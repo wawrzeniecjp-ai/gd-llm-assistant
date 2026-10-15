@@ -8,6 +8,7 @@ build/
 build-*/
 *.geode
 build.log
+*.log
 CMakeUserPresets.json
 compile_commands.json
 .cache/
