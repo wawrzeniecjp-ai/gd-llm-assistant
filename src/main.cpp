@@ -2,6 +2,7 @@
 #include <Geode/modify/LevelEditorLayer.hpp>
 
 #include "bridge/bridge.hpp"
+#include "exec/job_queue.hpp"
 #include "net/sha1.hpp"
 
 using namespace geode::prelude;
@@ -15,6 +16,11 @@ bool autoConnectEnabled() {
     return Mod::get()->getSettingValue<bool>("auto-connect");
 }
 
+/// Per-frame main-thread edit budget (SPEC.md 6.1.4).
+double frameBudgetMs() {
+    return static_cast<double>(Mod::get()->getSettingValue<int64_t>("frame-budget-ms"));
+}
+
 } // namespace
 
 class $modify(EditorBridgeHook, LevelEditorLayer) {
@@ -26,6 +32,15 @@ class $modify(EditorBridgeHook, LevelEditorLayer) {
             gdai::bridge::Bridge::get().start();
         }
         return true;
+    }
+
+    // The main-thread drain for the job queue (SPEC.md 6.1.4). Hooking the
+    // inherited `update` is deliberate: it runs every frame in the editor, and
+    // when a playtest takes over the editor stops updating, which suppresses
+    // queued edits during playtest as SPEC.md 6.1.7 requires.
+    void update(float dt) {
+        LevelEditorLayer::update(dt);
+        gdai::exec::JobQueue::get().drain(frameBudgetMs());
     }
 
     // NOTE: there is deliberately no `onExit` hook here.

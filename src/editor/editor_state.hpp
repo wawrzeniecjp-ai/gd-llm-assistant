@@ -67,4 +67,43 @@ void dumpSaveStringSamples();
 /// level is left as it was found. Must be called on the main thread.
 void runDifferentialProbe();
 
+/// TEMPORARY (spike S3, second half): determines the **shape** of an undo entry.
+///
+/// The first half measured that the default path gives one undo entry per
+/// created object, so a batch create would need N Ctrl+Z presses.
+///
+/// **This probe exists because an earlier attempt at grouping crashed the game.**
+/// An `UndoObject` was built with `createWithArray(gameObjects, UndoCommand::New)`
+/// and handed to `undoLastAction()`, which reached
+/// `LevelEditorLayer::handleAction` and dereferenced a null at +0x38. So this half
+/// constructs nothing: it reads what the *game* puts on the stack, and never calls
+/// `handleAction`/`undoLastAction`.
+///
+/// Result (GD 2.2081): `m_undoObjects` holds plain `UndoObject*` -- **not**
+/// `CCArray` wrappers -- each with `m_command == UndoCommand::New` and
+/// `m_objects == nullptr`. A single-object entry stores its object in
+/// `m_objectCopy`, not `m_objects`, and `UndoCommand` has no multi-object *create*
+/// command (see SPEC.md 6.1.5 for what that implies).
+///
+/// **Read-only with respect to the undo stack**: it never calls
+/// `handleAction`/`undoLastAction`, and clears both stacks before returning.
+void runUndoShapeProbe();
+
+/// TEMPORARY (spike S3, first half): measures how the *undo* stack behaves for
+/// created objects, and whether a transaction can register its own undo entries.
+///
+/// Answers the question SPEC.md 6.1.5 leaves open: whether one Ctrl+Z can revert
+/// a whole assistant turn (criterion A2), or whether the bookkeeping fallback is
+/// required. The two halves are independent:
+///
+///   1. `noUndo = false` -- does creating N objects produce N undo entries (one
+///      Ctrl+Z removes one object) or one entry (removes all N)?
+///   2. `addToUndoList` -- can a transaction register its own grouped entry?
+///
+/// Scratch objects are removed afterwards. **This one is not purely read-only**:
+/// it creates objects that enter the undo stack, so it deliberately clears that
+/// stack first, and the level is left as found only if the last step succeeds.
+/// Must be called on the main thread.
+void runUndoProbe();
+
 } // namespace gdai::editor

@@ -72,6 +72,16 @@
             "default": 1000,
             "min": 10,
             "max": 5000
+        },
+        "debug-title": {
+            "type": "title",
+            "name": "Developer"
+        },
+        "debug-probe": {
+            "type": "bool",
+            "name": "Enable developer probes",
+            "description": "Developer only. Derives save-string key mappings from the game and prints object data to the Geode log when the editor opens. Leave off unless you are working on the mod; it writes level content to a local log file.",
+            "default": false
         }
     }
 }

@@ -338,4 +338,180 @@ void runDifferentialProbe() {
     log::info("differential probe: done; scratch objects removed");
 }
 
+void runUndoProbe() {
+    auto* editor = LevelEditorLayer::get();
+    if (editor == nullptr) {
+        log::warn("undo probe: no editor open");
+        return;
+    }
+
+    constexpr int kBatch = 5;
+    constexpr float kProbeY = 450.f;
+
+    auto const countObjects = [editor] {
+        auto* objects = editor->getAllObjects();
+        return objects == nullptr ? 0 : static_cast<int>(objects->count());
+    };
+
+    // Objects created with an undo entry would allow Ctrl+Z to remove the probe's
+    // own work, so start from a clean stack. Clear both halves.
+    editor->m_undoObjects->removeAllObjects();
+    editor->m_redoObjects->removeAllObjects();
+
+    auto const before = countObjects();
+    log::info("undo probe: starting with {} objects, creating {} with undo enabled", before, kBatch);
+
+    std::vector<GameObject*> created;
+    for (auto i = 0; i < kBatch; ++i) {
+        // noUndo = false: this is the case under test.
+        auto* object = editor->createObject(
+            1, cocos2d::CCPoint { 100.f + static_cast<float>(i) * 30.f, kProbeY }, false
+        );
+        if (object != nullptr) {
+            created.push_back(object);
+        }
+    }
+
+    auto const afterCreate = countObjects();
+    auto const undoEntries = static_cast<int>(editor->m_undoObjects->count());
+    log::info(
+        "undo probe: {} objects created ({} now present), {} undo entries on the stack",
+        static_cast<int>(created.size()), afterCreate, undoEntries
+    );
+
+    if (undoEntries > 0) {
+        // The decisive measurement. If one undo removes all kBatch objects, then
+        // a batch is already one undo entry and A2 works via Ctrl+Z. If it
+        // removes one, grouping has to be constructed explicitly.
+        editor->undoLastAction();
+        auto const afterUndo = countObjects();
+        log::info(
+            "UNDO-PROBE-RESULT: one undo removed {} of {} objects ({} remaining)",
+            afterCreate - afterUndo, kBatch, afterUndo
+        );
+
+        // Whether undo moved entries to the redo stack, which is what would let
+        // `revert_transaction` be implemented as a targeted undo.
+        log::info(
+            "undo probe: undo stack now {}, redo stack {}",
+            static_cast<int>(editor->m_undoObjects->count()),
+            static_cast<int>(editor->m_redoObjects->count())
+        );
+    } else {
+        log::warn(
+            "UNDO-PROBE-RESULT: createObject added no undo entries, so undo grouping "
+            "cannot be built on it"
+        );
+    }
+
+    // Clean up: redo restores the batch if undo removed it, then remove anything
+    // still present so the level is left as found. `noUndo = true` keeps this
+    // cleanup off the stack, but the stack is cleared anyway so no probe entry
+    // can be undone later.
+    if (editor->m_redoObjects->count() > 0) {
+        editor->redoLastAction();
+    }
+    for (auto* object : created) {
+        // The object may already be gone; findGameObject resolves safely rather
+        // than dereferencing a dangling pointer (SPEC.md 6.1.3 rule 5).
+        if (auto* live = editor->findGameObject(object->m_uniqueID)) {
+            editor->removeObject(live, true);
+        }
+    }
+
+    editor->m_undoObjects->removeAllObjects();
+    editor->m_redoObjects->removeAllObjects();
+
+    log::info("undo probe: done; {} objects now present (started with {})", countObjects(), before);
+}
+
+void runUndoShapeProbe() {
+    auto* editor = LevelEditorLayer::get();
+    if (editor == nullptr) {
+        log::warn("undo-shape probe: no editor open");
+        return;
+    }
+
+    constexpr int kBatch = 3;
+    constexpr float kProbeY = 600.f;
+
+    auto const countObjects = [editor] {
+        auto* objects = editor->getAllObjects();
+        return objects == nullptr ? 0 : static_cast<int>(objects->count());
+    };
+
+    editor->m_undoObjects->removeAllObjects();
+    editor->m_redoObjects->removeAllObjects();
+
+    auto const before = countObjects();
+    log::info("undo-shape probe: starting with {} objects", before);
+
+    // Created with undo enabled, which the first probe already proved is safe.
+    // Nothing is constructed by hand here: the point is to observe the entries
+    // the game itself produces.
+    std::vector<GameObject*> created;
+    for (auto i = 0; i < kBatch; ++i) {
+        auto* object = editor->createObject(
+            1, cocos2d::CCPoint { 100.f + static_cast<float>(i) * 30.f, kProbeY }, false
+        );
+        if (object != nullptr) {
+            created.push_back(object);
+        }
+    }
+
+    auto const entries = static_cast<int>(editor->m_undoObjects->count());
+    log::info("undo-shape probe: {} objects created, {} stack entries", kBatch, entries);
+
+    // The decisive read. Each element is either a single UndoObject (one entry
+    // per action) or a CCArray of them (one entry per group). Which one it is
+    // determines whether grouping needs a wrapper array or a multi-object entry.
+    for (auto i = 0; i < entries && i < 3; ++i) {
+        auto* element = editor->m_undoObjects->objectAtIndex(static_cast<unsigned>(i));
+        if (element == nullptr) {
+            log::info("  entry {}: null", i);
+            continue;
+        }
+
+        if (auto* array = dynamic_cast<cocos2d::CCArray*>(element)) {
+            log::info(
+                "  entry {}: CCArray with {} element(s)", i,
+                static_cast<int>(array->count())
+            );
+            if (array->count() > 0) {
+                auto* inner = array->objectAtIndex(0);
+                log::info(
+                    "    inner[0]: {} (UndoObject={}, CCArray={})",
+                    inner == nullptr ? "null" : "non-null",
+                    dynamic_cast<UndoObject*>(inner) != nullptr,
+                    dynamic_cast<cocos2d::CCArray*>(inner) != nullptr
+                );
+            }
+        } else if (auto* undo = dynamic_cast<UndoObject*>(element)) {
+            log::info(
+                "  entry {}: UndoObject command={} objects={}",
+                i, static_cast<int>(undo->m_command),
+                undo->m_objects == nullptr ? -1 : static_cast<int>(undo->m_objects->count())
+            );
+        } else {
+            log::info("  entry {}: neither CCArray nor UndoObject", i);
+        }
+    }
+
+    // Clean up without ever calling handleAction: remove the objects directly and
+    // clear both stacks. This is why the probe cannot crash the game the way the
+    // previous attempt did.
+    for (auto* object : created) {
+        if (auto* live = editor->findGameObject(object->m_uniqueID)) {
+            editor->removeObject(live, true);
+        }
+    }
+    editor->m_undoObjects->removeAllObjects();
+    editor->m_redoObjects->removeAllObjects();
+
+    log::info(
+        "undo-shape probe: done; {} objects now present (started with {})",
+        countObjects(), before
+    );
+}
+
 } // namespace gdai::editor

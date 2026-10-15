@@ -61,6 +61,13 @@ std::string configuredUrl() {
 }
 
 /// Builds the `hello` frame (SPEC.md 7.2).
+///
+/// Carries only the opaque session key and client versions. The level **name**
+/// and object count are deliberately absent: sending them here would push level
+/// content to the sidecar before the user has typed anything, which contradicts
+/// SPEC.md 12 ("nothing is sent until the user submits a message") and SPEC.md
+/// D4 (query on demand, no mirror). Both arrive via `get_editor_state` when the
+/// sidecar actually needs them.
 std::string buildHello(std::string_view token, editor::Snapshot const& snapshot) {
     auto hello = matjson::Value::object();
     hello["type"] = "hello";
@@ -79,17 +86,21 @@ std::string buildHello(std::string_view token, editor::Snapshot const& snapshot)
     // Session key: the persistent editor ID when available, else the level name
     // (SPEC.md 6.2.5). A name is not a stable key -- it collides across levels and
     // changes on rename -- so the ID is preferred; `cvolton.level-id-api`
-    // supplies it (mod.json dependency).
-    auto const name = snapshot.levelName.empty() ? std::string("unknown") : snapshot.levelName;
-    auto key = name;
+    // supplies it (mod.json dependency). The id is an opaque integer, so sending
+    // it is not level-content disclosure.
+    std::string key = "unknown";
     if (snapshot.levelId != 0) {
         key = fmt::format("editor-{}", snapshot.levelId);
+    } else if (!snapshot.levelName.empty()) {
+        key = snapshot.levelName;
     }
 
     auto level = matjson::Value::object();
     level["key"] = key;
-    level["name"] = name;
-    level["object_count"] = snapshot.objectCount;
+    // `hello`'s schema requires name and object_count for the session record; the
+    // sidecar fills them from get_editor_state instead of taking them here.
+    level["name"] = key;
+    level["object_count"] = 0;
     payload["level"] = std::move(level);
 
     hello["payload"] = std::move(payload);
@@ -230,10 +241,15 @@ arc::Future<> Bridge::session(net::WebSocket socket, std::string token) {
     // Read the level identity on the main thread, for the hello payload.
     auto snapshot = co_await async::waitForMainThread<editor::Snapshot>(
         [] {
-            // TEMPORARY (spike): capture the save-string key map from a real
-            // level. Remove with the editor:: functions once captured.
-            editor::dumpSaveStringSamples();
-            editor::runDifferentialProbe();
+            // Developer probes are opt-in: they print level content to the
+            // local Geode log, which SPEC.md 12 treats as data exposure, so they
+            // must never run in a normal session.
+            if (Mod::get()->getSettingValue<bool>("debug-probe")) {
+                editor::dumpSaveStringSamples();
+                editor::runDifferentialProbe();
+                editor::runUndoProbe();
+                editor::runUndoShapeProbe();
+            }
             return editor::takeSnapshot();
         }
     );
@@ -248,8 +264,9 @@ arc::Future<> Bridge::session(net::WebSocket socket, std::string token) {
         co_return;
     }
     log::info(
-        "sent hello: level '{}' (editor id {}), {} objects",
-        snapshot->levelName, snapshot->levelId, snapshot->objectCount
+        "sent hello for session {}", snapshot->levelId != 0
+            ? fmt::format("editor-{}", snapshot->levelId)
+            : std::string("(unnamed)")
     );
 
     while (!m_stopRequested) {

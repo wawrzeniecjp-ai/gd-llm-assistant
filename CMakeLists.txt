@@ -21,6 +21,7 @@ add_library(${PROJECT_NAME} SHARED
     src/main.cpp
     src/bridge/bridge.cpp
     src/editor/editor_state.cpp
+    src/exec/job_queue.cpp
     src/net/sha1.cpp
     src/net/websocket.cpp
 )
