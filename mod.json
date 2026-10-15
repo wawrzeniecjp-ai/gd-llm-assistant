@@ -4,9 +4,9 @@
         "win": "2.2081"
     },
     "version": "v0.1.0",
-    "id": "laure.gd-ai-assistant",
+    "id": "wawrzeniecjp.gd-ai-assistant",
     "name": "GD AI Assistant",
-    "developer": "laure",
+    "developer": "wawrzeniecjp",
     "description": "Natural-language level editing in the GD editor, powered by a local LLM sidecar.",
     "tags": [
         "editor",

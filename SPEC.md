@@ -5,13 +5,21 @@
 | Field | Value |
 | --- | --- |
 | Project name | GD AI Assistant |
-| Document version | 0.5.0 |
-| Status | Draft — pre-implementation (toolchain-verified revision of 0.4.0) |
+| Document version | 0.6.0 |
+| Status | Draft — pre-implementation (S2 transport spike passed) |
 | Target platform | Windows only (initial release) |
 | Target Geode version | v5.11.x (Geode SDK 5.11.1 verified locally; requires C++23). Geode v6 is WIP — see §15 Q3 |
 | Target GD version | 2.2081 |
 
-## 0.1 Changes from 0.4.0
+## 0.1 Changes from 0.5.0
+
+- **S2 resolved — no WebSocket dependency.** The bridge uses a hand-written RFC 6455 client on `arc::TcpStream` (D14, §6.1.10). This satisfies §12's "avoid unmaintained libraries": websocketpp is neglected, and any third-party library would bring its own thread and event loop, which §6.1.3 forbids bridging into Arc.
+- **S2 verified on the wire, not just compiled.** A mod load completed the full round trip against the Python sidecar: handshake accepted (`Sec-WebSocket-Accept` independently verified), token accepted, `hello` parsed with the correct mod/GD/Geode versions, and both the response and the pushed `history` frame decoded. The client frames ran on `arc-worker-*` threads, confirming §6.1.3.
+- **The one missing primitive was found and supplied.** Geode ships `sha256`/`Sha256Hasher` but **no SHA-1**, which RFC 6455 requires for the handshake. The mod therefore carries its own SHA-1 (§6.1.10), self-tested against the FIPS 180-1 vectors and the RFC 6455 handshake example before any connection is attempted. Framing itself needs no cryptography.
+- **New modules:** `src/net/websocket.{hpp,cpp}` (handshake, masked text frames, fragmentation reassembly, ping/pong, close, 4 MB inbound cap) and `src/net/sha1.{hpp,cpp}`. Recorded in §6.1.10 and the §6.1.9 layout.
+- **`Origin` omission is load-bearing:** the client deliberately sends no `Origin` header, which is what makes D11's rejection rule enforceable. Now stated explicitly in §6.1.10.
+
+## 0.2 Changes from 0.4.0
 
 - **Version target settled and raised:** Geode SDK **5.11.1** is installed and the target is now **v5.11.x**. Geode v6 exists only as a work-in-progress migration guide, so no v6 work is in scope. Resolves §15 Q3 and Appendix A #1.
 - **Toolchain verified end to end:** Clang 23.1.3 (scoop LLVM), Ninja, CMake ≥ 3.29, Git, MSVC 14.51 + Windows SDK 10.0.26100 (VS BuildTools), Geode CLI 3.9.0, and `GEODE_SDK` set per workspace. Recorded in the new §6.1.9.
@@ -23,7 +31,7 @@
 - **Job-completion primitive confirmed:** Arc provides `arc::oneshot`, `arc::mpsc`, `arc::Semaphore` and `arc::Notify`; `arc::Mutex` is the async-aware lock (§6.1.4, Appendix A #9).
 - **New build-configuration section (§6.1.9):** Arc ships only its Core and Time features by default, so the mod's `CMakeLists.txt` must opt into the rest; the expected repository layout is specified there.
 
-## 0.2 Changes from 0.3.0
+## 0.3 Changes from 0.3.0
 
 - **Topology flipped (proposed):** the mod is the WebSocket client; the sidecar is the server. Resolves the port/role contradictions in 0.3.0 (§5, D1).
 - **Corrected API claims:** `createObject` / `removeObject` take `noUndo` (0.3.0 had it inverted); v4 coroutine/`Popup<>` APIs replaced with v5 equivalents (§6.1).
@@ -177,6 +185,7 @@ All entries are **Proposed** until the owner confirms. Each replaces or answers 
 | D11 | Shared-token handshake plus rejection of any connection carrying an `Origin` header. | §10 "malicious clients" row |
 | D12 | Multi-turn tool loop is core, capped by `max_tool_rounds`. | Q5 |
 | D13 | Editor closed mid-flight: fail in-flight requests with `EDITOR_NOT_OPEN`, drop queue, end/abandon transaction, sidecar marks turn `incomplete`. | Q6 |
+| D14 | Bridge transport is a hand-written RFC 6455 client on `arc::TcpStream`, with a bundled SHA-1 for the handshake. No WebSocket dependency. | S2, Appendix A #3 |
 
 # 6. Component Specifications
 
@@ -193,7 +202,7 @@ UI rendering, capturing user input, managing the WebSocket client connection, va
 | UI container | Custom non-modal `CCNode`/`CCLayer` panel attached to the editor UI layer (verify attachment point) | `geode::Popup` derives from the alert-layer family and is, I believe, modal with a dimming overlay; that blocks the editor and defeats live visual feedback (verify). |
 | Message rendering | `MDTextArea` for assistant/system text; sanitised input only (§9.3) | Supports bold, italic, monospace via md4c. |
 | Input | `geode::TextInput` | Standard Geode component. |
-| WebSocket client | **S2 (open, narrowed):** Geode's `web::WebRequest` is HTTP-only (curl_multi) and the SDK provides **no** WebSocket client; the choice is a third-party library (websocketpp / standalone Asio) or manual RFC 6455 framing over `arc::TcpStream` | Geode's own web utilities are ruled out. The dependency is unavoidable, so keep it minimal and version-pinned. |
+| WebSocket client | **Decided (D14, §6.1.10):** hand-written RFC 6455 client on `arc::TcpStream`. Geode's `web::WebRequest` is HTTP-only and the SDK ships no WebSocket client, so this replaces the third-party option | No new dependency, and it runs natively on the Arc runtime, so there is no foreign thread or event loop to bridge into the main thread (§6.1.3). websocketpp is unmaintained; a self-contained library would still add a second concurrency model. |
 | Async | v5: `async::spawn`, `arc::Future<>`, `co_await async::waitForMainThread<T>(fn)`; async-aware synchronisation via `arc::Mutex`, `arc::Notify`, `arc::oneshot`, `arc::mpsc` | Replaces v4 `coro::spawn` / `$async`. Never hold a `std::mutex` across a suspension point. |
 | Keybinds | `geode::Keybind` — core Geode in v5, not an external dependency | Rebindable through Geode's keybind UI; avoids hard-coded conflicts. |
 
@@ -360,6 +369,7 @@ The network-capable Arc primitives (`arc::TcpStream`, `arc::UdpSocket`) require 
 CMakeLists.txt        mod build (Arc flags above)
 mod.json              mod manifest and §6.1.8 settings
 src/                  mod C++ sources
+src/net/              RFC 6455 WebSocket client and SHA-1 — §6.1.10
 protocol/             JSON Schemas — the §13 test seam, shared with the sidecar
 sidecar/              uv project: package, tests and test harnesses
 tests/fixtures/       recorded turns and fuzz corpora (language-agnostic)
@@ -372,6 +382,28 @@ every harness that exercises the protocol is therefore Python. The top-level
 needs a single Python project rather than two.
 
 The `protocol/` schemas are authored before either side's transport work, because §13 makes the protocol the test seam and both the fake mod and the fake sidecar validate against it. The mod project stays at the repository root because `setup_geode_mod` reads `mod.json` from `CMAKE_CURRENT_SOURCE_DIR`.
+
+### 6.1.10 Bridge Transport (S2, resolved)
+
+Decision D14: the WebSocket client is hand-written against RFC 6455, on `arc::TcpStream`. Implementation: `src/net/websocket.{hpp,cpp}`, with `src/net/sha1.{hpp,cpp}` for the handshake digest.
+
+**Why not a library.** Geode's `web::WebRequest` is HTTP-only (curl_multi) and the SDK ships no WebSocket client, so a dependency was the obvious alternative. It is rejected because websocketpp is effectively unmaintained (§12: "avoid unmaintained libraries where an alternative exists"), and because any third-party library brings its own thread and event loop — which §6.1.3 rule 1 forbids bridging into Cocos2d, leaving a second concurrency model to reconcile with Arc. The Arc-native client has nothing to bridge.
+
+**Why SHA-1 is bundled.** RFC 6455 §4.2.2 requires `base64(SHA1(key + GUID))` for `Sec-WebSocket-Accept`. Geode provides `sha256`/`Sha256Hasher` but no SHA-1, and pulling a crypto library in for one hash is not worth it. SHA-1 is collision-broken, which is immaterial here: RFC 6455 uses it as a handshake checksum proving the peer speaks WebSocket, not as a security control. Framing uses no cryptography at all. `sha1SelfTest()` validates the implementation against the FIPS 180-1 vectors and the RFC 6455 handshake example, and the mod refuses to connect if it fails.
+
+**Deliberate scope limits.** One connection; `ws://` only (no TLS); text frames carrying UTF-8 JSON; no extensions, no permessage-deflate, no subprotocols. This matches what the bridge needs and keeps the frame codec small enough to fuzz (§13).
+
+**Security properties this establishes.**
+
+- No `Origin` header is ever sent, which is what makes D11's "reject any upgrade carrying `Origin`" rule enforceable: the mod and a browser are distinguishable.
+- `Sec-WebSocket-Accept` is verified, so an incorrect digest or base64 fails loudly at the handshake rather than causing confusing framing errors later. A cross-implementation check: the Python `websockets` server computes the expected value independently.
+- The 4 MB inbound cap (hard max, §6.1.4) is enforced in the mod. An oversized frame length is refused rather than buffered.
+- Server frames must not be masked (RFC 6455 §5.1); a masked server frame is rejected as a protocol error.
+- Length fields are validated before any read, so a malformed header cannot cause an over-read.
+
+**Threading.** Every method is a coroutine awaited on the async runtime; nothing in `src/net/` touches Cocos2d or GD objects (§6.1.3). Verified during the spike: the round trip ran on `arc-worker-*` threads, not the main thread.
+
+**Open follow-ups** (Phase 1, not blockers): reconnection with exponential backoff (§7.8 step 5), the `hello` retry path on token mismatch (4001), and coverage for the fragmentation and oversized-frame paths, which the spike did not exercise.
 
 ## 6.2 Sidecar Server (Python)
 
@@ -856,7 +888,7 @@ A Geode mod cannot run headless in CI, so the protocol is the test seam.
 | ID | Question | Exit criterion |
 | --- | --- | --- |
 | S1 | Does the verified toolchain build and load a hello-world mod on Geode SDK 5.11.1 / loader 5.9.0? (The "is v5 stable" half is settled: v5 is the target, v6 is WIP.) | Mod builds and loads on the target GD/Geode versions. The toolchain is newer than Geode's tested matrix, so clear this before any other work. |
-| S2 | **Narrowed:** Geode provides no WebSocket client (`web::WebRequest` is HTTP-only). websocketpp / standalone Asio, or manual RFC 6455 framing over `arc::TcpStream` (`ARC_FEATURE_NET`)? | One client library chosen; round-trip echo to a Python server; token handshake and the absence of an `Origin` header verified on the wire. |
+| S2 | **RESOLVED (0.6.0).** No WebSocket dependency: hand-written RFC 6455 client on `arc::TcpStream` (D14, §6.1.10), plus a bundled SHA-1 for the handshake. | **Met.** Round trip verified against the Python sidecar: handshake accepted, token accepted, `hello` parsed, response and `history` frames decoded, clean close. Token handshake and the absence of an `Origin` header confirmed on the wire. |
 | S3 | **Advanced:** can undo entries be grouped per transaction via `addToUndoList` / `handleAction` (§6.1.5)? | Either grouping works (A2 via Ctrl+Z) or the bookkeeping fallback is adopted. Also measure per-slice refresh cost and `m_increaseMaxUndoRedo` behaviour at 5000 objects. |
 | S4 | Which hooks reliably detect user adds/removes/moves/selection? | Coalesced `level_changed` working with correct `source` tagging. |
 | S6 | Non-modal panel attachment, touch/key routing, hotkey leakage, Escape handling. | Panel usable while editing; typing doesn't trigger editor hotkeys. |
@@ -931,7 +963,7 @@ Items asserted in this document that are not yet confirmed, with their 0.5.0 sta
 
 1. **Resolved (0.5.0):** Geode v5 is the target — SDK 5.11.1 verified locally, loader 5.9.0 installed; v6 is WIP. Only the player-share / v4-build question remains (§15 Q3).
 2. `geode::Popup` modality/overlay behaviour (§6.1.2); panel attachment point and input routing (S6).
-3. **Resolved (0.5.0):** Geode provides no WebSocket client (`web::WebRequest` is HTTP-only), so a third-party library or manual framing is required (S2).
+3. **Resolved (0.6.0):** Geode provides no WebSocket client (`web::WebRequest` is HTTP-only), and Geode/Arc provide no SHA-1. Both are supplied in-mod: a hand-written RFC 6455 client and SHA-1 (§6.1.10, D14), verified by a round trip against the Python sidecar.
 4. **Advanced (0.5.0):** grouping is feasible via `addToUndoList` / `handleAction` / `m_undoObjects`; confirm whether a single `UndoObject` may mix kinds (S3).
 5. Hooks for change detection (S4).
 6. **Retired (0.5.0):** `geode::Label` is Unicode- and emoji-capable, so only font choice and the missing-glyph fallback remain (§8.3.1).
