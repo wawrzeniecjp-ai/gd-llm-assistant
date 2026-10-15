@@ -52,6 +52,17 @@ arc::Future<JobOutcome> JobQueue::submit(std::unique_ptr<Job> job) {
 }
 
 void JobQueue::drain(double budgetMs) {
+    // TEMPORARY diagnostics: the queue silently did nothing once, because the
+    // per-frame hook was never installed. These lines make it visible whether
+    // drain runs at all and whether a job is picked up.
+    static auto drainCalls = 0;
+    static bool reportedFirstCall = false;
+    ++drainCalls;
+    if (!reportedFirstCall) {
+        reportedFirstCall = true;
+        log::info("queue: drain() first call (budget {}ms)", budgetMs);
+    }
+
     auto const start = std::chrono::steady_clock::now();
     auto const elapsedMs = [&start] {
         return std::chrono::duration<double, std::milli>(
@@ -68,6 +79,7 @@ void JobQueue::drain(double budgetMs) {
             // Take the oldest; FIFO keeps request ordering predictable.
             m_current = std::move(m_waiting.front());
             m_waiting.erase(m_waiting.begin());
+            log::info("queue: picked up job '{}'", m_current->job->type());
         }
 
         auto& pending = *m_current;
@@ -78,6 +90,8 @@ void JobQueue::drain(double budgetMs) {
             // slice yields the frame and resumes next time.
             continue;
         }
+
+        log::info("queue: job '{}' finished", pending.job->type());
 
         auto outcome = pending.job->takeOutcome();
         auto const type = std::string(pending.job->type());

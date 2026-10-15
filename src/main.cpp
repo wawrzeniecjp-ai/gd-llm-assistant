@@ -21,6 +21,43 @@ double frameBudgetMs() {
     return static_cast<double>(Mod::get()->getSettingValue<int64_t>("frame-budget-ms"));
 }
 
+/// True while the drain loop should keep re-arming itself.
+bool g_draining = false;
+
+void armDrain();
+
+/// Runs one drain, then re-arms for the next frame.
+///
+/// The drain runs from Geode's **main-thread queue**, not from a cocos scheduled
+/// selector on the editor layer. That distinction turned out to matter: removing
+/// an object from inside a scheduled layer update -- i.e. while the editor may be
+/// mid-traversal of its own object list -- crashed the game, whereas the same
+/// `removeObject` call succeeds from the main-thread queue (which is where
+/// `runTransactionProbe` performs it successfully).
+///
+/// Geode flushes `queueInMainThread` once per frame, so re-arming here gives a
+/// per-frame cadence without depending on which update virtuals the editor
+/// happens to call -- which was the other problem, since hooking
+/// `GJBaseGameLayer::update` and `LevelEditorLayer::postUpdate` both installed
+/// and neither was ever invoked.
+void armDrain() {
+    if (!g_draining) {
+        return;
+    }
+    geode::queueInMainThread([] {
+        if (!g_draining) {
+            return;
+        }
+        // The editor closing ends the loop; nothing left to drain work for.
+        if (LevelEditorLayer::get() == nullptr) {
+            g_draining = false;
+            return;
+        }
+        gdai::exec::JobQueue::get().drain(frameBudgetMs());
+        armDrain();
+    });
+}
+
 } // namespace
 
 class $modify(EditorBridgeHook, LevelEditorLayer) {
@@ -28,19 +65,35 @@ class $modify(EditorBridgeHook, LevelEditorLayer) {
         if (!LevelEditorLayer::init(level, noUI)) {
             return false;
         }
+
+        // The job queue's drain is driven by Geode's main-thread queue rather
+        // than by a hooked virtual.
+        //
+        // Two problems led here, both worth recording:
+        //
+        //   1. Hooking failed, twice over. `LevelEditorLayer` does not declare
+        //      `update` (it inherits it from `GJBaseGameLayer`), and Geode only
+        //      installs hooks for functions declared in the target class's own
+        //      bindings, so that hook was never installed. Then hooking
+        //      `GJBaseGameLayer::update` and `LevelEditorLayer::postUpdate`
+        //      installed both -- the log shows "Enabled ... hook" -- yet neither
+        //      was invoked while the editor was open. So "check the log for the
+        //      Enabled line" is necessary but not sufficient.
+        //
+        //   2. A cocos scheduled selector did run, but removing an object from
+        //      inside a scheduled layer update crashed the game. The same
+        //      `removeObject` call succeeds from the main-thread queue, which is
+        //      where `runTransactionProbe` performs it.
+        //
+        // Draining from the main-thread queue satisfies both: it runs every
+        // frame, and it mutates the editor from the context known to be safe.
+        g_draining = true;
+        armDrain();
+
         if (autoConnectEnabled()) {
             gdai::bridge::Bridge::get().start();
         }
         return true;
-    }
-
-    // The main-thread drain for the job queue (SPEC.md 6.1.4). Hooking the
-    // inherited `update` is deliberate: it runs every frame in the editor, and
-    // when a playtest takes over the editor stops updating, which suppresses
-    // queued edits during playtest as SPEC.md 6.1.7 requires.
-    void update(float dt) {
-        LevelEditorLayer::update(dt);
-        gdai::exec::JobQueue::get().drain(frameBudgetMs());
     }
 
     // NOTE: there is deliberately no `onExit` hook here.

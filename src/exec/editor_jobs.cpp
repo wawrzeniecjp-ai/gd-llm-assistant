@@ -325,12 +325,21 @@ public:
             return false;
         }
 
+        // Fine-grained diagnostics. A crash here killed the game with no crash
+        // log, so each step is logged to localise it rather than guessing.
+        log::info("delete: id {} resolved, reading save string", uniqueId);
         // The save string is captured BEFORE removal: it is the only way to
         // restore the object, and it is unavailable once the object is gone.
-        editor::TransactionManager::get().recordDeleted(object->getSaveString(ed));
+        auto const saveString = object->getSaveString(ed);
+        log::info("delete: save string is {} chars", saveString.size());
 
-        // noUndo, for the same reason as creation (D2).
+        editor::TransactionManager::get().recordDeleted(saveString);
+
+        // Removal via `removeObject`, the same call the transaction revert uses
+        // successfully, so the comparison against that known-good path is clean.
+        log::info("delete: calling removeObject");
         ed->removeObject(object, true);
+        log::info("delete: id {} removed", uniqueId);
         ++m_deleted;
         return false;
     }

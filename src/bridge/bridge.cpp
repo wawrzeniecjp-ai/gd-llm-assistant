@@ -17,6 +17,7 @@
 #include "../editor/editor_state.hpp"
 #include "../editor/transaction.hpp"
 #include "../exec/editor_jobs.hpp"
+#include "../exec/handler_verification.hpp"
 #include "../exec/job_queue.hpp"
 
 using namespace geode::prelude;
@@ -46,6 +47,11 @@ void runDeveloperProbesOnce() {
     editor::runUndoShapeProbe();
     editor::runTransactionProbe();
     log::info("developer probes: done");
+
+    // The handler verification is a coroutine that submits jobs and awaits the
+    // per-frame drain, so it cannot run on the main thread (see its header).
+    // Spawned after the synchronous probes so the two do not interleave.
+    async::spawn(exec::runHandlerVerification);
 }
 
 /// How long a single receive may block before the loop re-checks the stop flag.
@@ -198,6 +204,23 @@ arc::Future<> sendResponseError(
     payload["error"] = error;
     co_await sendResponse(socket, requestId, std::move(payload));
     co_return;
+}
+
+/// Splits a `CODE: message` string into its parts.
+///
+/// The transaction manager and the property layer both report protocol codes
+/// inline, so the distinction between, say, `TRANSACTION_ACTIVE` and
+/// `TRANSACTION_NOT_REVERTIBLE` survives to the wire.
+std::pair<std::string, std::string> splitCode(std::string const& error) {
+    auto const colon = error.find(':');
+    if (colon == std::string::npos) {
+        return { "INVALID_REQUEST", error };
+    }
+    auto message = error.substr(colon + 1);
+    if (!message.empty() && message.front() == ' ') {
+        message.erase(0, 1);
+    }
+    return { error.substr(0, colon), std::move(message) };
 }
 
 } // namespace
@@ -416,6 +439,65 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
     }
 
     if (exec::isImplementedRequest(type)) {
+        // The transaction requests (SPEC.md 7.5) are state changes on the
+        // manager rather than editor mutations, so they take a main-thread hop
+        // instead of a queued job. Ordering is still safe: a caller awaits each
+        // response before sending the next request.
+        if (type == "begin_transaction") {
+            auto const label = payload.contains("label")
+                ? payload["label"].asString().unwrapOr(std::string("turn"))
+                : std::string("turn");
+            auto opened = co_await async::waitForMainThread<geode::Result<std::string, std::string>>(
+                [label] { return editor::TransactionManager::get().begin(label); }
+            );
+            if (!opened) {
+                co_return co_await sendError(
+                    socket, requestId, "THREAD_DISPATCH_FAILED",
+                    "could not schedule work on the main thread"
+                );
+            }
+            if (!opened->ok()) {
+                auto const [code, message] = splitCode(opened->unwrapErr());
+                co_return co_await sendError(socket, requestId, code, message);
+            }
+            auto result = matjson::Value::object();
+            result["txn_id"] = opened->unwrap();
+            co_return co_await sendResult(socket, requestId, std::move(result));
+        }
+
+        if (type == "end_transaction" || type == "revert_transaction") {
+            if (!payload.contains("txn_id")) {
+                co_return co_await sendError(
+                    socket, requestId, "INVALID_REQUEST", "'txn_id' is required"
+                );
+            }
+            auto const txnId = payload["txn_id"].asString().unwrapOr(std::string());
+            if (txnId.empty()) {
+                co_return co_await sendError(
+                    socket, requestId, "INVALID_REQUEST", "'txn_id' must be a string"
+                );
+            }
+
+            auto const isEnd = type == "end_transaction";
+            auto outcome = co_await async::waitForMainThread<geode::Result<matjson::Value, std::string>>(
+                [txnId, isEnd] {
+                    auto& manager = editor::TransactionManager::get();
+                    return isEnd ? manager.end(txnId) : manager.revert(txnId);
+                }
+            );
+            if (!outcome) {
+                co_return co_await sendError(
+                    socket, requestId, "THREAD_DISPATCH_FAILED",
+                    "could not schedule work on the main thread"
+                );
+            }
+            if (!outcome->ok()) {
+                auto const [code, message] = splitCode(outcome->unwrapErr());
+                co_return co_await sendError(socket, requestId, code, message);
+            }
+            co_return co_await sendResult(socket, requestId, outcome->unwrap());
+        }
+
         // Editor mutations run through the job queue, which slices them across
         // frames so a large request cannot stall one (SPEC.md 6.1.4, A1). The
         // payload was already validated in `makeJob`, off the main thread; the
