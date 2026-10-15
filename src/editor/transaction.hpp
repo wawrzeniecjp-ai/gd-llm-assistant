@@ -67,7 +67,10 @@ public:
 
     /// Notes an object this turn removed, with its save string so it can be
     /// recreated. Call **before** removal, while the object is still valid.
-    void recordDeleted(std::string saveString);
+    ///
+    /// If the object was created by this same turn, the creation is cancelled
+    /// rather than a deletion recorded, so that revert leaves it gone.
+    void recordDeleted(std::string saveString, std::int32_t uniqueId);
 
     /// Notes properties this turn changed, with their values from before the
     /// change, so revert can restore them.

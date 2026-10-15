@@ -16,27 +16,22 @@ using namespace geode::prelude;
 namespace gdai::exec {
 namespace {
 
-/// Set false to skip the standalone `delete_objects` step.
+/// Set true to include the standalone `delete_objects` step.
 ///
-/// `removeObject` on a programmatically created object has crashed the game with
-/// **STATUS_HEAP_CORRUPTION** (0xc0000374) on every attempt, and several
-/// explanations have been tested and falsified: the coordinates, which removal
-/// API is used, whether selection was involved, and the calling context
-/// (scheduled selector vs. Geode's main-thread queue).
+/// **`noUndo = true` on removal corrupts the heap.** Removal crashed with
+/// STATUS_HEAP_CORRUPTION (0xc0000374) on every attempt while passing
+/// `noUndo = true`; with `noUndo = false` it works. Measured on objects this mod
+/// created *and* on objects already in the level, so it is not about the
+/// object's provenance.
 ///
-/// The one thing never tested is whether removal across frames works *at all*.
-/// The transaction probe only ever removed objects created within the same
-/// main-thread callback, so its success does not cover the cross-frame case.
+/// The asymmetry is worth noting: `createObject(..., noUndo = true)` is fine,
+/// but `removeObject(..., noUndo = true)` is not. The flag evidently does more
+/// than suppress undo bookkeeping on the removal path.
 ///
-/// Skipping the delete step lets the run reach the final revert, which removes
-/// the created objects via the same `removeObject` but after frames have passed.
-/// One run then separates two very different situations:
-///
-///   - revert succeeds  -> removal across frames is fine, and `delete_objects`
-///     specifically is broken; the difference is then in how it is invoked.
-///   - revert crashes   -> removal across frames is itself unsafe, which makes
-///     this a constraint on the whole design rather than one handler.
-constexpr bool kTestDeleteObjects = false;
+/// Consequence for D2: removals now land on the user's undo stack, so they are
+/// visible to Ctrl+Z while our creations are not. Grouping them per transaction
+/// is possible (`UndoCommand::DeleteMulti` exists) but is not yet done.
+constexpr bool kTestDeleteObjects = true;
 
 /// Collects results so the run ends with a single summary rather than a wall of
 /// interleaved lines.
@@ -234,6 +229,11 @@ arc::Future<> runHandlerVerification() {
     createArray.push(objectEntry(1, kProbeX + 60.0, kProbeLevelY));
     createPayload["objects"] = std::move(createArray);
 
+    // The count baseline is taken *after* the pre-existing-removal test above,
+    // which removes one of the level's own objects. Taking it before would make
+    // the create check read +2 instead of +3.
+    auto const baselineCount = co_await objectCount();
+
     auto created = co_await submit("create_objects", std::move(createPayload));
     verifier.check(created.ok, "create_objects succeeds", created.payload.dump(0));
     verifier.checkEqual(
@@ -241,7 +241,7 @@ arc::Future<> runHandlerVerification() {
     );
 
     auto const afterCreate = co_await objectCount();
-    verifier.checkEqual(afterCreate - initialCount, 3, "level grew by 3 objects");
+    verifier.checkEqual(afterCreate - baselineCount, 3, "level grew by 3 objects");
 
     // IDs come back from the handler, which is also what the sidecar would use.
     std::vector<std::int32_t> ids;
@@ -380,7 +380,9 @@ arc::Future<> runHandlerVerification() {
             );
 
             auto const afterDelete = co_await objectCount();
-            verifier.checkEqual(afterDelete - initialCount, 2, "level is two objects larger");
+            // One created object removed, and the pre-existing removal earlier
+            // also still counted against `initialCount`.
+            verifier.checkEqual(afterDelete - baselineCount, 2, "level is two objects larger");
         } else {
             log::info("handler verification: delete_objects step SKIPPED (see kTestDeleteObjects)");
         }

@@ -333,12 +333,22 @@ public:
         auto const saveString = object->getSaveString(ed);
         log::info("delete: save string is {} chars", saveString.size());
 
-        editor::TransactionManager::get().recordDeleted(saveString);
+        editor::TransactionManager::get().recordDeleted(saveString, uniqueId);
 
-        // Removal via `removeObject`, the same call the transaction revert uses
-        // successfully, so the comparison against that known-good path is clean.
-        log::info("delete: calling removeObject");
-        ed->removeObject(object, true);
+        // `noUndo = false` here, deliberately -- the one parameter held constant
+        // across every previous crash was `true`.
+        //
+        // Every removal that corrupted the heap passed `noUndo = true`, which
+        // asks the game to skip undo bookkeeping. If that fast path also skips
+        // un-registration the object needs (section lists, group membership),
+        // the omission would corrupt the heap in exactly this way. Letting the
+        // game record the removal normally is the untested alternative.
+        //
+        // Cost if it works: the removal lands on the user's undo stack, which
+        // D2 wanted to avoid. A groupable removal (`UndoCommand::DeleteMulti`
+        // exists) could then be collapsed per transaction.
+        log::info("delete: calling removeObject(noUndo=false)");
+        ed->removeObject(object, false);
         log::info("delete: id {} removed", uniqueId);
         ++m_deleted;
         return false;

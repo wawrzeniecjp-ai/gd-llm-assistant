@@ -70,10 +70,25 @@ void TransactionManager::recordCreated(std::int32_t uniqueId) {
     }
 }
 
-void TransactionManager::recordDeleted(std::string saveString) {
-    if (m_hasOpen) {
-        m_open.deletedSaveStrings.push_back(std::move(saveString));
+void TransactionManager::recordDeleted(std::string saveString, std::int32_t uniqueId) {
+    if (!m_hasOpen) {
+        return;
     }
+
+    // An object created and then deleted within the same turn should end up
+    // nonexistent after a revert, not restored. Recording both would make revert
+    // remove it as a creation and then recreate it as a deletion, leaving it
+    // present -- the opposite of what happened.
+    //
+    // So a delete of something this turn created cancels the creation instead of
+    // being recorded as a deletion.
+    auto const created = std::find(m_open.created.begin(), m_open.created.end(), uniqueId);
+    if (created != m_open.created.end()) {
+        m_open.created.erase(created);
+        return;
+    }
+
+    m_open.deletedSaveStrings.push_back(std::move(saveString));
 }
 
 bool TransactionManager::hasModified(std::int32_t uniqueId) const {
@@ -180,7 +195,9 @@ geode::Result<matjson::Value, std::string> TransactionManager::revert(std::strin
         // the turn (SPEC.md 6.1.3 rule 5). Null means it is already gone, which
         // happens if the user deleted it -- not an error.
         if (auto* object = editor->findGameObject(*it)) {
-            editor->removeObject(object, true);
+            // `noUndo = false` for the same reason as DeleteObjectsJob: the
+            // `true` path corrupts the heap on removal.
+            editor->removeObject(object, false);
             ++removed;
         }
     }
