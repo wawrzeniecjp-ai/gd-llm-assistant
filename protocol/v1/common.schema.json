@@ -1,0 +1,195 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://geode-llm.local/protocol/v1/common.schema.json",
+    "title": "Common definitions",
+    "description": "Shared building blocks for the mod/sidecar protocol. See SPEC.md 7.3, 7.5, 7.7.",
+
+    "$defs": {
+        "ProtocolVersion": {
+            "type": "integer",
+            "const": 1
+        },
+
+        "MessageId": {
+            "type": ["string", "null"],
+            "description": "Correlation ID. Non-null for requests, null for events.",
+            "maxLength": 64
+        },
+
+        "Envelope": {
+            "type": "object",
+            "description": "Every frame uses this shape (SPEC.md 7.3).",
+            "required": ["type", "payload"],
+            "properties": {
+                "type": { "type": "string", "minLength": 1, "maxLength": 64 },
+                "id": { "$ref": "#/$defs/MessageId" },
+                "payload": { "type": "object" }
+            },
+            "additionalProperties": false
+        },
+
+        "ErrorCode": {
+            "type": "string",
+            "description": "SPEC.md 7.7.",
+            "enum": [
+                "INVALID_REQUEST",
+                "UNAUTHORIZED",
+                "UNSUPPORTED_PROPERTY",
+                "INVALID_OBJECT_ID",
+                "OBJECT_NOT_FOUND",
+                "LIMIT_EXCEEDED",
+                "PAYLOAD_TOO_LARGE",
+                "EDITOR_NOT_OPEN",
+                "EDITOR_BUSY",
+                "TRANSACTION_ACTIVE",
+                "TRANSACTION_NOT_REVERTIBLE",
+                "CANCELLED",
+                "THREAD_DISPATCH_FAILED",
+                "INTERNAL_ERROR"
+            ]
+        },
+
+        "Error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+                "code": { "$ref": "#/$defs/ErrorCode" },
+                "message": {
+                    "type": "string",
+                    "description": "Human-readable. Codes appear only in small print in the UI.",
+                    "maxLength": 512
+                },
+                "details": {
+                    "type": "object",
+                    "description": "e.g. { \"limit\": 1000 } for LIMIT_EXCEEDED."
+                }
+            },
+            "additionalProperties": false
+        },
+
+        "ResponseOk": {
+            "type": "object",
+            "required": ["ok", "result"],
+            "properties": {
+                "ok": { "const": true },
+                "result": { "type": "object" }
+            },
+            "additionalProperties": false
+        },
+
+        "ResponseErr": {
+            "type": "object",
+            "required": ["ok", "error"],
+            "properties": {
+                "ok": { "const": false },
+                "error": { "$ref": "#/$defs/Error" }
+            },
+            "additionalProperties": false
+        },
+
+        "ResponsePayload": {
+            "description": "Result of a request, correlated by envelope `id`.",
+            "oneOf": [
+                { "$ref": "#/$defs/ResponseOk" },
+                { "$ref": "#/$defs/ResponseErr" }
+            ]
+        },
+
+        "UniqueId": {
+            "type": "integer",
+            "description": "GameObject unique ID (D9). Valid only for the current editor session; never persisted.",
+            "minimum": 1
+        },
+
+        "ObjectTypeId": {
+            "type": "integer",
+            "description": "Object type key passed to LevelEditorLayer::createObject.",
+            "minimum": 1,
+            "maximum": 10000
+        },
+
+        "ZLayer": {
+            "type": "string",
+            "description": "SPEC.md 7.5. Names must be confirmed against the game's z-layer list (Appendix A #11).",
+            "x-unverified": true,
+            "enum": ["b4", "b3", "b2", "b1", "default", "t1", "t2", "t3"]
+        },
+
+        "PropertySet": {
+            "type": "object",
+            "description": "Writable object properties (SPEC.md 7.5). Unknown keys are rejected with UNSUPPORTED_PROPERTY.",
+            "properties": {
+                "x": { "type": "number", "description": "GD units; 30 units = one grid block." },
+                "y": { "type": "number" },
+                "rotation": { "type": "number" },
+                "scale_x": { "type": "number", "exclusiveMinimum": 0 },
+                "scale_y": { "type": "number", "exclusiveMinimum": 0 },
+                "flip_x": { "type": "boolean" },
+                "flip_y": { "type": "boolean" },
+                "z_layer": { "$ref": "#/$defs/ZLayer" },
+                "z_order": { "type": "integer" },
+                "editor_layer": { "type": "integer", "minimum": 0 },
+                "groups": {
+                    "type": "array",
+                    "items": { "type": "integer", "minimum": 1, "maximum": 9999 },
+                    "maxItems": 10
+                },
+                "color_channel_1": { "type": "integer", "minimum": 0, "maximum": 999 },
+                "color_channel_2": { "type": "integer", "minimum": 0, "maximum": 999 }
+            },
+            "additionalProperties": false
+        },
+
+        "PropertyDelta": {
+            "type": "object",
+            "description": "Relative deltas for modify_objects. Only x, y and rotation are supported (SPEC.md 7.5).",
+            "properties": {
+                "x": { "type": "number" },
+                "y": { "type": "number" },
+                "rotation": { "type": "number" }
+            },
+            "additionalProperties": false
+        },
+
+        "ObjectRecord": {
+            "type": "object",
+            "description": "Compact object listing. Only non-default properties are included.",
+            "required": ["object_id", "id", "x", "y"],
+            "properties": {
+                "object_id": { "$ref": "#/$defs/UniqueId" },
+                "id": { "$ref": "#/$defs/ObjectTypeId" },
+                "x": { "type": "number" },
+                "y": { "type": "number" },
+                "rotation": { "type": "number" }
+            },
+            "additionalProperties": false
+        },
+
+        "Range": {
+            "type": "array",
+            "description": "[min, max] inclusive.",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "number" }
+        },
+
+        "Limits": {
+            "type": "object",
+            "description": "Hard maxima enforced in the mod (D10). Configurable within these bounds.",
+            "properties": {
+                "objects_per_request": { "const": 5000 },
+                "objects_per_transaction": { "const": 20000 },
+                "inbound_frame_bytes": { "const": 4194304 },
+                "query_page_objects": { "const": 500 },
+                "queued_jobs": { "const": 64 },
+                "request_timeout_ms": { "const": 120000 }
+            }
+        },
+
+        "Direction": {
+            "type": "string",
+            "enum": ["m2s", "s2m", "both"],
+            "description": "m2s = mod to sidecar, s2m = sidecar to mod."
+        }
+    }
+}

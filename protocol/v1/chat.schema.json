@@ -1,0 +1,196 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://geode-llm.local/protocol/v1/chat.schema.json",
+    "title": "Chat channel",
+    "description": "SPEC.md 7.4. Note (7.4): \"N actions\" counts mutating tool calls, not objects; per-action `count` is the number of objects affected.",
+
+    "$defs": {
+        "userMessage": {
+            "description": "user_message (mod -> sidecar, event)",
+            "x-direction": "m2s",
+            "type": "object",
+            "required": ["message_id", "text"],
+            "properties": {
+                "message_id": { "type": "string", "maxLength": 64 },
+                "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Length-capped by the mod's `max-message-length` setting before sending.",
+                    "maxLength": 10000
+                }
+            },
+            "additionalProperties": false
+        },
+
+        "cancelTurn": {
+            "description": "cancel_turn (mod -> sidecar, event)",
+            "x-direction": "m2s",
+            "type": "object",
+            "required": ["turn_id"],
+            "properties": {
+                "turn_id": { "type": "string", "maxLength": 64 }
+            },
+            "additionalProperties": false
+        },
+
+        "transactionReverted": {
+            "description": "transaction_reverted (mod -> sidecar, event). Lets the sidecar tell the LLM its changes are gone.",
+            "x-direction": "m2s",
+            "type": "object",
+            "required": ["txn_id"],
+            "properties": {
+                "txn_id": { "type": "string", "maxLength": 64 }
+            },
+            "additionalProperties": false
+        },
+
+        "turnStarted": {
+            "description": "turn_started (sidecar -> mod, event)",
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["turn_id", "message_id"],
+            "properties": {
+                "turn_id": { "type": "string", "maxLength": 64 },
+                "message_id": { "type": "string", "maxLength": 64 }
+            },
+            "additionalProperties": false
+        },
+
+        "assistantMessage": {
+            "description": "assistant_message (sidecar -> mod, event). May occur more than once per turn.",
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["turn_id", "message_id", "text"],
+            "properties": {
+                "turn_id": { "type": "string", "maxLength": 64 },
+                "message_id": { "type": "string", "maxLength": 64 },
+                "text": { "type": "string", "maxLength": 65536 }
+            },
+            "additionalProperties": false
+        },
+
+        "assistantMessageDelta": {
+            "description": "assistant_message_delta (sidecar -> mod, event). Optional streaming; not required for v1 (SPEC.md 9 / Q7).",
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["turn_id", "message_id", "delta"],
+            "properties": {
+                "turn_id": { "type": "string", "maxLength": 64 },
+                "message_id": { "type": "string", "maxLength": 64 },
+                "delta": { "type": "string", "maxLength": 4096 }
+            },
+            "additionalProperties": false
+        },
+
+        "turnFinished": {
+            "description": "turn_finished (sidecar -> mod, event)",
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["turn_id", "status", "actions"],
+            "properties": {
+                "turn_id": { "type": "string", "maxLength": 64 },
+                "status": { "$ref": "#/$defs/TurnStatus" },
+                "actions": {
+                    "type": "array",
+                    "description": "One entry per mutating tool call.",
+                    "maxItems": 256,
+                    "items": { "$ref": "#/$defs/ActionSummary" }
+                },
+                "txn_id": {
+                    "type": ["string", "null"],
+                    "description": "Present when the turn opened a transaction; the mod uses it for the UI Revert action.",
+                    "maxLength": 64
+                },
+                "usage": { "$ref": "#/$defs/Usage" }
+            },
+            "additionalProperties": false
+        },
+
+        "TurnStatus": {
+            "type": "string",
+            "enum": ["completed", "cancelled", "failed", "incomplete"]
+        },
+
+        "ActionSummary": {
+            "type": "object",
+            "required": ["kind", "count", "summary"],
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "description": "The mutating tool that produced this action.",
+                    "enum": ["create_objects", "modify_objects", "delete_objects", "set_selection"]
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Objects affected by this action.",
+                    "minimum": 0
+                },
+                "summary": { "type": "string", "maxLength": 256 }
+            },
+            "additionalProperties": false
+        },
+
+        "Usage": {
+            "type": "object",
+            "description": "Token usage, reported for runaway-cost visibility (SPEC.md 12).",
+            "properties": {
+                "input_tokens": { "type": "integer", "minimum": 0 },
+                "output_tokens": { "type": "integer", "minimum": 0 },
+                "tool_rounds": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+        },
+
+        "sidecarStatus": {
+            "description": "sidecar_status (sidecar -> mod, event)",
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["state"],
+            "properties": {
+                "state": { "$ref": "hello.schema.json#/$defs/SidecarState" },
+                "detail": { "type": ["string", "null"], "maxLength": 512 }
+            },
+            "additionalProperties": false
+        },
+
+        "systemMessage": {
+            "description": "system_message (sidecar -> mod, event). Never carries API keys or secrets.",
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["level", "text"],
+            "properties": {
+                "level": { "type": "string", "enum": ["info", "warn", "error"] },
+                "text": { "type": "string", "maxLength": 4096 }
+            },
+            "additionalProperties": false
+        },
+
+        "history": {
+            "description": "history (sidecar -> mod, event). Sent once, after a successful hello.",
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["messages"],
+            "properties": {
+                "messages": {
+                    "type": "array",
+                    "maxItems": 1000,
+                    "items": {
+                        "type": "object",
+                        "required": ["role", "text", "ts"],
+                        "properties": {
+                            "role": { "type": "string", "enum": ["user", "assistant"] },
+                            "text": { "type": "string", "maxLength": 65536 },
+                            "ts": {
+                                "type": "integer",
+                                "description": "Unix epoch milliseconds.",
+                                "minimum": 0
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "additionalProperties": false
+        }
+    }
+}

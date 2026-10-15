@@ -1,0 +1,72 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://geode-llm.local/protocol/v1/hello.schema.json",
+    "title": "Handshake",
+    "description": "SPEC.md 7.2. The first frame from the mod must be `hello`; anything else, or a wrong token, closes the connection with 4001.",
+
+    "$defs": {
+        "helloRequest": {
+            "description": "hello (mod -> sidecar, request)",
+            "x-direction": "m2s",
+            "type": "object",
+            "required": ["protocol_version", "token", "client", "level"],
+            "properties": {
+                "protocol_version": { "$ref": "common.schema.json#/$defs/ProtocolVersion" },
+                "token": {
+                    "type": "string",
+                    "description": "Handshake token read from the token file. NOT the LLM API key. Sent in the message rather than an HTTP header.",
+                    "minLength": 16,
+                    "maxLength": 256,
+                    "writeOnly": true
+                },
+                "client": {
+                    "type": "object",
+                    "required": ["mod_version", "gd_version", "geode_version"],
+                    "properties": {
+                        "mod_version": { "type": "string", "maxLength": 32 },
+                        "gd_version": { "type": "string", "maxLength": 32 },
+                        "geode_version": { "type": "string", "maxLength": 32 }
+                    },
+                    "additionalProperties": false
+                },
+                "level": {
+                    "type": "object",
+                    "description": "Session key source (SPEC.md 6.2.5).",
+                    "required": ["key", "name", "object_count"],
+                    "properties": {
+                        "key": { "type": "string", "maxLength": 256 },
+                        "name": { "type": "string", "maxLength": 256 },
+                        "object_count": { "type": "integer", "minimum": 0 }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            "additionalProperties": false
+        },
+
+        "helloResult": {
+            "description": "result payload of the hello response (sidecar -> mod)",
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["protocol_version", "sidecar_version", "state", "history_count"],
+            "properties": {
+                "protocol_version": { "$ref": "common.schema.json#/$defs/ProtocolVersion" },
+                "sidecar_version": { "type": "string", "maxLength": 32 },
+                "state": { "$ref": "#/$defs/SidecarState" },
+                "detail": {
+                    "type": ["string", "null"],
+                    "description": "User-facing message when state is `needs_setup`.",
+                    "maxLength": 512
+                },
+                "history_count": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+        },
+
+        "SidecarState": {
+            "type": "string",
+            "description": "Reported in `hello` and in later `sidecar_status` events (SPEC.md 7.4, 8.8).",
+            "enum": ["ready", "needs_setup", "provider_error"]
+        }
+    }
+}

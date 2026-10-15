@@ -1,0 +1,293 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://geode-llm.local/protocol/v1/envelope.schema.json",
+    "title": "Protocol v1 message envelope",
+    "description": "Single validation entry point for the mod/sidecar protocol (SPEC.md 7.3). Resolve $defs.registry by a frame's `type` to find the schema for its payload, and the expected direction.",
+
+    "$defs": {
+        "registry": {
+            "type": "object",
+            "description": "type -> { direction, payload, result? }. `result` is present for requests and absent for events.",
+            "additionalProperties": false,
+            "properties": {
+                "hello": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "m2s" },
+                        "payload": { "const": "hello.schema.json#/$defs/helloRequest" },
+                        "result": { "const": "hello.schema.json#/$defs/helloResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "response": {
+                    "type": "object",
+                    "description": "Correlated reply to a request. Result shape is determined by the request kind.",
+                    "properties": {
+                        "direction": { "const": "both" },
+                        "payload": { "const": "common.schema.json#/$defs/ResponsePayload" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "user_message": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "m2s" },
+                        "payload": { "const": "chat.schema.json#/$defs/userMessage" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "cancel_turn": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "m2s" },
+                        "payload": { "const": "chat.schema.json#/$defs/cancelTurn" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "transaction_reverted": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "m2s" },
+                        "payload": { "const": "chat.schema.json#/$defs/transactionReverted" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "turn_started": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "chat.schema.json#/$defs/turnStarted" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "assistant_message": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "chat.schema.json#/$defs/assistantMessage" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "assistant_message_delta": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "chat.schema.json#/$defs/assistantMessageDelta" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "turn_finished": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "chat.schema.json#/$defs/turnFinished" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "sidecar_status": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "chat.schema.json#/$defs/sidecarStatus" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "system_message": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "chat.schema.json#/$defs/systemMessage" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "history": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "chat.schema.json#/$defs/history" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "get_editor_state": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/getEditorStatePayload" },
+                        "result": { "const": "editor.schema.json#/$defs/getEditorStateResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "query_objects": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/queryObjectsPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/queryObjectsResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "summarize_region": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/summarizeRegionPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/summarizeRegionResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "get_object_properties": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/getObjectPropertiesPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/getObjectPropertiesResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "create_objects": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/createObjectsPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/createObjectsResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "modify_objects": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/modifyObjectsPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/modifyObjectsResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "delete_objects": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/deleteObjectsPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/deleteObjectsResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "set_selection": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/setSelectionPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/setSelectionResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "begin_transaction": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/beginTransactionPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/beginTransactionResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "end_transaction": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/endTransactionPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/endTransactionResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "revert_transaction": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/revertTransactionPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/revertTransactionResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "ping": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/pingPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/pingResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "editor_closed": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "m2s" },
+                        "payload": { "const": "editor.schema.json#/$defs/editorClosedEvent" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "level_changed": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "m2s" },
+                        "payload": { "const": "editor.schema.json#/$defs/levelChangedEvent" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "selection_changed": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "m2s" },
+                        "payload": { "const": "editor.schema.json#/$defs/selectionChangedEvent" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "progress": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "m2s" },
+                        "payload": { "const": "editor.schema.json#/$defs/progressEvent" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
+                "error": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "m2s" },
+                        "payload": { "const": "editor.schema.json#/$defs/errorEvent" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                }
+            }
+        }
+    },
+
+    "$ref": "common.schema.json#/$defs/Envelope"
+}

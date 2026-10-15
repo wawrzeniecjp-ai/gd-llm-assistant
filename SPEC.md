@@ -5,13 +5,25 @@
 | Field | Value |
 | --- | --- |
 | Project name | GD AI Assistant |
-| Document version | 0.4.0 |
-| Status | Draft — pre-implementation (review revision of 0.3.0) |
+| Document version | 0.5.0 |
+| Status | Draft — pre-implementation (toolchain-verified revision of 0.4.0) |
 | Target platform | Windows only (initial release) |
-| Target Geode version | v5.0.0+ (requires C++23) — confirm v5 stable before committing, see §14 |
+| Target Geode version | v5.11.x (Geode SDK 5.11.1 verified locally; requires C++23). Geode v6 is WIP — see §15 Q3 |
 | Target GD version | 2.2081 |
 
-## 0.1 Changes from 0.3.0
+## 0.1 Changes from 0.4.0
+
+- **Version target settled and raised:** Geode SDK **5.11.1** is installed and the target is now **v5.11.x**. Geode v6 exists only as a work-in-progress migration guide, so no v6 work is in scope. Resolves §15 Q3 and Appendix A #1.
+- **Toolchain verified end to end:** Clang 23.1.3 (scoop LLVM), Ninja, CMake ≥ 3.29, Git, MSVC 14.51 + Windows SDK 10.0.26100 (VS BuildTools), Geode CLI 3.9.0, and `GEODE_SDK` set per workspace. Recorded in the new §6.1.9.
+- **Third-party refresh dependency removed:** the editor exposes no generic `update()`; vanilla `updateObjectLabel` / `updateObjectSection` / `quickUpdateAllPositions` / `updateGridLayer` / `updateGameObjects` replace `nwo5::editor::update()`, so the "Silly API" is no longer a dependency (§6.1.6, Appendix A #10).
+- **Undo grouping promoted to the primary path:** `addToUndoList(UndoObject*, bool keepRedo)`, `addToRedoList`, `handleAction`, `m_undoObjects` / `m_redoObjects` and `m_increaseMaxUndoRedo` make a grouped mixed-mutation undo entry feasible. The bookkeeping fallback is retained, but is no longer the assumed mechanism (§6.1.5, S3, Appendix A #4).
+- **Text rendering revised:** `geode::Label` is quad-based with Unicode and emoji support and rich-text colour tags, so the bitmap-font glyph-coverage spike is retired (§8.3.1, §8.9, Appendix A #6).
+- **WebSocket client narrowed:** Geode's `web::WebRequest` is HTTP-only (curl_multi); the SDK provides no WebSocket client, so a third-party library or manual framing over `arc::TcpStream` is required (§6.1.2, Appendix A #3).
+- **Keybinds resolved:** keybinds are core Geode in v5 (`geode::Keybind`) — not an external dependency (§6.1.2, Appendix A #12).
+- **Job-completion primitive confirmed:** Arc provides `arc::oneshot`, `arc::mpsc`, `arc::Semaphore` and `arc::Notify`; `arc::Mutex` is the async-aware lock (§6.1.4, Appendix A #9).
+- **New build-configuration section (§6.1.9):** Arc ships only its Core and Time features by default, so the mod's `CMakeLists.txt` must opt into the rest; the expected repository layout is specified there.
+
+## 0.2 Changes from 0.3.0
 
 - **Topology flipped (proposed):** the mod is the WebSocket client; the sidecar is the server. Resolves the port/role contradictions in 0.3.0 (§5, D1).
 - **Corrected API claims:** `createObject` / `removeObject` take `noUndo` (0.3.0 had it inverted); v4 coroutine/`Popup<>` APIs replaced with v5 equivalents (§6.1).
@@ -181,9 +193,9 @@ UI rendering, capturing user input, managing the WebSocket client connection, va
 | UI container | Custom non-modal `CCNode`/`CCLayer` panel attached to the editor UI layer (verify attachment point) | `geode::Popup` derives from the alert-layer family and is, I believe, modal with a dimming overlay; that blocks the editor and defeats live visual feedback (verify). |
 | Message rendering | `MDTextArea` for assistant/system text; sanitised input only (§9.3) | Supports bold, italic, monospace via md4c. |
 | Input | `geode::TextInput` | Standard Geode component. |
-| WebSocket client | **Spike S2:** use Geode's own web utilities if they provide a WebSocket client; otherwise websocketpp (standalone Asio) | Avoids an unmaintained dependency if possible. Not decided. |
-| Async | v5: `async::spawn`, `arc::Future<>`, `co_await async::waitForMainThread<T>(fn)` | Replaces v4 `coro::spawn` / `$async`. |
-| Keybinds | Geode custom keybinds (dependency to be confirmed for v5, verify) | Rebindable, avoids hard-coded conflicts. |
+| WebSocket client | **S2 (open, narrowed):** Geode's `web::WebRequest` is HTTP-only (curl_multi) and the SDK provides **no** WebSocket client; the choice is a third-party library (websocketpp / standalone Asio) or manual RFC 6455 framing over `arc::TcpStream` | Geode's own web utilities are ruled out. The dependency is unavoidable, so keep it minimal and version-pinned. |
+| Async | v5: `async::spawn`, `arc::Future<>`, `co_await async::waitForMainThread<T>(fn)`; async-aware synchronisation via `arc::Mutex`, `arc::Notify`, `arc::oneshot`, `arc::mpsc` | Replaces v4 `coro::spawn` / `$async`. Never hold a `std::mutex` across a suspension point. |
+| Keybinds | `geode::Keybind` — core Geode in v5, not an external dependency | Rebindable through Geode's keybind UI; avoids hard-coded conflicts. |
 
 ### 6.1.3 Threading Rules
 
@@ -199,7 +211,7 @@ Hard requirements:
 
 "Never block the main thread" is not satisfied by dispatching a large batch into a single `waitForMainThread` callback. Instead:
 
-- The network side validates a request, then enqueues a **job** (thread-safe queue) and awaits a completion signal (verify available primitive: Arc channel/oneshot or equivalent).
+- The network side validates a request, then enqueues a **job** (thread-safe queue) and awaits a completion signal — `arc::oneshot` for a single completion, `arc::mpsc` for progress, `arc::Notify` for wake-ups (all confirmed available, Appendix A #9).
 - A per-frame scheduled update on the main thread drains the queue. Each job is resumable: it processes items until the frame budget (`frame-budget-ms`, default 4 ms) is exhausted, then yields to the next frame.
 - The response is sent when the job completes. Optional `progress` events may be emitted for jobs spanning more than ~10 frames.
 - Validation (types, ranges, ID checks, limits) happens **before** any mutation so a request is rejected whole rather than half-applied.
@@ -222,7 +234,7 @@ Exceeding a limit returns `LIMIT_EXCEEDED` or `PAYLOAD_TOO_LARGE` with the limit
 Goal: one user Ctrl+Z reverts a whole assistant turn.
 
 - `begin_transaction` opens a transaction; only one may be open at a time (`TRANSACTION_ACTIVE` otherwise). All mutations until `end_transaction` are grouped.
-- Mechanism **(verify, spike S3)**: group the editor's undo entries so that a single undo step reverses the whole transaction. The editor exposes `undoLastAction`/`redoLastAction` and `UndoObject`-based lists on `LevelEditorLayer`; whether a multi-object grouped entry can be constructed for mixed create/modify/delete is unconfirmed.
+- Mechanism (**primary path, S3**): group the editor's undo entries so that a single undo step reverses the whole transaction. `LevelEditorLayer` exposes the whole surface needed — `addToUndoList(UndoObject*, bool keepRedo)`, `addToRedoList(UndoObject*)`, `handleAction(bool undo, CCArray* undoObjects)`, the `m_undoObjects` / `m_redoObjects` lists, `m_increaseMaxUndoRedo` (raise it above the 5000-object A2 target) — plus the `UndoObject` class. Mutations run with `noUndo = true` and their `UndoObject`s are supplied explicitly, so one grouped entry covers a mixed create/modify/delete transaction. Residual uncertainty: whether a single `UndoObject` may hold entries of more than one kind; if not, push N entries inside one `handleAction` call so the undo stack still advances exactly once. Confirm in S3.
 - **Fallback if grouping is infeasible:** the mod records, per transaction, the created object IDs, removed object snapshots (serialised via the object-string mechanism), and modified-object prior property sets, and implements `revert_transaction` from this bookkeeping with the editor's own undo list left untouched. A2 then applies to the "Revert" action, not Ctrl+Z.
 - `revert_transaction { txn_id }` succeeds only if the transaction is the most recent change (no user edits after it). Otherwise → `TRANSACTION_NOT_REVERTIBLE`, and the UI tells the user to use the editor's undo.
 - A transaction left open when the connection drops or the editor closes is ended automatically by the mod.
@@ -241,9 +253,12 @@ Verified against the Geode bindings for `LevelEditorLayer`:
 | Enumerate | `getAllObjects()`, `m_objectVector` (`std::vector<GameObject*>`) | `m_objects` is not on `LevelEditorLayer`'s own field list; pick one source deliberately and document it. |
 | Range query | `objectsInRect(CCRect, bool ignoreGroups)`, `objectsAtPosition(CCPoint)` | Use for `x_range`/`y_range` filters. |
 | Undo / redo | `undoLastAction()`, `redoLastAction()` | Not exposed to the LLM (D3). |
+| Undo grouping | `addToUndoList(UndoObject*, bool keepRedo)`, `addToRedoList(UndoObject*)`, `handleAction(bool undo, CCArray* undoObjects)`, `m_undoObjects`, `m_redoObjects`, `m_increaseMaxUndoRedo`, class `UndoObject` | Basis of the §6.1.5 primary path (S3). Raise `m_increaseMaxUndoRedo` for the 5000-object A2 target. |
 | Batch from string | `createObjectsFromString(gd::string const&, bool noUndo, bool noLimit)` | Candidate fast path for batches; has an object-limit flag, so a limit exists (verify value). |
+| Snapshot / re-create | `getLevelString()` | Whole-level serialisation. Basis of the §6.1.5 fallback bookkeeping. |
+| Allocate free IDs | `getNextFreeGroupID(excludes)`, `getNextFreeEditorLayer(excludes)`, `getNextFreeOrderChannel(excludes)`, `getNextFreeItemID(excludes)`, `getNextColorChannel()` (all take `std::unordered_set<int> const&` except the last) | Use these instead of inventing group / editor-layer IDs for `create_objects`. |
 | Editor layer / UI | `LevelEditorLayer::get()`, `m_editorUI` | |
-| Refresh UI after programmatic change | `nwo5::editor::update()` (third-party "Silly API") | **Unverified.** Adds a dependency; confirm it is needed. |
+| Refresh UI after programmatic change | `updateObjectLabel(GameObject*)` (static), `updateObjectSection(GameObject*)`, `quickUpdateAllPositions()`, `updateGridLayer()`, `updateGameObjects()` | Vanilla, so the third-party "Silly API" (`nwo5::editor::update()`) is **not** required. Call the minimal set per slice and measure the cost (A1). |
 
 Important: do not call `EditorUI::createObject` directly (access violation). Use `LevelEditorLayer::get()->createObject()`.
 
@@ -305,6 +320,58 @@ Notes:
 - The model is chosen in the sidecar only. The 0.3.0 `default-model` mod setting is removed (two sources of truth, and no protocol message used it).
 - **The API key is not a mod setting.** The mod never receives, stores, or transmits it.
 - Token location (§7.2) is a fixed path by default; an optional override setting may be added if needed.
+
+### 6.1.9 Build Configuration (verified)
+
+Confirmed on the development host (Windows, 2026-10-15):
+
+| Tool | Value | Note |
+| --- | --- | --- |
+| Geode SDK | 5.11.1, `GEODE_SDK` set per workspace | Pin the SDK version; set via workspace settings rather than a global env var |
+| Geode CLI | 3.9.0 (scoop `geode-sdk-cli`) | `geode sdk install`, `geode profile add` |
+| Loader | 5.9.0 (installed in Steam GD) | Target GD 2.2081 |
+| Clang | 23.1.3 (scoop `llvm`), incl. `clang-cl` | MSVC CRT and Windows SDK come from VS BuildTools |
+| MSVC + Windows SDK | 14.51.36231, SDK 10.0.26100 (VS 18 BuildTools) | Geode requires VS 2022+; this is **newer** than the tested matrix, so S1 confirms it compiles before any other work |
+| CMake | ≥ 3.29 required, must be on PATH | Install to PATH rather than relying on the copy bundled with VS BuildTools |
+| Ninja | scoop `ninja` | Geode's generator on Windows |
+| Git | required by the SDK's populate steps | |
+
+**Arc feature flags.** Mods include only Arc's Core and Time features by default. The mod's `CMakeLists.txt` must opt into the rest *before* the SDK is added:
+
+```cmake
+set(ARC_FEATURE_FULL ON CACHE BOOL "" FORCE)
+# or granularly: ARC_FEATURE_NET, ARC_FEATURE_TIME, ARC_FEATURE_SIGNAL, ARC_FEATURE_DEBUG
+
+add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
+```
+
+The network-capable Arc primitives (`arc::TcpStream`, `arc::UdpSocket`) require `ARC_FEATURE_NET`, which matters if S2 selects manual WebSocket framing (§6.1.2).
+
+**`mod.json` gotchas (cost a build cycle each, verified).**
+
+- The `geode` key must **not** carry a `v` prefix. `setup_geode_mod` compares major.minor via `string(REGEX REPLACE "([0-9]+\\.[0-9]+)\\.[0-9]+" ...)`, which is unanchored — so `v5.11.1` yields `v5.11` against the SDK's `5.11` and the configure step fails with a misleading "change the Geode version" error. Use `"geode": "5.11.1"`. The SDK's own reference manifest uses `@GEODE_VERSION_FULL@`, which expands without a prefix; the docs example showing `"v1.0.0"` is wrong for current SDK versions.
+- The `gd` value is checked against `GEODE_GD_VERSION` (2.2081) exactly, or accepts `*`.
+- `setup_geode_mod` reads `mod.json` from `CMAKE_CURRENT_SOURCE_DIR`, which is why the mod project must stay at the repository root (§6.1.9, repository layout).
+- `geode sdk install-binaries` is required before the first configure; without it the SDK fails at `Geode/CMakeLists.txt` with "No valid loader binary to link to".
+
+**Repository layout.** No repository existed before this revision; the following top-level layout is a prerequisite for Phase 1:
+
+```text
+CMakeLists.txt        mod build (Arc flags above)
+mod.json              mod manifest and §6.1.8 settings
+src/                  mod C++ sources
+protocol/             JSON Schemas — the §13 test seam, shared with the sidecar
+sidecar/              uv project: package, tests and test harnesses
+tests/fixtures/       recorded turns and fuzz corpora (language-agnostic)
+```
+
+All Python test code lives under `sidecar/` — the fake mod, the fake sidecar and
+the schema conformance tests — because the mod cannot run headless in CI and
+every harness that exercises the protocol is therefore Python. The top-level
+`tests/` directory holds only language-agnostic fixtures, so the repository
+needs a single Python project rather than two.
+
+The `protocol/` schemas are authored before either side's transport work, because §13 makes the protocol the test seam and both the fake mod and the fake sidecar validate against it. The mod project stays at the repository root because `setup_geode_mod` reads `mod.json` from `CMAKE_CURRENT_SOURCE_DIR`.
 
 ## 6.2 Sidecar Server (Python)
 
@@ -616,7 +683,7 @@ Unknown keys are rejected with `UNSUPPORTED_PROPERTY`; values outside range are 
 | Property | Value |
 | --- | --- |
 | Component | Scroll layer containing a stack of message nodes |
-| Text renderer | `MDTextArea` |
+| Text renderer | `MDTextArea` for Markdown assistant/system text; `geode::Label` for short labels and the thinking indicator |
 | User messages | Right-aligned, distinct background |
 | Assistant messages | Left-aligned, default background |
 | System messages | Centered, muted, smaller font |
@@ -627,9 +694,9 @@ Unknown keys are rejected with `UNSUPPORTED_PROPERTY`; values outside range are 
 
 Assistant text (and anything echoed from level data) is untrusted. Before it reaches `MDTextArea` the mod:
 
-- Strips links, images, raw HTML, profile references, and GD colour tags (`<cr>`, `<cg>`, `<c-XXXXXX>`).
+- Strips links, images, raw HTML, profile references, and GD colour tags (`<cr>`, `<cg>`, `<c-XXXXXX>`) — the last of these matters because `geode::Label::setRichText` interprets colour tags, so unstripped tags would be *rendered*, not shown as text.
 - Allows bold, italic, inline code, and fenced code blocks.
-- Replaces characters not present in the chosen bitmap font with a visible placeholder (spike S5 determines glyph coverage; accents, CJK, emoji, and box-drawing characters are the risk).
+- Renders through `geode::Label`, which is quad-based and supports Unicode and emoji where the chosen font supplies the glyphs. The bitmap-font glyph-coverage spike (S5) is **retired**. Remaining constraint: pick one font covering Latin-1 plus common symbols, and decide the fallback for glyphs a font lacks (a missing glyph now degrades rather than breaking layout).
 
 Mod-generated system messages may use colour tags.
 
@@ -699,7 +766,7 @@ Finished with 3 actions
   - Deleted 1 object (id: 98765)
 ```
 
-Use plain ASCII and sprite icons; do not rely on emoji or box-drawing glyphs in the bitmap fonts.
+Prefer plain ASCII and sprite icons for alignment and legibility. `geode::Label` renders Unicode and emoji where the chosen font supplies the glyphs, so a missing glyph degrades gracefully rather than breaking layout; the 0.3.0 mock's `●●●` is still replaced by the ASCII ellipsis cycle above.
 
 ## 8.10 Message History
 
@@ -788,13 +855,14 @@ A Geode mod cannot run headless in CI, so the protocol is the test seam.
 
 | ID | Question | Exit criterion |
 | --- | --- | --- |
-| S1 | Does a v5 toolchain build and load a hello-world mod? Is Geode v5 stable and adopted? | Mod loads on the target GD/Geode versions. |
-| S2 | Does Geode provide a WebSocket client? If not, can websocketpp be built cleanly? | One client library chosen; round-trip echo to a Python server. |
-| S3 | Can undo entries be grouped per transaction? | Either grouping works (A2 via Ctrl+Z) or the bookkeeping fallback is adopted. |
+| S1 | Does the verified toolchain build and load a hello-world mod on Geode SDK 5.11.1 / loader 5.9.0? (The "is v5 stable" half is settled: v5 is the target, v6 is WIP.) | Mod builds and loads on the target GD/Geode versions. The toolchain is newer than Geode's tested matrix, so clear this before any other work. |
+| S2 | **Narrowed:** Geode provides no WebSocket client (`web::WebRequest` is HTTP-only). websocketpp / standalone Asio, or manual RFC 6455 framing over `arc::TcpStream` (`ARC_FEATURE_NET`)? | One client library chosen; round-trip echo to a Python server; token handshake and the absence of an `Origin` header verified on the wire. |
+| S3 | **Advanced:** can undo entries be grouped per transaction via `addToUndoList` / `handleAction` (§6.1.5)? | Either grouping works (A2 via Ctrl+Z) or the bookkeeping fallback is adopted. Also measure per-slice refresh cost and `m_increaseMaxUndoRedo` behaviour at 5000 objects. |
 | S4 | Which hooks reliably detect user adds/removes/moves/selection? | Coalesced `level_changed` working with correct `source` tagging. |
-| S5 | Glyph coverage of the available bitmap fonts. | Placeholder policy decided. |
 | S6 | Non-modal panel attachment, touch/key routing, hotkey leakage, Escape handling. | Panel usable while editing; typing doesn't trigger editor hotkeys. |
 | S7 | Unique ID stability across undo/redo; which object IDs crash on programmatic creation. | D9 confirmed or revised; initial denylist. |
+
+S5 (bitmap-font glyph coverage) was retired in 0.5.0 — see §8.3.1. All other spike IDs are unchanged, so existing references to S4, S6 and S7 remain valid.
 
 ## Phase 1 — WebSocket Bridge
 
@@ -830,7 +898,7 @@ A Geode mod cannot run headless in CI, so the protocol is the test seam.
 | --- | --- | --- |
 | 1 | Session key: level name collides across levels and breaks on rename. Is a mod-stored name→UUID map worth it? | Session continuity. |
 | 2 | How much trigger support belongs in v1.1, and what is the property schema (target group, move offsets, duration, easing)? | Largest driver of usefulness. |
-| 3 | Is Geode v5 stable and what share of players are on it? Is a v4 build required? | Reach; may force the older async API. |
+| 3 | **Partly resolved in 0.5.0.** Geode v5 is the target (SDK 5.11.1 verified locally, loader 5.9.0 installed); v6 exists only as a WIP migration guide, so no v6 work is in scope. Still open: what share of players are on v5 versus v4, and is a v4 build required for reach? | Reach only — the async API question is settled. |
 | 4 | Does the Geode index permit or require disclosure for mods that connect to local services / send data to LLM providers? | Release eligibility. |
 | 5 | Which provider and model are the supported baseline for tool-use quality testing? | Prompt tuning, test matrix. |
 | 6 | Should confirmation be required before large destructive operations (e.g., deleting more than N objects), or is revert sufficient? | Safety vs friction. |
@@ -845,6 +913,10 @@ A Geode mod cannot run headless in CI, so the protocol is the test seam.
 | Geode v5 Async guide | https://docs.geode-sdk.org/tutorials/async |
 | Geode waitForMainThread | https://docs.geode-sdk.org/functions/geode/async/waitForMainThread/ |
 | Geode v5 Migration Guide | https://docs.geode-sdk.org/tutorials/migrate-v5 |
+| Geode v5 → v6 migration guide (v6 WIP) | https://docs.geode-sdk.org/tutorials/migrate-v6 |
+| Geode required C++ tools | https://docs.geode-sdk.org/getting-started/cpp-stuff |
+| Geode CLI | https://docs.geode-sdk.org/getting-started/geode-cli |
+| Geode web requests (HTTP only — no WebSocket) | https://docs.geode-sdk.org/tutorials/fetch |
 | Geode v5.0.0-alpha.2 release notes | https://newreleases.io/project/github/geode-sdk/geode/release/v5.0.0-alpha.2 |
 | Geode bindings: LevelEditorLayer | https://docs.geode-sdk.org/classes/LevelEditorLayer |
 | WSLiveEditor (reference mod) | https://geode-sdk.org/mods/iandyhd3.wsliveeditor |
@@ -855,18 +927,19 @@ A Geode mod cannot run headless in CI, so the protocol is the test seam.
 
 # Appendix A — Verification Checklist
 
-Items asserted in this document that are not yet confirmed:
+Items asserted in this document that are not yet confirmed, with their 0.5.0 status:
 
-1. Geode v5 is stable; target players are on it (S1).
+1. **Resolved (0.5.0):** Geode v5 is the target — SDK 5.11.1 verified locally, loader 5.9.0 installed; v6 is WIP. Only the player-share / v4-build question remains (§15 Q3).
 2. `geode::Popup` modality/overlay behaviour (§6.1.2); panel attachment point and input routing (S6).
-3. Geode's own WebSocket client availability (S2).
-4. Undo-entry grouping mechanism (S3).
+3. **Resolved (0.5.0):** Geode provides no WebSocket client (`web::WebRequest` is HTTP-only), so a third-party library or manual framing is required (S2).
+4. **Advanced (0.5.0):** grouping is feasible via `addToUndoList` / `handleAction` / `m_undoObjects`; confirm whether a single `UndoObject` may mix kinds (S3).
 5. Hooks for change detection (S4).
-6. Bitmap-font glyph coverage (S5).
+6. **Retired (0.5.0):** `geode::Label` is Unicode- and emoji-capable, so only font choice and the missing-glyph fallback remain (§8.3.1).
 7. Unique-ID stability across undo/redo; crash-prone object IDs (S7).
 8. `createObjectsFromString` object limit value and suitability as a batch fast path.
-9. Availability of a completion primitive (Arc channel/oneshot) for job-queue signalling.
-10. `nwo5::editor::update()` existence, necessity, and dependency cost.
+9. **Resolved (0.5.0):** Arc provides `arc::oneshot`, `arc::mpsc`, `arc::Semaphore` and `arc::Notify`; `arc::Mutex` is the async-aware lock.
+10. **Resolved (0.5.0):** no generic editor `update()` exists; vanilla `updateObjectLabel` / `updateObjectSection` / `quickUpdateAllPositions` / `updateGridLayer` / `updateGameObjects` replace it, so `nwo5` is not needed (§6.1.6).
 11. z-layer enum names and `editor_layer` indexing.
-12. Geode custom-keybinds availability on v5; Ctrl+Shift+C conflicts.
+12. **Resolved (0.5.0):** keybinds are core Geode (`geode::Keybind`). Still unverified: whether Ctrl+Shift+C collides with editor shortcuts (S6).
 13. Geode index policy for LLM/network mods.
+14. **Resolved (0.5.0):** Arc ships Core and Time only; the rest must be enabled in `CMakeLists.txt` before the SDK is added (§6.1.9). Whether the newer-than-tested toolchain builds cleanly is S1.

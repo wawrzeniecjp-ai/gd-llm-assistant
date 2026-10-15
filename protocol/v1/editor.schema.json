@@ -1,0 +1,416 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://geode-llm.local/protocol/v1/editor.schema.json",
+    "title": "Editor requests and events",
+    "description": "SPEC.md 7.5 (requests, sidecar -> mod) and 7.6 (events, mod -> sidecar). Each `*Payload` is a request; the matching `*Result` is the `result` of the response. Each `*Event` is an event payload.",
+
+    "$defs": {
+        "Bounds": {
+            "type": "object",
+            "properties": {
+                "x1": { "type": "number" },
+                "y1": { "type": "number" },
+                "x2": { "type": "number" },
+                "y2": { "type": "number" }
+            },
+            "required": ["x1", "y1", "x2", "y2"],
+            "additionalProperties": false
+        },
+
+        "TypeCount": {
+            "type": "object",
+            "required": ["id", "count"],
+            "properties": {
+                "id": { "$ref": "common.schema.json#/$defs/ObjectTypeId" },
+                "count": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+        },
+
+        "TxnSummary": {
+            "type": "object",
+            "required": ["created", "modified", "deleted"],
+            "properties": {
+                "created": { "type": "integer", "minimum": 0 },
+                "modified": { "type": "integer", "minimum": 0 },
+                "deleted": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+        },
+
+        "MissingIds": {
+            "type": "array",
+            "description": "Unique IDs that no longer resolve. Reported, not fatal, unless none were found (then OBJECT_NOT_FOUND).",
+            "maxItems": 5000,
+            "items": { "$ref": "common.schema.json#/$defs/UniqueId" }
+        },
+
+        "getEditorStatePayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "maxProperties": 0,
+            "additionalProperties": false
+        },
+        "getEditorStateResult": {
+            "type": "object",
+            "required": ["object_count", "grid_size", "playtesting"],
+            "properties": {
+                "object_count": { "type": "integer", "minimum": 0 },
+                "selected": {
+                    "type": "object",
+                    "properties": {
+                        "count": { "type": "integer", "minimum": 0 },
+                        "by_type": { "type": "array", "items": { "$ref": "#/$defs/TypeCount" }, "maxItems": 20 },
+                        "bounds": { "$ref": "#/$defs/Bounds" }
+                    },
+                    "additionalProperties": false
+                },
+                "editor_layer": { "type": "integer", "minimum": 0 },
+                "camera": {
+                    "type": "object",
+                    "properties": {
+                        "x": { "type": "number" },
+                        "y": { "type": "number" },
+                        "zoom": { "type": "number", "exclusiveMinimum": 0 },
+                        "visible_rect": { "$ref": "#/$defs/Bounds" }
+                    },
+                    "additionalProperties": false
+                },
+                "ground_y": { "type": "number", "description": "Ground height; required for sensible placements." },
+                "grid_size": { "const": 30, "description": "GD units per grid block." },
+                "playtesting": { "type": "boolean" },
+                "level": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string", "maxLength": 256 } },
+                    "additionalProperties": false
+                }
+            },
+            "additionalProperties": false
+        },
+
+        "QueryFilters": {
+            "type": "object",
+            "description": "SPEC.md 7.5. All filters are optional; omitted filters do not constrain.",
+            "properties": {
+                "id": { "$ref": "common.schema.json#/$defs/ObjectTypeId" },
+                "ids": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": { "$ref": "common.schema.json#/$defs/UniqueId" }
+                },
+                "editor_layer": { "type": "integer", "minimum": 0 },
+                "z_layer": { "$ref": "common.schema.json#/$defs/ZLayer" },
+                "group": { "type": "integer", "minimum": 1, "maximum": 9999 },
+                "x_range": { "$ref": "common.schema.json#/$defs/Range" },
+                "y_range": { "$ref": "common.schema.json#/$defs/Range" },
+                "selected_only": { "type": "boolean" }
+            },
+            "additionalProperties": false
+        },
+
+        "queryObjectsPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["filters"],
+            "properties": {
+                "filters": { "$ref": "#/$defs/QueryFilters" },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 },
+                "cursor": { "type": ["string", "null"], "maxLength": 128 }
+            },
+            "additionalProperties": false
+        },
+        "queryObjectsResult": {
+            "type": "object",
+            "required": ["objects", "total_matches", "truncated"],
+            "properties": {
+                "objects": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": { "$ref": "common.schema.json#/$defs/ObjectRecord" }
+                },
+                "total_matches": { "type": "integer", "minimum": 0 },
+                "next_cursor": { "type": ["string", "null"], "maxLength": 128 },
+                "truncated": { "type": "boolean" }
+            },
+            "additionalProperties": false
+        },
+
+        "summarizeRegionPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "description": "Preferred over bulk query_objects for understanding a region.",
+            "properties": {
+                "x_range": { "$ref": "common.schema.json#/$defs/Range" },
+                "y_range": { "$ref": "common.schema.json#/$defs/Range" },
+                "editor_layer": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+        },
+        "summarizeRegionResult": {
+            "type": "object",
+            "required": ["total", "by_type"],
+            "properties": {
+                "total": { "type": "integer", "minimum": 0 },
+                "bounds": { "$ref": "#/$defs/Bounds" },
+                "by_type": {
+                    "type": "array",
+                    "description": "Capped at 20 entries.",
+                    "maxItems": 20,
+                    "items": { "$ref": "#/$defs/TypeCount" }
+                }
+            },
+            "additionalProperties": false
+        },
+
+        "getObjectPropertiesPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["object_id"],
+            "properties": {
+                "object_id": { "$ref": "common.schema.json#/$defs/UniqueId" }
+            },
+            "additionalProperties": false
+        },
+        "getObjectPropertiesResult": {
+            "type": "object",
+            "required": ["properties"],
+            "properties": {
+                "properties": { "$ref": "common.schema.json#/$defs/PropertySet" }
+            },
+            "additionalProperties": false
+        },
+
+        "createObjectsPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "description": "Validated whole before any mutation, so a request is rejected rather than half-applied.",
+            "required": ["objects"],
+            "properties": {
+                "objects": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 5000,
+                    "items": {
+                        "type": "object",
+                        "required": ["id", "x", "y"],
+                        "properties": {
+                            "id": { "$ref": "common.schema.json#/$defs/ObjectTypeId" },
+                            "x": { "type": "number" },
+                            "y": { "type": "number" },
+                            "properties": { "$ref": "common.schema.json#/$defs/PropertySet" }
+                        },
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "additionalProperties": false
+        },
+        "createObjectsResult": {
+            "type": "object",
+            "required": ["created", "count"],
+            "properties": {
+                "created": {
+                    "type": "array",
+                    "maxItems": 5000,
+                    "items": { "$ref": "common.schema.json#/$defs/UniqueId" }
+                },
+                "count": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+        },
+
+        "modifyObjectsPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["targets"],
+            "properties": {
+                "targets": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 5000,
+                    "items": { "$ref": "common.schema.json#/$defs/UniqueId" }
+                },
+                "set": { "$ref": "common.schema.json#/$defs/PropertySet" },
+                "delta": { "$ref": "common.schema.json#/$defs/PropertyDelta" }
+            },
+            "additionalProperties": false,
+            "anyOf": [{ "required": ["set"] }, { "required": ["delta"] }]
+        },
+        "modifyObjectsResult": {
+            "type": "object",
+            "required": ["modified_count", "missing"],
+            "properties": {
+                "modified_count": { "type": "integer", "minimum": 0 },
+                "missing": { "$ref": "#/$defs/MissingIds" }
+            },
+            "additionalProperties": false
+        },
+
+        "deleteObjectsPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["targets"],
+            "properties": {
+                "targets": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 5000,
+                    "items": { "$ref": "common.schema.json#/$defs/UniqueId" }
+                }
+            },
+            "additionalProperties": false
+        },
+        "deleteObjectsResult": {
+            "type": "object",
+            "required": ["deleted_count", "missing"],
+            "properties": {
+                "deleted_count": { "type": "integer", "minimum": 0 },
+                "missing": { "$ref": "#/$defs/MissingIds" }
+            },
+            "additionalProperties": false
+        },
+
+        "setSelectionPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["targets"],
+            "properties": {
+                "targets": {
+                    "type": "array",
+                    "maxItems": 5000,
+                    "items": { "$ref": "common.schema.json#/$defs/UniqueId" }
+                }
+            },
+            "additionalProperties": false
+        },
+        "setSelectionResult": {
+            "type": "object",
+            "required": ["selected_count"],
+            "properties": { "selected_count": { "type": "integer", "minimum": 0 } },
+            "additionalProperties": false
+        },
+
+        "beginTransactionPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "properties": { "label": { "type": "string", "maxLength": 128 } },
+            "additionalProperties": false
+        },
+        "beginTransactionResult": {
+            "type": "object",
+            "required": ["txn_id"],
+            "properties": { "txn_id": { "type": "string", "maxLength": 64 } },
+            "additionalProperties": false
+        },
+
+        "endTransactionPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["txn_id"],
+            "properties": { "txn_id": { "type": "string", "maxLength": 64 } },
+            "additionalProperties": false
+        },
+        "endTransactionResult": {
+            "type": "object",
+            "required": ["txn_id", "summary"],
+            "properties": {
+                "txn_id": { "type": "string", "maxLength": 64 },
+                "summary": { "$ref": "#/$defs/TxnSummary" }
+            },
+            "additionalProperties": false
+        },
+
+        "revertTransactionPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "description": "Usually triggered from the panel's Revert action rather than the sidecar (D3). Succeeds only while the transaction is the most recent change.",
+            "required": ["txn_id"],
+            "properties": { "txn_id": { "type": "string", "maxLength": 64 } },
+            "additionalProperties": false
+        },
+        "revertTransactionResult": {
+            "type": "object",
+            "required": ["reverted"],
+            "properties": { "reverted": { "const": true } },
+            "additionalProperties": false
+        },
+
+        "pingPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "maxProperties": 0,
+            "additionalProperties": false
+        },
+        "pingResult": {
+            "type": "object",
+            "required": ["pong"],
+            "properties": { "pong": { "const": true } },
+            "additionalProperties": false
+        },
+
+        "editorClosedEvent": {
+            "x-direction": "m2s",
+            "type": "object",
+            "description": "Sent when the editor closes; the mod then closes the socket with code 1000.",
+            "maxProperties": 0,
+            "additionalProperties": false
+        },
+
+        "levelChangedEvent": {
+            "x-direction": "m2s",
+            "type": "object",
+            "description": "Coalesced: at most one flush per 250 ms. `source` prevents echo loops.",
+            "required": ["added", "removed", "modified", "source"],
+            "properties": {
+                "added": { "type": "integer", "minimum": 0 },
+                "removed": { "type": "integer", "minimum": 0 },
+                "modified": { "type": "integer", "minimum": 0 },
+                "bounds": { "$ref": "#/$defs/Bounds" },
+                "source": { "type": "string", "enum": ["user", "assistant"] }
+            },
+            "additionalProperties": false
+        },
+
+        "selectionChangedEvent": {
+            "x-direction": "m2s",
+            "type": "object",
+            "description": "Throttled to 250 ms; ids capped at 200.",
+            "required": ["count", "ids", "truncated"],
+            "properties": {
+                "count": { "type": "integer", "minimum": 0 },
+                "ids": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": { "$ref": "common.schema.json#/$defs/UniqueId" }
+                },
+                "truncated": { "type": "boolean" }
+            },
+            "additionalProperties": false
+        },
+
+        "progressEvent": {
+            "x-direction": "m2s",
+            "type": "object",
+            "description": "Emitted for long jobs only (spanning more than ~10 frames).",
+            "required": ["request_id", "done", "total"],
+            "properties": {
+                "request_id": { "type": "string", "maxLength": 64 },
+                "done": { "type": "integer", "minimum": 0 },
+                "total": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+        },
+
+        "errorEvent": {
+            "x-direction": "m2s",
+            "type": "object",
+            "description": "Unsolicited error, not a response to a request.",
+            "required": ["code", "message"],
+            "properties": {
+                "code": { "$ref": "common.schema.json#/$defs/ErrorCode" },
+                "message": { "type": "string", "maxLength": 512 }
+            },
+            "additionalProperties": false
+        }
+    }
+}

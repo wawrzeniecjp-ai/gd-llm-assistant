@@ -1,0 +1,74 @@
+{
+    "geode": "5.11.1",
+    "gd": {
+        "win": "2.2081"
+    },
+    "version": "v0.1.0",
+    "id": "laure.gd-ai-assistant",
+    "name": "GD AI Assistant",
+    "developer": "laure",
+    "description": "Natural-language level editing in the GD editor, powered by a local LLM sidecar.",
+    "tags": [
+        "editor",
+        "interface",
+        "online",
+        "utility"
+    ],
+    "settings": {
+        "connection-title": {
+            "type": "title",
+            "name": "Connection"
+        },
+        "sidecar-url": {
+            "type": "string",
+            "name": "Sidecar WebSocket URL",
+            "description": "WebSocket URL of the local sidecar. Must be a loopback address.",
+            "default": "ws://127.0.0.1:8765"
+        },
+        "auto-connect": {
+            "type": "bool",
+            "name": "Auto-connect on editor open",
+            "description": "Connect to the sidecar automatically when entering the editor, and reconnect with backoff if the connection drops.",
+            "default": true
+        },
+        "interface-title": {
+            "type": "title",
+            "name": "Interface"
+        },
+        "toggle-chat": {
+            "type": "keybind",
+            "name": "Toggle chat panel",
+            "description": "Show or hide the assistant panel in the level editor.",
+            "default": "Ctrl+Shift+C",
+            "category": "editor"
+        },
+        "limits-title": {
+            "type": "title",
+            "name": "Limits"
+        },
+        "max-message-length": {
+            "type": "int",
+            "name": "Maximum message length",
+            "description": "Maximum character count for a single user message.",
+            "default": 2000,
+            "min": 100,
+            "max": 10000
+        },
+        "frame-budget-ms": {
+            "type": "int",
+            "name": "Per-frame edit budget (ms)",
+            "description": "Maximum main-thread time per frame spent applying assistant edits.",
+            "default": 4,
+            "min": 1,
+            "max": 16
+        },
+        "max-objects-per-request": {
+            "type": "int",
+            "name": "Max objects per request",
+            "description": "Upper bound on objects created, modified, or deleted by a single request.",
+            "default": 1000,
+            "min": 10,
+            "max": 5000
+        }
+    }
+}

@@ -1,0 +1,36 @@
+# Repository-wide line-ending policy.
+#
+# The project mixes a Windows C++ toolchain (which is happy either way) with
+# Python, JSON Schemas and Markdown tooling that are line-ending sensitive.
+# Normalise on commit, and force LF for the file types where CRLF causes real
+# problems (multi-line edits, fenced-block parsing, formatter churn).
+* text=auto
+
+# Tooling-sensitive: keep LF in the working tree as well as the repository.
+*.py            text eol=lf
+*.pyi           text eol=lf
+*.toml          text eol=lf
+*.json          text eol=lf
+*.jsonl         text eol=lf
+*.schema.json   text eol=lf
+*.md            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.sh            text eol=lf
+
+# Native sources and build scripts: normalise on commit, platform default on
+# checkout.
+*.c             text
+*.cc            text
+*.cpp           text
+*.cxx           text
+*.h             text
+*.hpp           text
+CMakeLists.txt  text
+*.ps1           text
+
+# Arithmetic: never touch.
+*.png           binary
+*.jpg           binary
+*.ico           binary
+*.geode         binary

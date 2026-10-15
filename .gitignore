@@ -1,1 +1,29 @@
-.vscode
+# --- Editor ---
+# Not tracked: these hold machine-specific absolute paths (toolchain locations,
+# GEODE_SDK), so they are personal to a checkout rather than project config.
+.vscode/
+
+# --- Geode / C++ build output ---
+build/
+build-*/
+*.geode
+build.log
+CMakeUserPresets.json
+compile_commands.json
+.cache/
+
+# --- Python / sidecar (uv) ---
+__pycache__/
+*.py[cod]
+.venv/
+# NOTE: uv.lock is intentionally committed (reproducible builds, SPEC.md §12).
+
+# --- Sidecar runtime state ---
+sessions/
+*.sqlite
+*.sqlite3
+.env
+
+# --- Token file must never be committed (handshake secret) ---
+token
+
