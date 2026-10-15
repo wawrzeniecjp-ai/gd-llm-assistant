@@ -258,6 +258,15 @@ Goal: one user Ctrl+Z reverts a whole assistant turn.
 - After any revert the mod sends `transaction_reverted` so the sidecar can tell the LLM on the next turn that its changes were reverted.
 - Mutations outside a transaction are permitted and form their own single undo entry.
 
+#### 6.1.5.1 Removal and the undo stack (measured, 0.8.0)
+
+Removal has a constraint that creation does not, and it is not documented anywhere in the API:
+
+- **`removeObject(object, noUndo)` must be called with `noUndo = false`.** Passing `true` corrupts the heap — the game dies with `STATUS_HEAP_CORRUPTION` (0xc0000374), raised from ntdll. This was reproduced on objects the mod created *and* on objects already in the level, so it is not about the object's provenance. The asymmetry with creation is notable: `createObject(..., noUndo = true)` is fine. The flag evidently does more on the removal path than suppress an undo entry.
+- Rather than spend more cycles on it, note what made it hard: four other explanations were tested and falsified first (object coordinates, which removal API is used, selection involvement, and the calling context), and the "known-good" reference used as a control turned out not to be comparable — it only ever ran during editor init.
+
+**Consequence, accepted for now:** removals land on the user's undo stack while creations do not. Ctrl+Z can therefore undo an assistant deletion but not an assistant creation, and D2's "one undo group per turn" currently holds only for creates. Grouping the removals per transaction is possible (`UndoCommand::DeleteMulti` exists) and is a v1.1 candidate. This is recorded rather than fixed: it is a consistency wart, not a correctness problem, and the phase's real risk was whether the operations worked at all.
+
 ### 6.1.6 Editor API Reference
 
 Verified against the Geode bindings for `LevelEditorLayer`:

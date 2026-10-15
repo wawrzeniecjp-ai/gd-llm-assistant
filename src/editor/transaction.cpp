@@ -106,11 +106,24 @@ void TransactionManager::recordModified(
     if (!m_hasOpen) {
         return;
     }
+
+    // An object this turn created needs no property restore: revert removes it,
+    // which reverts the modifications too. Recording them would be both useless
+    // and confusing -- revert removes the object first, so the later lookup by id
+    // fails and logs a spurious "not found for property restore".
+    if (std::find(m_open.created.begin(), m_open.created.end(), uniqueId) != m_open.created.end()) {
+        return;
+    }
+
     // First touch wins: reverting must restore the state before the turn, not
     // before the most recent of several changes to the same object.
     if (hasModified(uniqueId)) {
         return;
     }
+    log::info(
+        "transaction {}: recording {} prior value(s) for object {}",
+        m_open.id, priorValues.size(), uniqueId
+    );
     m_open.modified.emplace_back(uniqueId, std::move(priorValues));
 }
 
@@ -217,13 +230,19 @@ geode::Result<matjson::Value, std::string> TransactionManager::revert(std::strin
     // Prior values are written back through the same routing as the original
     // modification, so a read -> modify -> revert round trip is symmetric.
     auto revertedProperties = 0;
+    log::info("revert {}: {} modified object(s) recorded", txnId, record.modified.size());
     for (auto it = record.modified.rbegin(); it != record.modified.rend(); ++it) {
         auto const& [uniqueId, priorValues] = *it;
         auto* object = editor->findGameObject(uniqueId);
         if (object == nullptr || object->m_uniqueID != uniqueId) {
             // Gone, or the ID now belongs to a different object after a restore.
+            log::warn("revert {}: object {} not found for property restore", txnId, uniqueId);
             continue;
         }
+        log::info(
+            "revert {}: restoring {} prior value(s) on object {}",
+            txnId, priorValues.size(), uniqueId
+        );
         for (auto const& [name, value] : priorValues) {
             if (writeProperty(object, name, value)) {
                 ++revertedProperties;

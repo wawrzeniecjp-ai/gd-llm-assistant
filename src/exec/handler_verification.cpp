@@ -166,6 +166,10 @@ arc::Future<> runHandlerVerification() {
         co_return;
     }
 
+    // Hoisted so the property restore can be asserted after the revert.
+    std::int32_t existingToModifyId = 0;
+    std::optional<double> existingOriginalX;
+
     // -- does removing a PRE-EXISTING object work across frames? -------------
     //
     // Every crash so far involved removing an object this mod had created via
@@ -184,17 +188,22 @@ arc::Future<> runHandlerVerification() {
         range.push(100000.0);
         filters["x_range"] = std::move(range);
         queryPayload["filters"] = std::move(filters);
-        queryPayload["limit"] = 1;
+        queryPayload["limit"] = 2;
 
         auto found = co_await submit("query_objects", std::move(queryPayload));
-        std::int32_t existingId = 0;
+        std::vector<std::int32_t> existingIds;
         if (found.ok && found.payload.contains("objects")) {
             for (auto const& record : found.payload["objects"]) {
                 if (auto id = record["object_id"].asInt(); id.ok()) {
-                    existingId = static_cast<std::int32_t>(id.unwrap());
+                    existingIds.push_back(static_cast<std::int32_t>(id.unwrap()));
                 }
             }
         }
+        std::int32_t const existingId = existingIds.empty() ? 0 : existingIds[0];
+        // A second pre-existing object is needed for the property-revert test:
+        // modifying an object this harness *created* would not exercise it, since
+        // revert removes that object outright (see recordModified).
+        std::int32_t const existingToModify = existingIds.size() > 1 ? existingIds[1] : 0;
 
         if (existingId == 0) {
             log::warn("handler verification: no pre-existing object to try removing");
@@ -214,6 +223,43 @@ arc::Future<> runHandlerVerification() {
                 removed.ok, "removing a pre-existing object across frames",
                 removed.payload.dump(0)
             );
+        }
+
+        // Modify a pre-existing object, which is what makes the later property
+        // restore a real test: the object survives the turn, so revert has to
+        // put its properties back.
+        if (existingToModify != 0) {
+            existingToModifyId = existingToModify;
+            auto priorX = co_await readNumber(existingToModify, "x");
+            existingOriginalX = priorX;
+            auto modifyPayload = matjson::Value::object();
+            auto targets = matjson::Value::array();
+            targets.push(existingToModify);
+            modifyPayload["targets"] = std::move(targets);
+            auto set = matjson::Value::object();
+            set["x"] = 4242.0;
+            set["scale_x"] = 3.0;
+            modifyPayload["set"] = std::move(set);
+
+            auto modifyExisting = co_await submit("modify_objects", std::move(modifyPayload));
+            verifier.check(modifyExisting.ok, "modify_objects on a pre-existing object",
+                modifyExisting.payload.dump(0));
+
+            auto const changedX = co_await readNumber(existingToModify, "x");
+            verifier.check(
+                changedX.has_value() && std::abs(*changedX - 4242.0) < 0.01,
+                "pre-existing object's x changed",
+                fmt::format("was {}, now {}",
+                    priorX.has_value() ? *priorX : -1.0, changedX.has_value() ? *changedX : -1.0)
+            );
+            if (priorX.has_value()) {
+                verifier.check(
+                    std::abs(*priorX - 4242.0) > 1.0,
+                    "the change is detectable (prior x differed from the new value)"
+                );
+            }
+        } else {
+            log::warn("handler verification: no second pre-existing object to modify");
         }
     }
 
@@ -488,6 +534,30 @@ arc::Future<> runHandlerVerification() {
     });
     auto const reverted = revertedResult.value_or(std::string {});
     verifier.check(!reverted.empty(), "revert transaction", reverted);
+
+    // Asserted separately because the first version of this harness did not check
+    // it, and a run reported "all checks passed" while revert restored zero
+    // properties -- silent because nothing looked. The count is also asserted
+    // non-zero so an empty restore cannot pass by accident.
+    verifier.check(
+        reverted.find("\"properties_restored\":0") == std::string::npos,
+        "revert restored at least one property",
+        reverted
+    );
+
+    // The decisive property-revert check: a pre-existing object was modified to
+    // x = 4242, so revert must put its original x back. Asserted on the value
+    // rather than on the counter, because a counter could be satisfied by
+    // restoring something irrelevant.
+    if (existingToModifyId != 0 && existingOriginalX.has_value()) {
+        auto const restoredX = co_await readNumber(existingToModifyId, "x");
+        verifier.check(
+            restoredX.has_value() && std::abs(*restoredX - *existingOriginalX) < 0.01,
+            "revert restored the pre-existing object's x",
+            fmt::format("expected {}, got {}", *existingOriginalX,
+                restoredX.has_value() ? *restoredX : -1.0)
+        );
+    }
 
     auto const afterRevert = co_await objectCount();
     verifier.checkEqual(
