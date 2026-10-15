@@ -47,29 +47,47 @@ by a constant offset (below).
 - `uniqueID` values observed: 14, 16, 17, 21 — non-contiguous, so IDs are not
   reused after deletion. Relevant to S7 and to D9's identity model.
 
-### Trigger keys, resolved against the reference
+### Trigger keys, resolved
 
-Cross-checked against the community key table (see "External reference" below).
-This **corrected three earlier inferences**, which are recorded rather than
-deleted, because the same over-reading is easy to repeat:
+Cross-checked against the modern key table (see "External reference" below). The
+**names** from that table explain the **values** observed here exactly, which is
+stronger evidence than either source alone:
 
-| Key | Value here | Reference says | Status |
+| Key | Value here | Name | Reading |
 | --- | --- | --- | --- |
-| `7`, `8`, `9` | all 255 | Red, Green, Blue of a trigger's colour | ✅ matches the earlier guess |
-| `10` | 0.5 | **Duration** of an effect in a trigger | ❌ earlier guess "alpha/brightness" was **wrong** |
-| `35` | 1 | **Opacity** | ✅ consistent (1.0 = fully opaque) |
-| `36` | 1 | **bool**, suspected "X position locked / unaffected by a Move trigger" | ❌ earlier "overloaded: text vs colour id" was **wrong** |
-| `155` | 1, 2, 4 | not in the documented table; reference calls it *"suspected to be something related to optimizing colors, appears on all objects"* | ❌ earlier "z_layer" was **wrong** (z layer is key `24`) |
-| `156` | 3 | same as `155` | ❌ earlier "z_order" was **wrong** (z order is key `25`) |
+| `155` | 4 | `color_1_index` | Integer; the object's first colour index |
+| `36` | 1 | `interactible` | Bool |
+| `7` / `8` / `9` | 255 | `red` / `green` / `blue` | Full intensity, as a fresh trigger would have |
+| `10` | 0.5 | `duration` | Float; the trigger's fade duration |
+| `35` | 1 | `opacity` | Float; 1.0 = fully opaque |
 
-The `155`/`156` case is the instructive one. The observed values — `155,1` on the
-first object, `155,2,156,3` on the two added later, `155,4` on the trigger — looked
-like a layer/order pair, and that reading survived three consistent samples. It was
-still wrong. A pattern that fits the data is not the same as an identified key.
+The non-trigger samples resolve too: `155,1` is `color_1_index` 1, and
+`155,2,156,3` is `color_1_index` 2 with `color_2_index` 3. So `155`/`156` are a
+**colour-index pair**, present on all objects.
 
-**So: key meaning is still not established beyond `1`, `2`, `3`.** In particular,
-nothing here supports a per-type key overload, and a plain global map is not
-contradicted by the data.
+### Correction history (recorded, not deleted)
+
+This is the third attempt at `155`/`156`, and the path there is the point:
+
+1. **First reading — z_layer/z_order. Wrong.** The values looked like a
+   layer/order pair and that reading survived three consistent samples.
+2. **Second reading — "undisclosed".** The older reference table doesn't list
+   them, so they were written off as unknown. That was premature: the older table
+   *did* say "suspected to be something related to optimizing colors", which was
+   directionally right.
+3. **Actual answer — `color_1_index` / `color_2_index`**, from the modern table.
+
+Two lessons worth keeping. First, **a pattern that fits the data is not an
+identified key** — step 1 failed that test and step 2 over-corrected by concluding
+"unknowable" from one incomplete source. Second, when a key's meaning is unknown,
+check *more than one* reference before declaring it opaque.
+
+Also corrected: key `36` was earlier guessed to be an overloaded text/colour key.
+It is `interactible`, a bool.
+
+**Key meaning is now established for every key seen so far.** Nothing here
+supports a per-type key overload, and a plain global key→name map is consistent
+with all the data.
 
 ## Coordinate relationship (measured)
 
@@ -94,43 +112,122 @@ or derived from the ground layer or the editing layer is still unverified.
 
 ## External reference
 
-The community key table is at
-[Wyliemaster/gddocs → level-string](https://github.com/Wyliemaster/gddocs/blob/master/docs/resources/client/level-components/level-string.md).
-Keys that matter to `SPEC.md` §7.5 map as follows:
+The modern key table is
+[FlowVix/gd-info-explorer](https://flowvix.github.io/gd-info-explorer/), with the
+raw definitions at
+[`src/lib/schema.txt`](https://raw.githubusercontent.com/FlowVix/gd-info-explorer/main/src/lib/schema.txt).
+It is far more complete than the older
+[Wyliemaster/gddocs](https://github.com/Wyliemaster/gddocs) table — which was
+archived in January 2026 and states outright that 2.2 "adds a ton of new object
+properties" that live elsewhere.
 
-| Spec property | Key |
+The names map onto `SPEC.md` §7.5's existing property list almost exactly, which is
+the strongest argument for the hybrid schema — a name↔key dictionary plus a value
+codec, rather than two parallel property systems:
+
+| Spec property | Key | Type (per the table) |
+| --- | --- | --- |
+| `id` | `1` | Int |
+| `x` / `y` | `2` / `3` | Float |
+| `flip_x` / `flip_y` | `4` / `5` | Bool |
+| `rotation` | `6` | Float |
+| `editor_layer` | `20` | Int |
+| `color_channel_1` / `color_channel_2` | `21` / `22` | Int |
+| `z_layer` / `z_order` | `24` / `25` | Int |
+| `scale` | `32` | Float |
+| `scale_x` / `scale_y` | `128` / `129` | Float |
+| `groups` | `57` | `GroupList` (values dot-separated) |
+
+The table also supplies the value *encodings* §7.5 needs and doesn't yet define:
+`$GroupList` is a period-separated list, `$HSVString` is
+`<h>a<s>a<b>a<s_checked>a<b_checked>`, and text properties (`31`) are base64. It
+also shows the type system is an **inheritance hierarchy** — a `ColorTrigger`
+inherits `Trigger` inherits `Common` — so per-type property sets are real, even
+though the key *numbers* stay globally consistent.
+
+**Caveats.** It is crowdsourced and self-described as incomplete ("This data is
+incomplete, help extend it"). So it is a strong naming aid and a good source of
+value encodings, not an authority — which is exactly why the differential probe
+exists: it verifies the specific properties the mod actually ships, in the GD build
+we actually target, without depending on anyone's table being right.
+
+## Verified mappings
+
+Produced by `runDifferentialProbe()` (see "Method" above): create a scratch object,
+dump, apply exactly one change, dump, diff. Each row is confirmed **in GD 2.2081**,
+not quoted from a table.
+
+| Property | Key | Change applied |
+| --- | --- | --- |
+| `x` | `2` | `setPosition` |
+| `y` | `3` | `setPosition` |
+| `rotation` | `6` | `setRotation` |
+| `flip_x` | `4` | `setFlipX` |
+| `flip_y` | `5` | `setFlipY` |
+| `editor_layer` | `20` | `m_editorLayer` field |
+| `color_channel_1` | `21` | `m_baseColor->m_colorID` |
+| `z_layer` | `24` | `m_zLayer` field |
+| `z_order` | `25` | `m_zOrder` field |
+| `groups` | `57` | `addToGroup` |
+| `scale_x` | `128` | `m_scaleX` **field** |
+| `scale_y` | `129` | `m_scaleY` **field** |
+
+`editor_layer`, `z_layer` and `z_order` respond to **direct field writes**, which
+was worth confirming: the game could have derived them elsewhere, and a field write
+is what `modify_objects` will need for them.
+
+### The setters that silently do nothing
+
+The most useful result in this table is what is *missing* from it:
+
+| Attempted change | Result |
 | --- | --- |
-| `id` (object type) | `1` |
-| `x` | `2` |
-| `y` | `3` |
-| `flip_x` / `flip_y` | `4` / `5` |
-| `rotation` | `6` |
-| `editor_layer` | `20` (and `61` for Editor Layer 2) |
-| `color_channel_1` / `color_channel_2` | `21` / `22` |
-| `z_layer` | `24` |
-| `z_order` | `25` |
-| `groups` | `57` (integer array, values dot-separated) |
-| `scale_x` | `128` (scale Y is not in the table) |
+| `setScaleX(1.5f)` | **no change** |
+| `setScale(1.5f)` | **no change** |
+| `m_scaleX = 1.5f` | key `128` := 1.5 ✅ |
 
-That the documented names line up one-to-one with the properties §7.5 already
-chose is a strong argument for the hybrid schema: a name↔key dictionary plus a
-value-codec (arrays, HSV, base64 strings) covers both the readable interface and
-the generic escape hatch, without two parallel property systems.
+GD's serialiser reads the `m_scaleX`/`m_scaleY` **fields**, not the cocos node scale
+that `setScale*` touches. So `setScaleX` compiles, is a real API, returns nothing,
+and has no effect on the object's stored scale.
 
-**Two caveats about the reference itself.**
+This matters directly for `SPEC.md` §7.5: a `modify_objects` implementation that
+reached for `setScaleX` would report success while changing nothing, and nothing in
+the code or the type system would indicate the problem. Scale must be written via
+the fields.
 
-1. **It is stale and incomplete for our target.** The repository was archived in
-   January 2026 with its last substantive commit two years earlier, and the page
-   states plainly that 2.2 "adds a ton of new object properties" with the full set
-   living elsewhere — it links
-   [flowvix.github.io/gd-info-explorer](https://flowvix.github.io/gd-info-explorer/).
-   We target GD 2.2081, i.e. 2.2, so the modern source is the one to use, and the
-   table above should be treated as reliable for the classic keys only.
-2. **It contains at least one error**: `128` is listed twice, both as "Scale X".
-   Treat it as a strong naming aid, not an authority — which is why the samples
-   above are captured from the game rather than quoted from it.
+The same shape of trap has now appeared three times in this project — the
+unbindable `onExit`, the unpopulated `m_objectVector`, and now the ineffective
+scale setter. The common feature is an API that exists and compiles but does not do
+what its name implies, and in each case only a measurement caught it.
+
+### Not yet verified
+
+- `color_channel_2`. Writing `m_detailColor->m_colorID` produced no change, almost
+  certainly because a standard block has no detail colour (the probe guards against
+  a null `m_detailColor`). The table gives key `22` for `color_2`, but that is
+  **unconfirmed** — it needs a probe on an object type that has a secondary colour.
+- `opacity` (key `35`) is a trigger-only property, so a standard block correctly
+  shows no change. Not a failure.
 
 ## Consequences for SPEC.md §7.5
+
+Three corrections are required regardless of how that section is reworded:
+
+1. **`m_objectVector` is the wrong enumeration source.** It reported 10000 entries,
+   all null, on a level with a handful of objects. Use `getAllObjects()`.
+2. **The string mechanism cannot modify.** `GameObject::getSaveString()` is
+   read-only and there is no `setSaveString`. The string form covers reading and
+   creation (`createObjectsFromString`, `addObjectFromVector`); modifications must
+   go through setters or fields.
+3. **Scale must be written via `m_scaleX`/`m_scaleY`, not `setScale*`.** The setters
+   have no effect on the save string.
+
+And one design conclusion, now backed by measurement rather than a table: the
+verified keys line up one-to-one with the properties §7.5 already chose, and the
+vocabulary is global and additive. So a **hybrid schema** — readable names for the
+properties the LLM touches constantly, fronted over a generic numeric key map with
+a small value codec — is the right shape. The two are the same dictionary seen from
+two directions, not two competing systems.
 
 Two corrections are required regardless of how that section is reworded:
 

@@ -231,8 +231,9 @@ arc::Future<> Bridge::session(net::WebSocket socket, std::string token) {
     auto snapshot = co_await async::waitForMainThread<editor::Snapshot>(
         [] {
             // TEMPORARY (spike): capture the save-string key map from a real
-            // level. Remove with editor::dumpSaveStringSamples once captured.
+            // level. Remove with the editor:: functions once captured.
             editor::dumpSaveStringSamples();
+            editor::runDifferentialProbe();
             return editor::takeSnapshot();
         }
     );

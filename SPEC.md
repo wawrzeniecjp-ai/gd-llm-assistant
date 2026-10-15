@@ -267,7 +267,7 @@ Verified against the Geode bindings for `LevelEditorLayer`:
 | Create object | `LevelEditorLayer::get()->createObject(int key, CCPoint position, bool noUndo)` | **`noUndo = true` disables undo.** Pass `false` for undoable creation (or `true` inside the fallback bookkeeping scheme). Returns `GameObject*` (check for null). |
 | Delete object | `LevelEditorLayer::get()->removeObject(GameObject*, bool noUndo)` | Same flag semantics. |
 | Find by unique ID | `LevelEditorLayer::get()->findGameObject(int uniqueID)` | Basis of D9. Confirm unique ID stability across undo/redo (verify, S7). |
-| Enumerate | `getAllObjects()`, `m_objectVector` (`std::vector<GameObject*>`) | `m_objects` is not on `LevelEditorLayer`'s own field list; pick one source deliberately and document it. |
+| Enumerate | `getAllObjects()` (`CCArray*`, backed by `GJBaseGameLayer::m_objects`) | **Resolved in 0.7.1 by measurement.** Do **not** use `LevelEditorLayer::m_objectVector`: on a level with a handful of objects it reported 10000 entries, all null, so it is a pre-sized table, not the object collection. It also reported the same 10000 on an empty level. Triggers *are* included in `getAllObjects()`. |
 | Range query | `objectsInRect(CCRect, bool ignoreGroups)`, `objectsAtPosition(CCPoint)` | Use for `x_range`/`y_range` filters. |
 | Undo / redo | `undoLastAction()`, `redoLastAction()` | Not exposed to the LLM (D3). |
 | Undo grouping | `addToUndoList(UndoObject*, bool keepRedo)`, `addToRedoList(UndoObject*)`, `handleAction(bool undo, CCArray* undoObjects)`, `m_undoObjects`, `m_redoObjects`, `m_increaseMaxUndoRedo`, class `UndoObject` | Basis of the §6.1.5 primary path (S3). Raise `m_increaseMaxUndoRedo` for the 5000-object A2 target. |

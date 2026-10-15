@@ -55,4 +55,16 @@ matjson::Value toJson(Snapshot const& snapshot);
 /// Must be called on the main thread. Remove once the key map is captured.
 void dumpSaveStringSamples();
 
+/// TEMPORARY (spike): derives the save-string key map by differential probing.
+///
+/// For each property it creates a scratch object, dumps its save string, applies
+/// exactly one setter or field change, dumps again, and reports which keys
+/// changed. Doing this in-process is what makes verification cheap: the whole map
+/// is confirmed in a single pass, with no manual editor actions and no
+/// guesswork about which action touched which key.
+///
+/// All scratch objects are created with `noUndo` and removed afterwards, so the
+/// level is left as it was found. Must be called on the main thread.
+void runDifferentialProbe();
+
 } // namespace gdai::editor
