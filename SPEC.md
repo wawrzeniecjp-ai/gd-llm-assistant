@@ -57,15 +57,35 @@ correctly against a real editor. That is deferred, not lost.
 
 ### Options
 
-1. **Roll Geometry Dash back to 2.2081.** The standard remedy in this scene and the
-   only one that restores in-editor testing now. Steam can fetch an older build with the
-   console command `download_depot 322170 <depot_id> <manifest_id>`; the manifest id is
-   per build and must be looked up for 2.2081 (SteamDB lists them per build). Current
-   build for reference: **25909607**. Afterwards, set the game to not auto-update, or
-   Steam will repeat this on the next launch.
-2. **Wait for Geode.** Nothing to do but wait; the fix is not ours.
-3. **Continue on the unblocked work** (see the table above), and re-verify in the editor
-   once either 1 or 2 lands.
+1. **Roll Geometry Dash back to 2.2081 — TRIED, NOT AVAILABLE.** The standard remedy in
+   this scene, but Steam would not serve the older depot (build 25909607 is the current
+   one). Recorded as attempted so it is not suggested again. Third-party downgrade tools
+   exist and are not used here: they mean running an unverified binary against a game
+   install.
+2. **Wait for Geode.** The fix is not ours. See the timeline below for what that means.
+3. **Try a Geode nightly loader.** The only remaining possibility that restores in-editor
+   testing before Geode publishes a release. See below.
+4. **Continue on the unblocked work** (see the table above), and re-verify in the editor
+   once any of the above lands.
+
+### Timeline evidence (checked 2026-10-16)
+
+- **Upstream issue: `geode-sdk/geode#2222` "Geode doesnt work in 2.209"**, opened the
+  same day the update landed, labelled `bug`, `unverified`. The community noticed
+  immediately.
+- **Our installed loader is `413ac9b` ("bump ver", 2026-10-10).** Geode `main` is two
+  commits ahead at `a6b9a91`, whose subject is
+  **"disable unnecessary hooks in forward compat"** (2026-10-13, Cvolton).
+  That is the same class of change as our crash, which is *inside* a forward-compat hook
+  (`GLFWFocusCallback`).
+- Geode's own update check still reports 5.11.1 as latest, so plenty of forward-compat
+  work exists that has never been released.
+
+So the wait is plausibly **days rather than weeks**, and a nightly loader may already
+contain a relevant fix. `geode sdk install-binaries -v <VERSION>` can pin a build-time SDK
+version, but it does not install a *loader* into the game; that is the official
+installer's job, and it offers a nightly channel.
+
 
 ### Consequence for `mod.json`
 
