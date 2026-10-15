@@ -63,10 +63,51 @@ correctly against a real editor. That is deferred, not lost.
    exist and are not used here: they mean running an unverified binary against a game
    install.
 2. **Wait for Geode.** The fix is not ours. See the timeline below for what that means.
-3. **Try a Geode nightly loader.** The only remaining possibility that restores in-editor
-   testing before Geode publishes a release. See below.
+3. **Try a Geode nightly loader — TRIED, HALF-WORKING.** It fixes the crash, so the game
+   is playable again, but it still cannot load mods. See the outcome below. **The nightly
+   is installed**; the release files are backed up at
+   `%USERPROFILE%\geode-loader-backup-413ac9b`.
 4. **Continue on the unblocked work** (see the table above), and re-verify in the editor
    once any of the above lands.
+
+### Nightly attempt: outcome (measured 2026-10-16)
+
+Installed `geode-a6b9a91-win.zip` from the `nightly` pre-release. Result: **the game
+launches and runs** — the crash is gone — but **not one mod loads**, for two independent
+reasons, and both had to be found by experiment:
+
+1. **The version gate.** Every mod declares `gd.win = 2.2081`, and the loader rejects each
+   one with `This mod doesn't support this version of Geometry Dash (2.2081)` — 11 errors,
+   one per installed mod. Repackaging our mod's manifest as `2.209` (bypassing CMake's
+   check with `geode package new --binary <existing dll>`) *did* clear it: the error count
+   dropped to 10, and our mod advanced to the next failure. So the gate is real and is
+   cleared by the declaration.
+2. **The loader changed its exports.** Past the gate, the mod fails to load anyway:
+
+   ```
+   Failed to load binary for mod wawrzeniecjp.gd-ai-assistant:
+   Unable to load the DLL: ERROR_PROC_NOT_FOUND
+   The mod tried to access a function defined in another DLL, but the specified
+   function was not found.
+   ```
+
+   A DLL built against the release loader (413ac9b) cannot bind to the nightly's
+   `Geode.dll`. Repackaging the manifest does not help, because this is an import-table
+   failure at load time, not a metadata check. Resolving it would mean linking against the
+   nightly's `Geode.lib` — i.e. building against an unreleased, moving ABI.
+
+Also confirmed: **the SDK has no 2.209 bindings**, so declaring 2.209 in `mod.json` stops
+the build outright (`Mod ... is made for Geometry Dash version 2.209 but this version of
+Geode is for GD version 2.2081`).
+
+**Conclusion: waiting is the correct call, and nothing is lost by it.** When Geode
+publishes a loader that supports 2.209 *and* the SDK ships matching bindings, this is a
+rebuild-and-go — no code changes, because the blocker is neither our mod nor its design.
+In the meantime the game is playable on the nightly, which it was not before.
+
+All experimental state was reverted: `mod.json` is back to 2.2081, the third-party
+`cvolton.level-id-api` manifest was restored from a backup, and our installed `.geode` was
+rebuilt cleanly. `git status` is clean.
 
 ### Timeline evidence (checked 2026-10-16)
 
