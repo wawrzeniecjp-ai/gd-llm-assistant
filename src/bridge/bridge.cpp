@@ -15,6 +15,9 @@
 #include <iterator>
 
 #include "../editor/editor_state.hpp"
+#include "../editor/transaction.hpp"
+#include "../exec/editor_jobs.hpp"
+#include "../exec/job_queue.hpp"
 
 using namespace geode::prelude;
 
@@ -181,6 +184,18 @@ arc::Future<> sendError(
     auto payload = matjson::Value::object();
     payload["ok"] = false;
     payload["error"] = std::move(error);
+    co_await sendResponse(socket, requestId, std::move(payload));
+    co_return;
+}
+
+/// Sends a job's failure payload, which is already an `error` object carrying a
+/// code and message (see `JobOutcome::failure`).
+arc::Future<> sendResponseError(
+    net::WebSocket& socket, matjson::Value const& requestId, matjson::Value const& error
+) {
+    auto payload = matjson::Value::object();
+    payload["ok"] = false;
+    payload["error"] = error;
     co_await sendResponse(socket, requestId, std::move(payload));
     co_return;
 }
@@ -357,10 +372,9 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
     }
 
     // Events carry a null id and need no reply. Responses answer a request we
-    // issued -- the mod issues none yet (the job queue arrives in Phase 2), so
-    // these are ignored for now. Replying to them would be wrong: it would
-    // answer the sidecar's own reply to our hello, and two sides that both
-    // answer each other's replies loop without bound.
+    // issued (currently only the sidecar's reply to our hello), so they are
+    // resolved rather than answered. Replying to a reply would be wrong: two
+    // sides that both answer each other's replies loop without bound.
     //
     // Checked before normalising the id, so event frames do not trip the
     // malformed-id warning below.
@@ -370,6 +384,7 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
     }
 
     auto const requestId = normaliseRequestId(json["id"]);
+    auto const payload = json.contains("payload") ? json["payload"] : matjson::Value::object();
 
     if (type == "ping") {
         auto result = matjson::Value::object();
@@ -398,6 +413,27 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
             snapshot->objectCount, snapshot->editorLayer, snapshot->selectedCount
         );
         co_return co_await sendResult(socket, requestId, editor::toJson(*snapshot));
+    }
+
+    if (exec::isImplementedRequest(type)) {
+        // Editor mutations run through the job queue, which slices them across
+        // frames so a large request cannot stall one (SPEC.md 6.1.4, A1). The
+        // payload was already validated in `makeJob`, off the main thread; the
+        // queue then runs it and this coroutine waits for the outcome, so the
+        // socket is never touched from the main thread.
+        auto job = exec::makeJob(type, payload);
+        if (job == nullptr) {
+            co_return co_await sendError(
+                socket, requestId, "INVALID_REQUEST",
+                fmt::format("'{}' could not be prepared", type)
+            );
+        }
+        auto outcome = co_await exec::JobQueue::get().submit(std::move(job));
+        if (outcome.ok) {
+            co_return co_await sendResult(socket, requestId, std::move(outcome.payload));
+        }
+        // The job's payload is an error object with a code and message.
+        co_return co_await sendResponseError(socket, requestId, outcome.payload);
     }
 
     // Phase 2/4 handle the rest; answering with a clear error beats silence,

@@ -76,6 +76,29 @@ void TransactionManager::recordDeleted(std::string saveString) {
     }
 }
 
+bool TransactionManager::hasModified(std::int32_t uniqueId) const {
+    if (!m_hasOpen) {
+        return false;
+    }
+    return std::any_of(m_open.modified.begin(), m_open.modified.end(),
+        [uniqueId](auto const& entry) { return entry.first == uniqueId; });
+}
+
+void TransactionManager::recordModified(
+    std::int32_t uniqueId,
+    std::vector<std::pair<std::string, PropertyValue>> priorValues
+) {
+    if (!m_hasOpen) {
+        return;
+    }
+    // First touch wins: reverting must restore the state before the turn, not
+    // before the most recent of several changes to the same object.
+    if (hasModified(uniqueId)) {
+        return;
+    }
+    m_open.modified.emplace_back(uniqueId, std::move(priorValues));
+}
+
 geode::Result<matjson::Value, std::string> TransactionManager::end(std::string const& txnId) {
     if (!m_hasOpen || m_open.id != txnId) {
         return Err(fmt::format("INVALID_REQUEST: no open transaction '{}'", txnId));
@@ -88,13 +111,13 @@ geode::Result<matjson::Value, std::string> TransactionManager::end(std::string c
 
     auto summary = matjson::Value::object();
     summary["created"] = static_cast<int>(m_open.created.size());
-    summary["modified"] = 0;
+    summary["modified"] = static_cast<int>(m_open.modified.size());
     summary["deleted"] = static_cast<int>(m_open.deletedSaveStrings.size());
 
     log::info(
-        "transaction {} ended: {} created, {} deleted (undo depth {})",
-        m_open.id, m_open.created.size(), m_open.deletedSaveStrings.size(),
-        m_open.undoDepthAtEnd
+        "transaction {} ended: {} created, {} modified, {} deleted (undo depth {})",
+        m_open.id, m_open.created.size(), m_open.modified.size(),
+        m_open.deletedSaveStrings.size(), m_open.undoDepthAtEnd
     );
 
     auto result = matjson::Value::object();
@@ -174,17 +197,39 @@ geode::Result<matjson::Value, std::string> TransactionManager::revert(std::strin
         }
     }
 
+    // Prior values are written back through the same routing as the original
+    // modification, so a read -> modify -> revert round trip is symmetric.
+    auto revertedProperties = 0;
+    for (auto it = record.modified.rbegin(); it != record.modified.rend(); ++it) {
+        auto const& [uniqueId, priorValues] = *it;
+        auto* object = editor->findGameObject(uniqueId);
+        if (object == nullptr || object->m_uniqueID != uniqueId) {
+            // Gone, or the ID now belongs to a different object after a restore.
+            continue;
+        }
+        for (auto const& [name, value] : priorValues) {
+            if (writeProperty(object, name, value)) {
+                ++revertedProperties;
+            } else {
+                log::warn("revert {}: could not restore '{}' on object {}", txnId, name, uniqueId);
+            }
+        }
+    }
+
     record.reverted = true;
 
     log::info(
-        "transaction {} reverted: {} of {} creations removed, {} of {} deletions restored",
-        txnId, removed, record.created.size(), restored, record.deletedSaveStrings.size()
+        "transaction {} reverted: {} of {} creations removed, {} of {} deletions restored, "
+        "{} properties restored",
+        txnId, removed, record.created.size(), restored, record.deletedSaveStrings.size(),
+        revertedProperties
     );
 
     auto result = matjson::Value::object();
     result["reverted"] = true;
     result["removed"] = removed;
     result["restored"] = restored;
+    result["properties_restored"] = revertedProperties;
     result["object_count_before"] = before;
     result["object_count_after"] = objectCount();
     return Ok(std::move(result));

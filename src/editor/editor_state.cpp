@@ -209,7 +209,10 @@ namespace {
 
 /// Ordered (key, value) pairs from a save string, values kept as text so no
 /// float/int round-tripping can disguise a change.
-std::vector<std::pair<std::string, std::string>> parseProperties(std::string_view text) {
+///
+/// Named `splitSaveString` rather than `parseProperties` to stay distinct from
+/// the protocol-level parser in properties.hpp, which does a different job.
+std::vector<std::pair<std::string, std::string>> splitSaveString(std::string_view text) {
     std::vector<std::pair<std::string, std::string>> pairs;
     std::size_t position = 0;
     while (position < text.size()) {
@@ -323,9 +326,9 @@ void runDifferentialProbe() {
             continue;
         }
 
-        auto const before = parseProperties(object->getSaveString(editor));
+        auto const before = splitSaveString(object->getSaveString(editor));
         probe.apply(object);
-        auto const after = parseProperties(object->getSaveString(editor));
+        auto const after = splitSaveString(object->getSaveString(editor));
 
         log::info(
             "DIFF {} |{}",

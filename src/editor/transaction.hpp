@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "properties.hpp"
+
 namespace gdai::editor {
 
 /// Records what a turn changed, so it can be undone (SPEC.md 6.1.5, D2).
@@ -67,6 +69,20 @@ public:
     /// recreated. Call **before** removal, while the object is still valid.
     void recordDeleted(std::string saveString);
 
+    /// Notes properties this turn changed, with their values from before the
+    /// change, so revert can restore them.
+    ///
+    /// Prior values are recorded **once per object**: a turn that modifies the
+    /// same object three times must revert to the state before the first change,
+    /// not the second. Later calls for an already-recorded object are ignored.
+    void recordModified(
+        std::int32_t uniqueId,
+        std::vector<std::pair<std::string, PropertyValue>> priorValues
+    );
+
+    /// True if this turn has already noted a change to the given object.
+    [[nodiscard]] bool hasModified(std::int32_t uniqueId) const;
+
 private:
     TransactionManager() = default;
 
@@ -77,6 +93,9 @@ private:
         std::vector<std::int32_t> created;
         /// Save strings of removed objects, in removal order.
         std::vector<std::string> deletedSaveStrings;
+        /// Prior values per modified object, in first-touch order.
+        std::vector<std::pair<std::int32_t, std::vector<std::pair<std::string, PropertyValue>>>>
+            modified;
         /// `m_undoObjects->count()` when the turn ended. The user editing after
         /// this point makes the turn non-revertible.
         int undoDepthAtEnd = 0;
