@@ -1,0 +1,516 @@
+"""The LLM tool loop: one turn, from user message to `turn_finished` (SPEC.md 5.2).
+
+The loop is deliberately transport-agnostic. It talks to the editor through a
+narrow `EditorLink` and to the model through a `Provider`, which is what lets the
+tests drive a complete turn -- tool calls, transactions, caps, cancellation --
+without a WebSocket or a network.
+
+Transaction handling is the part worth reading carefully. SPEC.md 5.2 requires one
+transaction per turn, opened *lazily* before the first mutation and ended always.
+Lazy matters: a read-only turn that opened one would leave an empty undo entry in
+the user's history, so Ctrl+Z would appear to do nothing. "Ended always" matters
+more: an abandoned transaction stays open in the mod, and every later turn's
+`begin_transaction` then fails with `TRANSACTION_ACTIVE` -- so this is a
+correctness requirement, not tidiness. It is enforced in a `finally` and, for
+cancellation, through a shielded task, because the cleanup has to survive the
+cancellation that triggered it.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import logging
+import random
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+from . import catalog as catalog_module
+from . import tools
+from .agent_prompt import system_prompt
+from .providers.base import (
+    AssistantTurn,
+    Message,
+    Provider,
+    ProviderError,
+    ToolCall,
+    Usage,
+)
+
+log = logging.getLogger("sidecar")
+
+#: Turn statuses (SPEC.md 7.4). Named constants because they are compared against
+#: strings in tests and the UI, and a typo in a literal is silent.
+COMPLETED = "completed"
+CANCELLED = "cancelled"
+FAILED = "failed"
+INCOMPLETE = "incomplete"
+
+
+class EditorLink(Protocol):
+    """What the loop needs from the connection to the mod."""
+
+    async def request(self, type_name: str, payload: dict[str, Any] | None = None) -> Any:
+        """Send a request and await its response.
+
+        Must return an object with `ok: bool`, `result: dict | None` and
+        `error: dict | None` -- the sidecar's `Response` satisfies this. The loop
+        is written against the shape rather than the class so tests can supply a
+        fake.
+        """
+
+    async def send_event(self, type_name: str, payload: dict[str, Any]) -> None:
+        """Send an event that expects no reply."""
+
+
+@dataclass
+class ActionRecord:
+    """One entry of `turn_finished.actions` (SPEC.md 7.4).
+
+    `kind` is a tool name, not a verb: the schema pins it to the mutating tools.
+    """
+
+    kind: str
+    count: int
+    summary: str
+
+    def to_json(self) -> dict[str, Any]:
+        return {"kind": self.kind, "count": self.count, "summary": self.summary}
+
+
+@dataclass
+class TurnResult:
+    """Everything the caller needs to report the turn."""
+
+    status: str
+    text: str = ""
+    actions: list[ActionRecord] = field(default_factory=list)
+    txn_id: str | None = None
+    usage: Usage = field(default_factory=Usage)
+
+    @property
+    def actions_json(self) -> list[dict[str, Any]]:
+        return [action.to_json() for action in self.actions]
+
+
+class History:
+    """Conversation history for one session (SPEC.md 6.2.3).
+
+    Keeps only user and assistant *text*: tool calls and their results are dropped
+    once a turn ends. That is the spec's rule and it is also the right one -- a
+    stale tool result is a statement about a level state that the user has since
+    edited, and feeding it back invites the model to reason from fiction. Anything
+    it needs it can re-query.
+    """
+
+    def __init__(self, token_budget: int) -> None:
+        self._messages: list[Message] = []
+        self._token_budget = token_budget
+
+    def __len__(self) -> int:
+        return len(self._messages)
+
+    def messages(self) -> list[Message]:
+        return list(self._messages)
+
+    def append(self, user_text: str, assistant_text: str) -> None:
+        if user_text:
+            self._messages.append(Message(role="user", text=user_text))
+        if assistant_text:
+            self._messages.append(Message(role="assistant", text=assistant_text))
+        self._trim()
+
+    def clear(self) -> None:
+        self._messages.clear()
+
+    def _trim(self) -> None:
+        """Drop the oldest messages until the budget is met.
+
+        Roughly four characters per token, which is enough for a bound that exists
+        to stop unbounded growth. Whitespace is not stripped first, so the estimate
+        errs high, and an over-eager trim is better than an oversized request.
+        """
+
+        def cost(message: Message) -> int:
+            return len(message.text) // 4 + 8
+
+        total = sum(cost(message) for message in self._messages)
+        while self._messages and total > self._token_budget:
+            total -= cost(self._messages.pop(0))
+
+
+class ToolLoop:
+    """Runs one turn: model, tools, transaction, limits, result."""
+
+    def __init__(
+        self,
+        *,
+        link: EditorLink,
+        provider: Provider,
+        catalog: catalog_module.Catalog,
+        history: History,
+        max_tool_rounds: int = 10,
+        max_objects_per_turn: int = 5000,
+        turn_timeout_s: int = 120,
+        turn_token_budget: int | None = None,
+        max_retries: int = 3,
+        retry_base_s: float = 1.0,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        self._link = link
+        self._provider = provider
+        self._catalog = catalog
+        self._history = history
+        self._max_tool_rounds = max_tool_rounds
+        self._max_objects = max_objects_per_turn
+        self._timeout_s = turn_timeout_s
+        self._token_budget = turn_token_budget
+        self._max_retries = max_retries
+        self._retry_base_s = retry_base_s
+        self._sleep = sleep
+
+        # Per-turn state, reset by `run`.
+        self._turn_id = ""
+        self._message_id = ""
+        self._actions: list[ActionRecord] = []
+        self._usage = Usage()
+        self._txn_id: str | None = None
+        self._objects_used = 0
+        self._text = ""
+
+    # -- public entry point ---------------------------------------------
+
+    async def run(self, *, turn_id: str, message_id: str, user_text: str) -> TurnResult:
+        self._reset(turn_id, message_id)
+
+        try:
+            async with asyncio.timeout(self._timeout_s):
+                return await self._drive(user_text)
+        except TimeoutError:
+            log.warning("turn %s hit the %ss wall-clock limit", turn_id, self._timeout_s)
+            await self._end_transaction()
+            return self._result(
+                INCOMPLETE,
+                self._text
+                or f"Stopped after {self._timeout_s}s. Some of the work may not have been done.",
+            )
+        except asyncio.CancelledError:
+            # The cleanup has to survive the cancellation that caused it, so it
+            # runs shielded in its own task: without that, the `end_transaction`
+            # request would be cancelled mid-flight and the transaction would stay
+            # open in the mod, breaking every later turn.
+            await self._end_transaction(shielded=True)
+            raise
+        except ProviderError as exc:
+            log.warning("turn %s failed at the provider: %s", turn_id, exc)
+            await self._end_transaction()
+            return self._result(FAILED, self._failure_text(exc))
+
+    # -- the loop --------------------------------------------------------
+
+    async def _drive(self, user_text: str) -> TurnResult:
+        messages = self._history.messages()
+        messages.append(Message(role="user", text=user_text))
+
+        status = COMPLETED
+        for _round in range(self._max_tool_rounds):
+            turn = await self._complete(messages)
+            self._usage = self._usage + Usage(
+                input_tokens=turn.usage.input_tokens,
+                output_tokens=turn.usage.output_tokens,
+                tool_rounds=1,
+            )
+
+            if self._token_budget is not None and self._usage.total_tokens > self._token_budget:
+                log.warning("turn %s exceeded the token budget", self._turn_id)
+                status = INCOMPLETE
+                break
+
+            if turn.text:
+                # Interim text is sent as it arrives and again if it changes, under
+                # one message id, so the panel shows a single bubble that fills in
+                # rather than a stack of partial ones (SPEC.md 7.4).
+                self._text = turn.text
+                await self._emit_assistant_text(turn.text)
+
+            if not turn.wants_tools:
+                break
+
+            messages.append(
+                Message(role="assistant", text=turn.text, tool_calls=list(turn.tool_calls))
+            )
+
+            # Tool calls in one round run sequentially. They are not independent:
+            # a create followed by a modify of the created objects is a normal
+            # pattern, and ordering is the only thing that makes it work.
+            stop = False
+            for call in turn.tool_calls:
+                result, is_error = await self._execute(call)
+                messages.append(
+                    Message(
+                        role="tool",
+                        text=_dump_result(result),
+                        tool_call_id=call.id,
+                        is_error=is_error,
+                    )
+                )
+                if result.get("_limit_reached"):
+                    status = INCOMPLETE
+                    stop = True
+            if stop:
+                break
+        else:
+            # The `else` on a `for` runs when it completes without `break`, i.e.
+            # the round cap was reached with the model still asking for tools.
+            log.warning("turn %s hit the %s-round cap", self._turn_id, self._max_tool_rounds)
+            status = INCOMPLETE
+            self._text = self._text or (
+                f"Stopped after {self._max_tool_rounds} rounds of tool calls. "
+                "The level may be partly edited; review it before continuing."
+            )
+
+        txn_id = await self._end_transaction()
+        if not self._text:
+            self._text = self._summarise_silently(status)
+
+        # Only a completed turn becomes history. An interrupted one would be
+        # repeated as fact on the next turn, and its edits may have been reverted.
+        if status == COMPLETED:
+            self._history.append(user_text, self._text)
+
+        return self._result(status, self._text, txn_id=txn_id)
+
+    async def _complete(self, messages: list[Message]) -> AssistantTurn:
+        """Call the provider, retrying a retryable failure (SPEC.md 6.2.3)."""
+        attempt = 0
+        while True:
+            try:
+                return await self._provider.complete(
+                    system=system_prompt(), messages=messages, tools=tools.tool_specs()
+                )
+            except ProviderError as exc:
+                attempt += 1
+                if not exc.retryable or attempt > self._max_retries:
+                    raise
+                # Exponential backoff with jitter. The jitter is what stops a
+                # provider that is failing for everything from being hit by every
+                # retry at the same instant.
+                delay = self._retry_base_s * (2 ** (attempt - 1))
+                delay += random.uniform(0, self._retry_base_s)
+                log.warning(
+                    "provider call failed (attempt %d/%d), retrying in %.2fs: %s",
+                    attempt,
+                    self._max_retries,
+                    delay,
+                    exc,
+                )
+                await self._sleep(delay)
+
+    # -- tool execution --------------------------------------------------
+
+    async def _execute(self, call: ToolCall) -> tuple[dict[str, Any], bool]:
+        tool = tools.get(call.name)
+        if tool is None:
+            # A hallucinated tool name is recoverable information, not a reason to
+            # kill the turn (see `tools.unknown_tool_names`).
+            return (
+                {
+                    "error": f"unknown tool {call.name!r}",
+                    "available": list(tools.TOOLS),
+                },
+                True,
+            )
+
+        if tool.protocol_type is None:
+            return catalog_module.search_object_catalog(self._catalog, call.arguments), False
+
+        if tool.mutates_objects:
+            wanted = tool.object_count(call.arguments)
+            if self._objects_used + wanted > self._max_objects:
+                # Refused, and the turn ends: letting the model retry would just
+                # have it slice the work into pieces that each pass the check,
+                # which defeats the cap rather than enforcing it.
+                return (
+                    {
+                        "error": (
+                            f"refused: this call would take the turn to "
+                            f"{self._objects_used + wanted} objects, over the "
+                            f"{self._max_objects} limit"
+                        ),
+                        "_limit_reached": True,
+                    },
+                    True,
+                )
+
+        if tool.mutates_objects and self._txn_id is None:
+            opened, is_error = await self._begin_transaction()
+            if is_error:
+                return opened, True
+
+        response = await self._link.request(tool.protocol_type, call.arguments)
+        if not response.ok:
+            error = response.error or {}
+            return (
+                {
+                    "error": error.get("message", "the request failed"),
+                    "code": error.get("code", "INTERNAL_ERROR"),
+                },
+                True,
+            )
+
+        result = response.result if isinstance(response.result, dict) else {}
+        if tool.mutates_objects:
+            self._objects_used += tool.object_count(call.arguments)
+        if tool.is_action:
+            self._actions.append(_describe(tool.spec.name, call.arguments, result))
+        return result, False
+
+    async def _begin_transaction(self) -> tuple[dict[str, Any], bool]:
+        response = await self._link.request("begin_transaction", {"label": self._turn_id})
+        if not response.ok:
+            error = response.error or {}
+            # Most often TRANSACTION_ACTIVE, which means a previous turn leaked
+            # one. Worth saying plainly: it is a bug, and silently retrying would
+            # hide it.
+            return (
+                {
+                    "error": error.get("message", "could not open a transaction"),
+                    "code": error.get("code", "INTERNAL_ERROR"),
+                },
+                True,
+            )
+        self._txn_id = (response.result or {}).get("txn_id")
+        log.info("turn %s opened transaction %s", self._turn_id, self._txn_id)
+        return {"txn_id": self._txn_id}, False
+
+    async def _end_transaction(self, *, shielded: bool = False) -> str | None:
+        """Close the open transaction, if any. Idempotent.
+
+        Returns the transaction id, or None when there was none -- which is the
+        normal case for a read-only turn.
+        """
+        txn_id = self._txn_id
+        self._txn_id = None
+        if txn_id is None:
+            return None
+
+        async def close() -> None:
+            response = await self._link.request("end_transaction", {"txn_id": txn_id})
+            if response.ok:
+                log.info("turn %s closed transaction %s", self._turn_id, txn_id)
+            else:
+                # Loud, because an unclosed transaction blocks every later turn.
+                log.error(
+                    "turn %s could not close transaction %s: %s",
+                    self._turn_id,
+                    txn_id,
+                    (response.error or {}).get("message"),
+                )
+
+        if shielded:
+            with contextlib.suppress(Exception, asyncio.CancelledError):
+                # A short timeout inside the shield: the whole point is to finish
+                # this before the task dies, and waiting indefinitely would hang
+                # the cancellation instead.
+                await asyncio.wait_for(asyncio.shield(asyncio.ensure_future(close())), timeout=5)
+        else:
+            with contextlib.suppress(Exception):
+                await close()
+
+        return txn_id
+
+    # -- helpers ---------------------------------------------------------
+
+    def _reset(self, turn_id: str, message_id: str) -> None:
+        self._turn_id = turn_id
+        self._message_id = message_id
+        self._actions = []
+        self._usage = Usage()
+        self._txn_id = None
+        self._objects_used = 0
+        self._text = ""
+
+    def _result(self, status: str, text: str, *, txn_id: str | None = None) -> TurnResult:
+        return TurnResult(
+            status=status,
+            text=text,
+            actions=list(self._actions),
+            txn_id=txn_id,
+            usage=self._usage,
+        )
+
+    async def _emit_assistant_text(self, text: str) -> None:
+        await self._link.send_event(
+            "assistant_message",
+            {"turn_id": self._turn_id, "message_id": self._message_id, "text": text},
+        )
+
+    def _failure_text(self, error: ProviderError) -> str:
+        prefix = "The assistant could not reach the model."
+        if self._actions:
+            # Naming what already happened is the difference between "try again"
+            # and "check your level", and the user cannot tell from the panel
+            # alone whether an edit landed before the failure.
+            prefix += " Some edits were already applied; review the level."
+        return f"{prefix} {error}"
+
+    def _summarise_silently(self, status: str) -> str:
+        """A message for a turn that ended without the model saying anything."""
+        if status == CANCELLED:
+            return "Stopped."
+        if self._actions:
+            return f"Finished with {len(self._actions)} action(s)."
+        if status == INCOMPLETE:
+            return "The turn stopped before finishing. Nothing further was changed."
+        return "Done."
+
+
+def _describe(name: str, arguments: dict[str, Any], result: dict[str, Any]) -> ActionRecord:
+    """Build the user-facing summary line for one action (SPEC.md 8.9).
+
+    Counts come from the *result* where the mod reports one, because that is what
+    actually happened: a create of five objects where two ids were rejected should
+    say two, not five.
+    """
+    if name == "create_objects":
+        requested = arguments.get("objects") or []
+        count = int(result.get("count", len(requested)) or 0)
+        kinds = _object_kinds(requested)
+        detail = f" ({kinds})" if kinds else ""
+        return ActionRecord(kind=name, count=count, summary=f"Created {count} object(s){detail}")
+
+    if name == "modify_objects":
+        count = int(result.get("modified_count", len(arguments.get("targets") or [])) or 0)
+        changed = sorted(set(arguments.get("set") or {}) | set(arguments.get("delta") or {}))
+        detail = f" ({', '.join(changed)})" if changed else ""
+        return ActionRecord(kind=name, count=count, summary=f"Modified {count} object(s){detail}")
+
+    if name == "delete_objects":
+        count = int(result.get("deleted_count", len(arguments.get("targets") or [])) or 0)
+        return ActionRecord(kind=name, count=count, summary=f"Deleted {count} object(s)")
+
+    count = int(result.get("selected_count", len(arguments.get("targets") or [])) or 0)
+    return ActionRecord(kind=name, count=count, summary=f"Selected {count} object(s)")
+
+
+def _object_kinds(objects: list[Any]) -> str:
+    """A short description of the object types created, e.g. `id 8`."""
+    ids = [entry.get("id") for entry in objects if isinstance(entry, dict)]
+    unique = sorted({entry for entry in ids if isinstance(entry, int)})
+    if not unique:
+        return ""
+    if len(unique) <= 3:
+        return ", ".join(f"id {value}" for value in unique)
+    return f"{len(unique)} types"
+
+
+def _dump_result(result: dict[str, Any]) -> str:
+    """Render a tool result for the model.
+
+    JSON rather than prose: the model reads structured data more reliably, and
+    every field it needs is already named. `_limit_reached` is stripped -- it is
+    a signal to the loop, not information about the level.
+    """
+    return json.dumps({k: v for k, v in result.items() if not k.startswith("_")}, default=str)

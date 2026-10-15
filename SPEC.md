@@ -5,13 +5,76 @@
 | Field | Value |
 | --- | --- |
 | Project name | GD AI Assistant |
-| Document version | 0.9.0 |
-| Status | Draft — Phases 0-3 verified in-editor (chat panel works end to end) |
+| Document version | 0.10.0 |
+| Status | Draft — Phases 0-4 implemented. **In-editor testing blocked by the GD 2.209 update; see 0.1.** |
 | Target platform | Windows only (initial release) |
 | Target Geode version | v5.11.x (Geode SDK 5.11.1 verified locally; requires C++23). Geode v6 is WIP — see §15 Q3 |
 | Target GD version | 2.2081 |
 
-## 0.1 Changes from 0.8.0
+## 0.1 Known blocker: GD 2.209 breaks the toolchain (2026-10-16)
+
+**In-editor testing is blocked. The sidecar is not, and neither is development.**
+
+Steam pushed Geometry Dash 2.209 on 2026-10-16 at 00:11. The game now crashes during
+Geode's startup, before any mod loads, so nothing can be tested in the editor.
+
+Measured, from the Geode log and the crash dump:
+
+```
+Running Geode v5.11.1 in Geometry Dash v1791899187 (forward compatibility mode)
+Faulty Module: libcocos2d.dll
+Exception Code: c0000005 (EXCEPTION_ACCESS_VIOLATION)
+Exception Details: Failed to read from memory at 0xFFFFFFFFFFFFFFFF
+  libcocos2d.dll + 0xdd68f
+  libcocos2d.dll + 0x7a70c (cocos2d::CCEGLView::onGLFWWindowFocus + 0x4c)
+  Geode.dll + 0x16133c (GLFWFocusCallback | loader/src/platform/windows/input.cpp:693)
+```
+
+- The reported game version is the nonsense `v1791899187` (an uninitialised read):
+  Geode's version probe does not understand the new binary.
+- Geode falls back to **forward compatibility mode**, printing ten `[Forward Compat]`
+  degradations, and then faults in its own GLFW focus shim.
+- **This is Geode core, not this mod.** The faulty module is `libcocos2d.dll` and the
+  stack is entirely Geode's own input handling. The crash log records `Failed to load: 0`
+  -- all 12 mods loaded; the game died afterwards.
+- Geode's own update check reports 5.11.1 as the latest, so **no fixed loader exists yet**.
+
+### What this does and does not block
+
+| Blocked | Still available |
+| --- | --- |
+| In-editor verification of anything | All sidecar work: the tool loop, providers, catalog, session store |
+| Acceptance criteria A1, A2, A4 (frame budget, undo grouping, soak) | The whole test suite, which runs headless |
+| Phase 5 end-to-end and soak testing | Documentation, packaging and the launcher script |
+
+This is survivable in large part because of a decision already taken: SPEC.md 13 makes
+**the protocol the test seam**, on the grounds that a Geode mod cannot run headless in
+CI. That prediction has now paid for itself -- 102 sidecar tests cover the turn
+lifecycle, the transaction rules and the caps without the game being runnable at all.
+
+The gap it leaves is the one the seam cannot cover: whether the mod's own C++ behaves
+correctly against a real editor. That is deferred, not lost.
+
+### Options
+
+1. **Roll Geometry Dash back to 2.2081.** The standard remedy in this scene and the
+   only one that restores in-editor testing now. Steam can fetch an older build with the
+   console command `download_depot 322170 <depot_id> <manifest_id>`; the manifest id is
+   per build and must be looked up for 2.2081 (SteamDB lists them per build). Current
+   build for reference: **25909607**. Afterwards, set the game to not auto-update, or
+   Steam will repeat this on the next launch.
+2. **Wait for Geode.** Nothing to do but wait; the fix is not ours.
+3. **Continue on the unblocked work** (see the table above), and re-verify in the editor
+   once either 1 or 2 lands.
+
+### Consequence for `mod.json`
+
+The mod declares `"gd": { "win": "2.2081" }`. Do **not** add 2.209 until the game can
+actually be launched and the mod verified against it -- a version claim that has never
+been run is worse than an honest narrower one, because it turns a clear refusal into a
+crash.
+
+## 0.2 Changes from 0.8.0
 
 Phase 3 (chat UI) is implemented and verified end to end in the editor against the
 scripted sidecar. This entry records the measured behaviour, because most of it is
@@ -1048,10 +1111,30 @@ does.
 
 ## Phase 4 — Sidecar
 
+**Status: implemented and tested headlessly (0.10.0). In-editor verification is blocked
+by §0.1.**
+
 - WS server and auth, provider adapters, tool loop with caps, catalog, session persistence, cancellation.
 - **Exit:** scripted-provider tests pass; A5, A6.
 
+Delivered: a provider interface with Anthropic, OpenAI and scripted adapters; the tool
+loop with lazy transactions, per-turn object caps, round and token caps, a wall-clock
+timeout, bounded retry with jitter, and cancellation that closes its transaction; the
+tool schemas mapped to protocol requests; the object catalog and search tool; the system
+prompt. **102 tests pass**, and every frame either side sends is validated against
+`protocol/v1` rather than eyeballed.
+
+Known gaps: session persistence to SQLite (SPEC.md 6.2.2) is not implemented, so history
+lives in memory and is lost when the sidecar restarts. The catalog is a two-entry seed
+by design -- an unverified id would make the model place the wrong object silently -- and
+needs a real source before it is useful (SPEC.md 15). Streaming (`assistant_message_delta`)
+is unused: the protocol supports it, the adapters do not emit it, and the mod renders
+whole messages.
+
 ## Phase 5 — Integration and Polish
+
+**Blocked on §0.1** for everything that requires the editor to run. The parts that do not
+-- documentation, packaging, the launcher script -- can proceed.
 
 - End-to-end user flow, error cases, soak test (A4), documentation, release packaging, README data-disclosure text, launcher script.
 - Confirm Geode index policy compliance for network-using / LLM-integrated mods before release.

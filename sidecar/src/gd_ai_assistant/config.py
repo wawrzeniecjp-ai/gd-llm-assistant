@@ -86,8 +86,31 @@ class SidecarConfig(BaseSettings):
     # Bounded by the mod's hard maximum: the mod's caps are authoritative (D10).
     max_objects_per_turn: int = Field(default=5000, ge=1, le=20000)
     turn_token_budget: int | None = None
-    turn_timeout_s: int = Field(default=120, ge=1)
+    # Fractional so that tests can set a timeout small enough to exercise the
+    # timeout path without a slow test; a whole-second floor would make the
+    # shortest meaningful case a one-second wait.
+    turn_timeout_s: float = Field(default=120.0, ge=0.05)
     history_token_budget: int = Field(default=8000, ge=1)
+
+    # How long a request to the mod may take before it is treated as failed.
+    #
+    # This field was referenced by the request path from the start but never
+    # declared, which went unnoticed because every call site passed an explicit
+    # timeout: the attribute was only read when one was omitted, so the first
+    # production request would have raised `AttributeError` on a config object.
+    # Fixed here rather than by adding a default at the call site, because a
+    # timeout is a setting (SPEC.md 9.2) and belongs with the others.
+    request_timeout_s: int = Field(default=30, ge=1)
+
+    # Optional extra object ids to merge over the built-in catalog seed, so the
+    # catalog can be extended without editing the package (SPEC.md 6.2.3).
+    catalog_path: Path | None = None
+
+    # Retries for a *retryable* provider failure, i.e. 429 and 5xx (SPEC.md 6.2.3).
+    # Zero disables the retry loop entirely, which is what the tests use so that a
+    # failure case does not spend the backoff waiting to fail.
+    provider_max_retries: int = Field(default=3, ge=0, le=10)
+    provider_retry_base_s: float = Field(default=1.0, ge=0.0, le=30.0)
 
     # --- Persistence / logging ----------------------------------------
     session_dir: Path = Path("./sessions")
@@ -109,13 +132,11 @@ class SidecarConfig(BaseSettings):
             )
         return self
 
-    @property
-    def is_configured(self) -> bool:
-        """False makes the sidecar report `state: needs_setup` after `hello` (SPEC.md 7.2)."""
-        # The scripted provider is configured by definition: it needs no key and
-        # no model, so demanding them would report `needs_setup` for a provider
-        # that is perfectly able to answer. Requiring them "for consistency"
-        # would make the fake sidecar unusable without dummy values.
-        if self.llm_provider == "scripted":
-            return True
-        return bool(self.api_key and self.model and self.llm_provider)
+    # NOTE: there is deliberately no `is_configured` property here.
+    #
+    # There used to be one, and it was a second copy of the readiness rule that
+    # disagreed with the real one: it demanded a `model`, while
+    # `providers.create_provider` falls back to a provider default, so a config
+    # with a key and no model read as "not configured" while the sidecar happily
+    # served turns. Readiness is now decided in exactly one place -- whether a
+    # provider can be constructed -- and the handshake asks that instead.

@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from gd_ai_assistant.auth import load_or_create_token, token_matches
 from gd_ai_assistant.config import SidecarConfig
+from gd_ai_assistant.providers import ProviderUnavailable, create_provider
 from gd_ai_assistant.redact import REDACTED, redact, redact_value
 
 # --- token file (7.2) -------------------------------------------------
@@ -83,15 +84,34 @@ def test_non_loopback_bind_allowed_only_with_override() -> None:
 
 # --- setup state (7.2, 9.2) -------------------------------------------
 
+# Readiness is decided by `create_provider`, not by inspecting config fields.
+# These assertions used to test a `config.is_configured` property, which was a
+# second copy of the same rule and disagreed with this one: it demanded a `model`,
+# while the factory falls back to a provider default. Two answers to "is the
+# sidecar ready" is one too many, so the property is gone and these test the
+# authority the handshake actually consults.
+
 
 def test_sidecar_reports_needs_setup_without_credentials() -> None:
-    """No key/model means `state: needs_setup`, not a failure to start (A6)."""
-    assert SidecarConfig().is_configured is False
+    """No provider means `state: needs_setup`, not a failure to start (A6)."""
+    with pytest.raises(ProviderUnavailable):
+        create_provider(SidecarConfig())
 
 
-def test_sidecar_is_configured_with_provider_key_and_model() -> None:
+def test_a_provider_is_constructible_with_key_and_model() -> None:
     config = SidecarConfig(llm_provider="anthropic", api_key="sk-ant-test", model="a-current-model")
-    assert config.is_configured is True
+    assert create_provider(config).name == "anthropic"
+
+
+def test_the_scripted_provider_needs_no_credentials() -> None:
+    """The fake provider must be usable with nothing configured, or it cannot
+    serve as the tests' vehicle (SPEC.md 13)."""
+    assert create_provider(SidecarConfig(llm_provider="scripted")).name == "scripted"
+
+
+def test_a_provider_requires_a_key_even_with_a_model() -> None:
+    with pytest.raises(ProviderUnavailable, match="api_key"):
+        create_provider(SidecarConfig(llm_provider="anthropic", model="a-current-model"))
 
 
 def test_objects_per_turn_cannot_exceed_mod_hard_maximum() -> None:

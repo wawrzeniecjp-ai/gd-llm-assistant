@@ -9,9 +9,11 @@ Implements the connection lifecycle:
 5. Reply with the `hello` result and push `history`.
 6. Issue requests to the mod and correlate replies by `id` (7.3), with a
    per-request timeout.
+7. Run the LLM tool loop for each `user_message` (SPEC.md 5.2, 6.2.3).
 
-The LLM tool loop, transactions and the editor request set beyond `ping` /
-`get_editor_state` are Phase 4 work and are deliberately absent here.
+The turn itself lives in `agent.ToolLoop`; this module owns the transport and the
+event sequence around it. That split is what lets the loop be tested against a
+fake editor link and a scripted provider, with no WebSocket involved.
 """
 
 from __future__ import annotations
@@ -29,9 +31,10 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request
 from websockets.http11 import Response as HttpResponse
 
-from . import __version__, protocol, scripted
+from . import __version__, agent, catalog, protocol
 from .auth import load_or_create_token, token_matches
 from .config import SidecarConfig
+from .providers import Provider, ProviderUnavailable, create_provider
 
 log = logging.getLogger("sidecar")
 
@@ -76,6 +79,25 @@ class SidecarServer:
         self._turn_id: str | None = None
         self._next_turn = 0
 
+        # Built once at construction rather than per turn, so a configuration
+        # problem is reported at startup instead of on the user's first message.
+        # A missing provider is not fatal -- the handshake reports `needs_setup`
+        # and the panel explains it (SPEC.md 8.8, A6).
+        self._provider: Provider | None = None
+        self._setup_detail: str | None = None
+        try:
+            self._provider = create_provider(config)
+        except ProviderUnavailable as exc:
+            self._setup_detail = str(exc)
+            log.warning("no provider configured: %s", exc)
+
+        self._catalog = catalog.load_catalog(
+            str(config.catalog_path) if config.catalog_path else None
+        )
+        # One history per level session, replaced when the level key changes.
+        self._history = agent.History(config.history_token_budget)
+        self._history_key: str | None = None
+
     # -- connection lifecycle -----------------------------------------
 
     async def rejects_origin(
@@ -118,7 +140,29 @@ class SidecarServer:
             return
 
         log.info("client ready for level %r", level_key)
-        await self._send_event(websocket, "history", {"messages": []})
+
+        # A new level means a new session, and SPEC.md 6.2.5 says panel state
+        # resets with it. Conversation history is part of that: carrying it across
+        # levels would have the model discussing a level the user is no longer in.
+        if self._history_key != level_key:
+            self._history.clear()
+            self._history_key = level_key
+
+        history_messages = self._history.messages()
+        await self._send_event(
+            websocket,
+            "history",
+            {
+                "messages": [
+                    # Only user and assistant text is kept (see `agent.History`),
+                    # so this is the whole transcript as far as the panel is
+                    # concerned. `ts` is required by the schema; the store does not
+                    # date messages yet, so it is zero rather than a plausible lie.
+                    {"role": message.role, "text": message.text, "ts": 0}
+                    for message in history_messages
+                ]
+            },
+        )
 
         # The read loop must already be running before we issue any request:
         # otherwise the reply would sit in the socket with nothing to dispatch
@@ -279,12 +323,8 @@ class SidecarServer:
             await websocket.close(CLOSE_PROTOCOL_MISMATCH, "protocol version mismatch")
             return None
 
-        state = "ready" if self.config.is_configured else "needs_setup"
-        detail = (
-            None
-            if self.config.is_configured
-            else "No API key configured. Set it in the sidecar config and restart."
-        )
+        state = "ready" if self._provider is not None else "needs_setup"
+        detail = self._setup_detail
 
         await self._send_response(
             websocket,
@@ -295,7 +335,7 @@ class SidecarServer:
                 "sidecar_version": __version__,
                 "state": state,
                 "detail": detail,
-                "history_count": 0,
+                "history_count": len(self._history),
             },
         )
         client = payload.get("client") or {}
@@ -404,9 +444,11 @@ class SidecarServer:
             )
             return
 
-        if self.config.llm_provider != "scripted":
-            # The real tool loop is Phase 4. Answering with a clear failure beats
-            # leaving the panel in its thinking state until some timeout.
+        if self._provider is None:
+            # Reaching here means the handshake already reported `needs_setup`, so
+            # the panel is showing the setup message and the input is disabled. A
+            # turn that slipped through anyway gets an explicit refusal rather
+            # than silence, and no request reaches a provider (A6).
             turn_id = self._allocate_turn_id()
             await self._send_event(
                 websocket, "turn_started", {"turn_id": turn_id, "message_id": f"a-{turn_id}"}
@@ -416,10 +458,7 @@ class SidecarServer:
                 "system_message",
                 {
                     "level": "error",
-                    "text": (
-                        f"Provider {self.config.llm_provider!r} is not implemented yet; "
-                        "set llm_provider=scripted to exercise the panel."
-                    ),
+                    "text": self._setup_detail or "No LLM provider is configured.",
                 },
             )
             await self._finish_turn(websocket, turn_id, status="failed", actions=[])
@@ -427,7 +466,7 @@ class SidecarServer:
 
         self._turn_id = self._allocate_turn_id()
         self._turn_task = asyncio.create_task(
-            self._run_scripted_turn(websocket, self._turn_id, text),
+            self._run_turn(websocket, self._turn_id, text),
             name=f"sidecar-turn-{self._turn_id}",
         )
 
@@ -435,9 +474,13 @@ class SidecarServer:
         self._next_turn += 1
         return f"t-{self._next_turn}"
 
-    async def _run_scripted_turn(
-        self, websocket: ServerConnection, turn_id: str, text: str
-    ) -> None:
+    async def _run_turn(self, websocket: ServerConnection, turn_id: str, text: str) -> None:
+        """Run the tool loop and report it as protocol events (SPEC.md 5.2).
+
+        The event sequence lives here rather than in the loop so that every exit
+        path -- completed, failed, cancelled -- sends exactly one `turn_finished`,
+        which is what the panel needs to leave its thinking state.
+        """
         message_id = f"a-{turn_id}"
         try:
             await self._send_event(
@@ -446,27 +489,41 @@ class SidecarServer:
                 {"turn_id": turn_id, "message_id": message_id},
             )
 
-            delay_ms = self.config.scripted_turn_delay_ms
-            if delay_ms:
-                # The only await point, and therefore the only place a
-                # `cancel_turn` can land. That is deliberate: the scripted
-                # provider exists to test cancellation, and a turn that could not
-                # be interrupted would test nothing.
-                await asyncio.sleep(delay_ms / 1000)
-
-            turn = scripted.plan_turn(text)
-            await self._send_event(
-                websocket,
-                "assistant_message",
-                {"turn_id": turn_id, "message_id": message_id, "text": turn.text},
+            loop = agent.ToolLoop(
+                link=self,
+                provider=self._provider,
+                catalog=self._catalog,
+                history=self._history,
+                max_tool_rounds=self.config.max_tool_rounds,
+                max_objects_per_turn=self.config.max_objects_per_turn,
+                turn_timeout_s=self.config.turn_timeout_s,
+                turn_token_budget=self.config.turn_token_budget,
+                max_retries=self.config.provider_max_retries,
+                retry_base_s=self.config.provider_retry_base_s,
             )
+            result = await loop.run(turn_id=turn_id, message_id=message_id, user_text=text)
+
+            if result.text:
+                # Sent last as well as any interim text, so the panel's final bubble
+                # is the complete answer rather than whatever arrived mid-turn.
+                await self._send_event(
+                    websocket,
+                    "assistant_message",
+                    {"turn_id": turn_id, "message_id": message_id, "text": result.text},
+                )
+
             await self._finish_turn(
                 websocket,
                 turn_id,
-                status="completed",
-                actions=[action.to_json() for action in turn.actions],
+                status=result.status,
+                actions=result.actions_json,
+                txn_id=result.txn_id,
+                usage=result.usage.to_json(),
             )
         except asyncio.CancelledError:
+            # The loop has already closed its transaction by the time this runs
+            # (it re-raises only after a shielded cleanup), so reporting the
+            # cancellation is all that is left.
             await self._finish_turn(websocket, turn_id, status="cancelled", actions=[])
             raise
         finally:
@@ -481,16 +538,20 @@ class SidecarServer:
         *,
         status: str,
         actions: list[dict],
+        txn_id: str | None = None,
+        usage: dict[str, int] | None = None,
     ) -> None:
         """Send `turn_finished`, tolerating a socket that has already gone."""
-        payload = {
+        payload: dict[str, Any] = {
             "turn_id": turn_id,
             "status": status,
             "actions": actions,
-            # No editor transaction was opened by the scripted provider, so this
-            # is genuinely null rather than unknown (SPEC.md 7.4).
-            "txn_id": None,
+            # Null when the turn never mutated anything, which is the normal case
+            # for a read-only turn: the panel must not offer Revert for it.
+            "txn_id": txn_id,
         }
+        if usage is not None:
+            payload["usage"] = usage
         try:
             await self._send_event(websocket, "turn_finished", payload)
         except ConnectionClosed:
@@ -556,6 +617,20 @@ class SidecarServer:
         }
         await websocket.send(json.dumps(frame))
 
+    async def send_event(self, type_name: str, payload: dict[str, Any]) -> None:
+        """Public event send, for `agent.ToolLoop`.
+
+        Wraps `_send_event` so the loop never touches the socket handle directly.
+        Missing client is not an error here: the loop may finish a turn just as the
+        editor closes, and the events it sends at that point have nobody to reach.
+        """
+        websocket = self._client
+        if websocket is None:
+            log.debug("dropping %s event: no client connected", type_name)
+            return
+        with contextlib.suppress(ConnectionClosed):
+            await self._send_event(websocket, type_name, payload)
+
     async def _send_event(self, websocket: ServerConnection, type_name: str, payload: dict) -> None:
         await websocket.send(json.dumps({"type": type_name, "id": None, "payload": payload}))
 
@@ -568,8 +643,13 @@ class SidecarServer:
             self.config.ws_port,
             protocol.PROTOCOL_VERSION,
         )
-        if not self.config.is_configured:
-            log.warning("no LLM configured; the panel will show the needs_setup state")
+        if self._provider is None:
+            log.warning(
+                "no provider configured; the panel will show needs_setup: %s",
+                self._setup_detail,
+            )
+        else:
+            log.info("provider ready: %s", self._provider.name)
 
         async with serve(
             self.handler,
