@@ -21,6 +21,29 @@ using namespace geode::prelude;
 namespace gdai::bridge {
 namespace {
 
+/// Developer probes run at most once per game session.
+///
+/// They are diagnostic tools, not runtime code, and two of them mutate the level
+/// (one clears the undo stack). Re-running them on every editor open would
+/// repeatedly disturb the level and the user's undo history for no benefit, so
+/// the first editor open triggers them and later ones do not. Restart the game
+/// to re-run.
+bool g_probesRan = false;
+
+void runDeveloperProbesOnce() {
+    if (g_probesRan) {
+        return;
+    }
+    g_probesRan = true;
+
+    log::info("developer probes: running (restart the game to run them again)");
+    editor::dumpSaveStringSamples();
+    editor::runDifferentialProbe();
+    editor::runUndoProbe();
+    editor::runUndoShapeProbe();
+    log::info("developer probes: done");
+}
+
 /// How long a single receive may block before the loop re-checks the stop flag.
 ///
 /// A bare blocking receive would make `stop()` wait for the sidecar to send
@@ -241,14 +264,11 @@ arc::Future<> Bridge::session(net::WebSocket socket, std::string token) {
     // Read the level identity on the main thread, for the hello payload.
     auto snapshot = co_await async::waitForMainThread<editor::Snapshot>(
         [] {
-            // Developer probes are opt-in: they print level content to the
-            // local Geode log, which SPEC.md 12 treats as data exposure, so they
-            // must never run in a normal session.
+            // Developer probes are opt-in (and one-shot): they print object data
+            // to the local Geode log, which SPEC.md 12 treats as data exposure,
+            // so they must never run in a normal session.
             if (Mod::get()->getSettingValue<bool>("debug-probe")) {
-                editor::dumpSaveStringSamples();
-                editor::runDifferentialProbe();
-                editor::runUndoProbe();
-                editor::runUndoShapeProbe();
+                runDeveloperProbesOnce();
             }
             return editor::takeSnapshot();
         }
