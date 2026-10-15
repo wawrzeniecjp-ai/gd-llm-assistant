@@ -28,6 +28,7 @@ add_library(${PROJECT_NAME} SHARED
     src/exec/job_queue.cpp
     src/net/sha1.cpp
     src/net/websocket.cpp
+    src/ui/chat_panel.cpp
 )
 
 setup_geode_mod(${PROJECT_NAME})

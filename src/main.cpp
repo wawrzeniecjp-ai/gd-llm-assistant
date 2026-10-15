@@ -1,9 +1,11 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/LevelEditorLayer.hpp>
+#include <Geode/ui/GeodeUI.hpp>
 
 #include "bridge/bridge.hpp"
 #include "exec/job_queue.hpp"
 #include "net/sha1.hpp"
+#include "ui/chat_panel.hpp"
 
 using namespace geode::prelude;
 
@@ -24,7 +26,67 @@ double frameBudgetMs() {
 /// True while the drain loop should keep re-arming itself.
 bool g_draining = false;
 
+/// The panel for the currently open editor, or null if none is attached.
+///
+/// Deliberately a raw pointer held for exactly as long as the editor is open:
+/// the panel is owned by the editor UI node, so letting it outlive the editor
+/// would dangle. `detachPanel` is called from the same place that notices the
+/// editor is gone.
+gdai::ui::ChatPanel* g_panel = nullptr;
+
 void armDrain();
+
+/// Creates the panel once the editor UI exists, and returns it.
+///
+/// The panel cannot be built in `LevelEditorLayer::init` because `m_editorUI` is
+/// not assigned yet at that point, so this is polled from the drain loop until it
+/// becomes available.
+gdai::ui::ChatPanel* attachPanel(LevelEditorLayer* editor) {
+    if (g_panel) {
+        return g_panel;
+    }
+    if (!editor || !editor->m_editorUI) {
+        return nullptr;
+    }
+
+    auto panel = gdai::ui::ChatPanel::create();
+    if (!panel) {
+        log::error("panel: creation failed");
+        return nullptr;
+    }
+
+    auto winSize = cocos2d::CCDirector::sharedDirector()->getWinSize();
+    panel->setPosition({
+        winSize.width - panel->getContentSize().width - 8.f,
+        8.f,
+    });
+
+    // Above the editor's own chrome so its controls are reachable, but the
+    // panel's touch priority (not this z-order) is what actually decides routing.
+    editor->m_editorUI->addChild(panel, 1000);
+    g_panel = panel;
+
+    log::info(
+        "panel: attached to editor UI at ({}, {}), win size {}x{}",
+        panel->getPositionX(), panel->getPositionY(), winSize.width, winSize.height
+    );
+    return g_panel;
+}
+
+void detachPanel() {
+    if (!g_panel) return;
+    g_panel->removeFromParent();
+    g_panel = nullptr;
+    log::info("panel: detached");
+}
+
+void togglePanel() {
+    if (g_panel) {
+        g_panel->toggle();
+    } else {
+        log::warn("panel: toggle requested with no editor open");
+    }
+}
 
 /// Runs one drain, then re-arms for the next frame.
 ///
@@ -49,10 +111,13 @@ void armDrain() {
             return;
         }
         // The editor closing ends the loop; nothing left to drain work for.
-        if (LevelEditorLayer::get() == nullptr) {
+        auto editor = LevelEditorLayer::get();
+        if (editor == nullptr) {
             g_draining = false;
+            detachPanel();
             return;
         }
+        attachPanel(editor);
         gdai::exec::JobQueue::get().drain(frameBudgetMs());
         armDrain();
     });
@@ -109,6 +174,7 @@ class $modify(EditorBridgeHook, LevelEditorLayer) {
 /// polling, and Geode's async-runtime shutdown blocked on it, which showed up as
 /// a 5-10 second hang on exit.
 $on_game(Exiting) {
+    detachPanel();
     gdai::bridge::Bridge::get().onGameExiting();
 }
 
@@ -123,4 +189,18 @@ $on_mod(Loaded) {
         return;
     }
     log::info("SHA-1 self-test passed");
+
+    // Toggle the panel (SPEC.md 8.6). Fires on the game's input thread, which is
+    // the main thread, so touching the scene graph here is safe. `repeat` is
+    // filtered so holding the key does not flicker the panel.
+    listenForKeybindSettingPresses(
+        "toggle-chat",
+        [](Keybind const&, bool down, bool repeat, double) {
+            if (down && !repeat) {
+                togglePanel();
+            }
+        }
+    );
+
+    log::info("panel: listening for the 'toggle-chat' keybind");
 }
