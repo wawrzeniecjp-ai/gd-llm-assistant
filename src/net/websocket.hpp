@@ -5,6 +5,9 @@
 #include <arc/net/TcpStream.hpp>
 
 #include <cstdint>
+#include <atomic>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 
@@ -36,6 +39,21 @@ using geode::Ok;
 ///
 /// Threading: every method is a coroutine and must be awaited on the async
 /// runtime. Nothing here touches Cocos2d or GD objects (SPEC.md 6.1.3).
+///
+/// **A receive must never be cancelled.** This is not a style preference; it is
+/// the one rule that keeps the stream parseable, and violating it cost a day.
+/// `receiveText` is a multi-await operation that keeps its progress in locals
+/// (`readMessage` reads a 2-byte header, then the extended length, then the
+/// payload) and that answers pings by *writing* to the socket. Destroying it
+/// midway therefore does two things: it discards the bytes already consumed from
+/// `m_buffer`, so the next call reads a payload byte as a frame header, and if
+/// the cancellation lands during the pong write it leaves a *partial frame* on
+/// the wire, which desynchronises the peer permanently. The symptom was the
+/// sidecar closing with "keepalive ping timeout" two minutes into every session,
+/// which looks like a network fault and is not one.
+///
+/// Use `forceClose` to end a session instead of cancelling a receive: shutting
+/// the stream down makes the pending read fail, which is a clean exit.
 class WebSocket {
 public:
     /// Connects and performs the opening handshake. `url` is `ws://host:port[/path]`.
@@ -45,12 +63,20 @@ public:
     arc::Future<Result<>> sendText(std::string_view text);
 
     /// Receives one complete text message, transparently answering pings and
-    /// reassembling fragmented frames.
+    /// reassembling fragmented frames. See the class comment: never cancel this.
     arc::Future<Result<std::string>> receiveText();
 
     /// Sends a close frame. Does not wait for the peer's close, so it is
     /// safe to call from a cleanup path.
     arc::Future<Result<>> close(std::uint16_t code = 1000, std::string_view reason = {});
+
+    /// Shuts the underlying stream down, causing any pending receive to fail.
+    ///
+    /// This is how a session is ended from outside its receive loop. Idempotent,
+    /// and safe to call from a thread other than the one awaiting the receive,
+    /// which is the point: the callers that need it (a watchdog noticing the
+    /// editor closed, the game exiting) are not the receive loop.
+    void forceClose();
 
     WebSocket(WebSocket&&) noexcept = default;
     WebSocket& operator=(WebSocket&&) noexcept = default;
@@ -74,6 +100,31 @@ private:
 
     arc::TcpStream m_stream;
     std::string m_buffer;
+
+    /// Cross-thread state, behind a pointer so that `WebSocket` stays movable.
+    ///
+    /// A `std::mutex` member would implicitly delete the move constructor, and
+    /// `connect` has to return the socket by value inside a `Result`. Indirection
+    /// is the cheap way out; nothing here is hot enough for an extra dereference
+    /// to matter.
+    struct Shared {
+        /// Serialises writes. Two coroutines can be sending at once -- the
+        /// session loop answering a request, and the watchdog sending
+        /// `editor_closed` -- and interleaving two `sendAll` calls would put a
+        /// partial frame on the wire, which is the failure mode this whole file
+        /// now exists to avoid.
+        ///
+        /// Held across the send's own await. That is deliberate: the lock's
+        /// purpose is to keep whole frames contiguous. Contention is rare and
+        /// each send is small, so the wait is short, but it does mean a send must
+        /// never grow into a long operation.
+        std::mutex sendMutex;
+
+        /// Set by `forceClose` (and by `close`) so repeated calls are harmless.
+        std::atomic<bool> closed { false };
+    };
+
+    std::shared_ptr<Shared> m_shared { std::make_shared<Shared>() };
 };
 
 } // namespace gdai::net

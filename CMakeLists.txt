@@ -29,6 +29,7 @@ add_library(${PROJECT_NAME} SHARED
     src/net/sha1.cpp
     src/net/websocket.cpp
     src/ui/chat_panel.cpp
+    src/ui/panel_host.cpp
 )
 
 setup_geode_mod(${PROJECT_NAME})

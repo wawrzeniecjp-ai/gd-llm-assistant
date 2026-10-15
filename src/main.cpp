@@ -5,7 +5,7 @@
 #include "bridge/bridge.hpp"
 #include "exec/job_queue.hpp"
 #include "net/sha1.hpp"
-#include "ui/chat_panel.hpp"
+#include "ui/panel_host.hpp"
 
 using namespace geode::prelude;
 
@@ -26,63 +26,11 @@ double frameBudgetMs() {
 /// True while the drain loop should keep re-arming itself.
 bool g_draining = false;
 
-/// The panel for the currently open editor, or null if none is attached.
-///
-/// Deliberately a raw pointer held for exactly as long as the editor is open:
-/// the panel is owned by the editor UI node, so letting it outlive the editor
-/// would dangle. `detachPanel` is called from the same place that notices the
-/// editor is gone.
-gdai::ui::ChatPanel* g_panel = nullptr;
-
 void armDrain();
 
-/// Creates the panel once the editor UI exists, and returns it.
-///
-/// The panel cannot be built in `LevelEditorLayer::init` because `m_editorUI` is
-/// not assigned yet at that point, so this is polled from the drain loop until it
-/// becomes available.
-gdai::ui::ChatPanel* attachPanel(LevelEditorLayer* editor) {
-    if (g_panel) {
-        return g_panel;
-    }
-    if (!editor || !editor->m_editorUI) {
-        return nullptr;
-    }
-
-    auto panel = gdai::ui::ChatPanel::create();
-    if (!panel) {
-        log::error("panel: creation failed");
-        return nullptr;
-    }
-
-    auto winSize = cocos2d::CCDirector::sharedDirector()->getWinSize();
-    panel->setPosition({
-        winSize.width - panel->getContentSize().width - 8.f,
-        8.f,
-    });
-
-    // Above the editor's own chrome so its controls are reachable, but the
-    // panel's touch priority (not this z-order) is what actually decides routing.
-    editor->m_editorUI->addChild(panel, 1000);
-    g_panel = panel;
-
-    log::info(
-        "panel: attached to editor UI at ({}, {}), win size {}x{}",
-        panel->getPositionX(), panel->getPositionY(), winSize.width, winSize.height
-    );
-    return g_panel;
-}
-
-void detachPanel() {
-    if (!g_panel) return;
-    g_panel->removeFromParent();
-    g_panel = nullptr;
-    log::info("panel: detached");
-}
-
 void togglePanel() {
-    if (g_panel) {
-        g_panel->toggle();
+    if (auto panel = gdai::ui::PanelHost::get().attach(LevelEditorLayer::get())) {
+        panel->toggle();
     } else {
         log::warn("panel: toggle requested with no editor open");
     }
@@ -102,6 +50,9 @@ void togglePanel() {
 /// happens to call -- which was the other problem, since hooking
 /// `GJBaseGameLayer::update` and `LevelEditorLayer::postUpdate` both installed
 /// and neither was ever invoked.
+///
+/// The same loop attaches the panel, because `LevelEditorLayer::init` runs
+/// before `m_editorUI` is assigned and so cannot do it.
 void armDrain() {
     if (!g_draining) {
         return;
@@ -114,10 +65,10 @@ void armDrain() {
         auto editor = LevelEditorLayer::get();
         if (editor == nullptr) {
             g_draining = false;
-            detachPanel();
+            gdai::ui::PanelHost::get().detach();
             return;
         }
-        attachPanel(editor);
+        gdai::ui::PanelHost::get().attach(editor);
         gdai::exec::JobQueue::get().drain(frameBudgetMs());
         armDrain();
     });
@@ -174,7 +125,7 @@ class $modify(EditorBridgeHook, LevelEditorLayer) {
 /// polling, and Geode's async-runtime shutdown blocked on it, which showed up as
 /// a 5-10 second hang on exit.
 $on_game(Exiting) {
-    detachPanel();
+    gdai::ui::PanelHost::get().detach();
     gdai::bridge::Bridge::get().onGameExiting();
 }
 
@@ -201,6 +152,17 @@ $on_mod(Loaded) {
             }
         }
     );
+
+    // The panel and the bridge do not know about each other: this is the only
+    // place they are wired, which keeps the UI free of transport details and the
+    // bridge free of Cocos. Registered here rather than at panel attach because
+    // this event fires long before any editor is open.
+    gdai::ui::PanelHost::get().setSubmitHandler([](std::string text) {
+        gdai::bridge::Bridge::get().sendUserMessage(std::move(text));
+    });
+    gdai::ui::PanelHost::get().setCancelHandler([] {
+        gdai::bridge::Bridge::get().sendCancelTurn();
+    });
 
     log::info("panel: listening for the 'toggle-chat' keybind");
 }

@@ -51,12 +51,22 @@ class SidecarConfig(BaseSettings):
     )
 
     # --- LLM provider -------------------------------------------------
-    llm_provider: Literal["anthropic", "openai", "openai_compatible"] | None = None
+    # `scripted` is a development provider (SPEC.md 13): it replays a
+    # deterministic turn with no network, no API key and no cost, which is what
+    # makes the Phase 3 exit criterion -- "panel works end-to-end against the
+    # fake sidecar" -- testable, and what the cancellation and error paths can be
+    # exercised against in Phase 4.
+    llm_provider: Literal["anthropic", "openai", "openai_compatible", "scripted"] | None = None
     api_key: str | None = None
     model: str | None = None
     base_url: str | None = None
     max_tokens: int = 4096
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+
+    # How long the scripted provider pretends to think before answering. Long
+    # enough to see the thinking indicator, short enough not to make the
+    # in-editor test cycle tedious. Tests set it to 0.
+    scripted_turn_delay_ms: int = Field(default=600, ge=0, le=30000)
 
     # --- Transport ----------------------------------------------------
     # `allow_non_loopback` must precede `ws_host` only if the check were a
@@ -102,4 +112,10 @@ class SidecarConfig(BaseSettings):
     @property
     def is_configured(self) -> bool:
         """False makes the sidecar report `state: needs_setup` after `hello` (SPEC.md 7.2)."""
+        # The scripted provider is configured by definition: it needs no key and
+        # no model, so demanding them would report `needs_setup` for a provider
+        # that is perfectly able to answer. Requiring them "for consistency"
+        # would make the fake sidecar unusable without dummy values.
+        if self.llm_provider == "scripted":
+            return True
         return bool(self.api_key and self.model and self.llm_provider)

@@ -29,7 +29,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request
 from websockets.http11 import Response as HttpResponse
 
-from . import __version__, protocol
+from . import __version__, protocol, scripted
 from .auth import load_or_create_token, token_matches
 from .config import SidecarConfig
 
@@ -68,6 +68,13 @@ class SidecarServer:
         # disjoint prefixes (m- / s-) so an id is unambiguous in logs (7.3).
         self._pending: dict[str, asyncio.Future[Response]] = {}
         self._next_request_id = 0
+
+        # The turn currently running, if any. The protocol has no request to
+        # await here: `user_message` is an event, and the answer arrives as a
+        # sequence of events, so the turn owns a task rather than a future.
+        self._turn_task: asyncio.Task[None] | None = None
+        self._turn_id: str | None = None
+        self._next_turn = 0
 
     # -- connection lifecycle -----------------------------------------
 
@@ -125,6 +132,12 @@ class SidecarServer:
             reader.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await reader
+            # A turn outlives the read loop by design, so it is not stopped by
+            # `reader` finishing. Left running, it would try to send `turn_started`
+            # or `turn_finished` on a closed socket and log a spurious error for
+            # what is really just "the editor closed mid-turn" (D13: the turn is
+            # `incomplete`).
+            await self._cancel_running_turn(disconnected=True)
             # Never leave a caller awaiting a reply that can no longer arrive.
             self._fail_pending("client disconnected")
 
@@ -346,8 +359,167 @@ class SidecarServer:
             await websocket.close(1000, "editor closed")
             return
 
+        if type_name == "user_message":
+            await self._handle_user_message(websocket, frame["payload"])
+            return
+
+        if type_name == "cancel_turn":
+            await self._handle_cancel_turn(websocket, frame["payload"])
+            return
+
+        if type_name == "transaction_reverted":
+            # Acknowledged so the turn's reported state stops claiming the edits
+            # are still in place. Nothing else depends on it until Phase 4's
+            # session persistence lands.
+            log.info("transaction reverted by the mod: %r", frame["payload"].get("txn_id"))
+            return
+
         # Everything else is Phase 4 work (tool loop, requests to the mod).
         log.info("unhandled message type %r (not implemented yet)", type_name)
+
+    # -- turns ---------------------------------------------------------
+
+    async def _handle_user_message(self, websocket: ServerConnection, payload: dict) -> None:
+        """Start a turn for a `user_message` event (SPEC.md 7.4).
+
+        No response frame is sent. The event carries a null id, so there is
+        nothing to correlate: the turn reports itself through `turn_started`,
+        `assistant_message` and `turn_finished`.
+        """
+        text = payload.get("text", "")
+        log.info("user_message (%d chars)", len(text))
+
+        if self._turn_task is not None and not self._turn_task.done():
+            # The mod disables its input while a turn runs (SPEC.md 8.5), so this
+            # is a duplicated or stale frame rather than a user double-send.
+            # Ignoring it is the safe reading of the protocol, which defines no
+            # error code for it: starting a second turn would interleave two
+            # turns' events, and cancelling the first would silently discard work
+            # the user did not ask to abandon.
+            log.warning("ignoring user_message; turn %r is still running", self._turn_id)
+            await self._send_event(
+                websocket,
+                "system_message",
+                {"level": "warn", "text": "A turn is already running."},
+            )
+            return
+
+        if self.config.llm_provider != "scripted":
+            # The real tool loop is Phase 4. Answering with a clear failure beats
+            # leaving the panel in its thinking state until some timeout.
+            turn_id = self._allocate_turn_id()
+            await self._send_event(
+                websocket, "turn_started", {"turn_id": turn_id, "message_id": f"a-{turn_id}"}
+            )
+            await self._send_event(
+                websocket,
+                "system_message",
+                {
+                    "level": "error",
+                    "text": (
+                        f"Provider {self.config.llm_provider!r} is not implemented yet; "
+                        "set llm_provider=scripted to exercise the panel."
+                    ),
+                },
+            )
+            await self._finish_turn(websocket, turn_id, status="failed", actions=[])
+            return
+
+        self._turn_id = self._allocate_turn_id()
+        self._turn_task = asyncio.create_task(
+            self._run_scripted_turn(websocket, self._turn_id, text),
+            name=f"sidecar-turn-{self._turn_id}",
+        )
+
+    def _allocate_turn_id(self) -> str:
+        self._next_turn += 1
+        return f"t-{self._next_turn}"
+
+    async def _run_scripted_turn(
+        self, websocket: ServerConnection, turn_id: str, text: str
+    ) -> None:
+        message_id = f"a-{turn_id}"
+        try:
+            await self._send_event(
+                websocket,
+                "turn_started",
+                {"turn_id": turn_id, "message_id": message_id},
+            )
+
+            delay_ms = self.config.scripted_turn_delay_ms
+            if delay_ms:
+                # The only await point, and therefore the only place a
+                # `cancel_turn` can land. That is deliberate: the scripted
+                # provider exists to test cancellation, and a turn that could not
+                # be interrupted would test nothing.
+                await asyncio.sleep(delay_ms / 1000)
+
+            turn = scripted.plan_turn(text)
+            await self._send_event(
+                websocket,
+                "assistant_message",
+                {"turn_id": turn_id, "message_id": message_id, "text": turn.text},
+            )
+            await self._finish_turn(
+                websocket,
+                turn_id,
+                status="completed",
+                actions=[action.to_json() for action in turn.actions],
+            )
+        except asyncio.CancelledError:
+            await self._finish_turn(websocket, turn_id, status="cancelled", actions=[])
+            raise
+        finally:
+            if self._turn_id == turn_id:
+                self._turn_id = None
+                self._turn_task = None
+
+    async def _finish_turn(
+        self,
+        websocket: ServerConnection,
+        turn_id: str,
+        *,
+        status: str,
+        actions: list[dict],
+    ) -> None:
+        """Send `turn_finished`, tolerating a socket that has already gone."""
+        payload = {
+            "turn_id": turn_id,
+            "status": status,
+            "actions": actions,
+            # No editor transaction was opened by the scripted provider, so this
+            # is genuinely null rather than unknown (SPEC.md 7.4).
+            "txn_id": None,
+        }
+        try:
+            await self._send_event(websocket, "turn_finished", payload)
+        except ConnectionClosed:
+            log.info("turn %r finished as %r after the client had gone", turn_id, status)
+
+    async def _handle_cancel_turn(self, websocket: ServerConnection, payload: dict) -> None:
+        turn_id = payload.get("turn_id")
+        task = self._turn_task
+        if task is None or task.done() or turn_id != self._turn_id:
+            # Cancelling a turn that is not running is not an error: the user may
+            # have pressed Stop just as the turn finished, and the two crossed on
+            # the wire.
+            log.info("cancel_turn for %r, which is not running", turn_id)
+            return
+        log.info("cancelling turn %r", turn_id)
+        task.cancel()
+
+    async def _cancel_running_turn(self, *, disconnected: bool) -> None:
+        """Stop the running turn, if any, and wait for it to unwind."""
+        task = self._turn_task
+        if task is None or task.done():
+            return
+        if disconnected:
+            # Nobody is left to hear the `turn_finished`, and the socket is
+            # closed, so the task's own report would only log a spurious error.
+            log.info("editor closed mid-turn; turn %r is incomplete", self._turn_id)
+            task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
     # -- helpers -------------------------------------------------------
 

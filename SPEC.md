@@ -5,13 +5,89 @@
 | Field | Value |
 | --- | --- |
 | Project name | GD AI Assistant |
-| Document version | 0.7.0 |
-| Status | Draft — pre-implementation (Phase 1 bridge verified in-editor) |
+| Document version | 0.9.0 |
+| Status | Draft — Phases 0-3 verified in-editor (chat panel works end to end) |
 | Target platform | Windows only (initial release) |
 | Target Geode version | v5.11.x (Geode SDK 5.11.1 verified locally; requires C++23). Geode v6 is WIP — see §15 Q3 |
 | Target GD version | 2.2081 |
 
-## 0.1 Changes from 0.6.0
+## 0.1 Changes from 0.8.0
+
+Phase 3 (chat UI) is implemented and verified end to end in the editor against the
+scripted sidecar. This entry records the measured behaviour, because most of it is
+not what the source suggests and every item below cost a debugging round.
+
+**Enter key (the hard one).** Three mechanisms were tried and measured not to work
+before the fourth did. `geode::TextInput` forwards only `textChanged` to its
+delegate, so `enterPressed`/`textInputReturn` are never called. Registering the panel
+as a keyboard delegate fails too — with `addDelegate`, `forceAddDelegate`, and
+`CCLayer::setKeyboardEnabled(true)`, not one `keyDown` fired while a text field had
+focus. `CCTextInputNode::onTextFieldInsertText` fires per character but reports
+`KEY_Unknown` every time and never fires for Enter. **What works is a `$modify` hook
+on `EditorUI::keyDown`**, which GD demonstrably dispatches (Geode's keybind mod hooks
+the same function). This is now a spike-level finding, not an implementation detail.
+
+**Touch priority runs the opposite way to intuition.** Lower values are dispatched
+first. A panel that claims a region at a low priority steals the gesture from its own
+children: at `-400`/`-499` the panel swallowed scroll drags before the `ScrollLayer`
+saw them, which is why the transcript could not be scrolled. `-1` is the value that
+works — children get their touches first, and the panel still beats the editor layer
+at `0`. Claiming the *whole* panel is separately wrong: it makes the Send button dead.
+
+**Layout scaling silently overrides child scale.** `SimpleAxisLayout`'s main-axis
+default is `AxisScaling::ScaleDownGaps`, which scales children and overrides the
+child's own `setScale`. Symptom: reducing the font size appeared to do nothing, and
+text stayed wider than the panel. Fixed by setting both axes to `AxisScaling::None`.
+Relatedly, `AxisDirection::BottomToTop` reverses child order, which made the
+transcript read backwards.
+
+**Fonts.** `bigFont.fnt` is size 32 with capital-shaped lowercase glyphs; body text
+rendered as an all-caps wall at double height. Messages now use `chatFont.fnt` (size
+16, real lowercase, GD's own chat font).
+
+**The `!` key was the character filter, not the font.** `bigFont.fnt` does contain
+`!` and `'`; both were verified in the `.fnt`. The actual cause was
+`geode::TextInput`'s default filter, fixed with `setCommonFilter(CommonFilter::Any)`,
+which also allows the apostrophe — an ordinary English character a chat box cannot
+do without.
+
+**A sprite's `setColor` multiplies with its texture.** Tinting a dark frame green
+yields black, so the status dot was invisible on a near-black panel. It is now a
+`CCLayerColor`, which has no texture to multiply against. Similarly,
+`CCSpriteFrameCache::spriteFrameByName` does **not** return null for a missing frame —
+it returns a **fallback texture** and logs a warning, so "does this frame exist" needs
+to be checked differently.
+
+**Stray instrumentation, adopted as a rule.** The `hello` result arrives *before* the
+panel can be built (the bridge connects from `LevelEditorLayer::init`, but the panel
+needs `EditorUI`), so a status posted in that window was silently dropped and the
+panel opened looking disconnected while turns worked. The host now remembers and
+replays. The sidecar's `history` frame lands immediately after the handshake and will
+wipe a just-posted status line unless the clear is scoped to the conversation.
+
+**Cancelling a socket read corrupts the stream.** `arc::timeout(...)` around
+`receiveText()` discards bytes already consumed from the buffer and can emit a partial
+frame during a pong write, desynchronising the peer. The symptom was the sidecar
+closing with "keepalive ping timeout" two minutes into every session — which reads as
+a network fault and is not one. The receive is now uncancellable, per-frame work moved
+to a separate watchdog task, and `arc::TcpStream::shutdown` is used to end a session.
+
+**Sanitising works, and the scripted provider proves it.** The fake provider's replies
+deliberately contain `<cr>`, `<c-FF00FF>` and `</c>` so the sanitiser has end-to-end
+coverage: the tags are stripped, not rendered.
+
+**Sanitising untrusted text (§8.3.1) is implemented, not just specified** (§8.3.1).
+Angle-bracket tags are removed wholesale rather than allow-listed, so a future switch
+to a rich-text renderer cannot turn unstripped markup into a formatting instruction.
+
+**Accepted gaps, deliberately.** Markdown is **not** rendered: `MDTextArea` is unused
+and fenced-code fence lines are stripped so they are not shown literally. Body text is
+plain. The mouse wheel does not scroll the transcript (drag does): GD's
+`CCMouseDispatcher` offers no priority API, so the editor keeps the wheel; recorded
+rather than worked around. `Home`/`End` and `!`-style navigation keys inside the field
+are GD's `CCTextInputNode` behaviour, which implements only left/right/backspace/delete.
+
+## 0.2 Changes from 0.6.0
 
 - **Phase 1 exit criteria met, verified in the editor.** The mod connected on editor open, completed `hello`, answered `ping` and `get_editor_state`, and closed cleanly on editor close. Measured against a real level: 10000 objects, 0 selected, `editor_layer` 0.
 - **New trap recorded (§6.1.11):** `LevelEditorLayer` does **not** declare `onExit` in the Geode bindings, unlike `PlayLayer` and most other layers. A `$modify` hook on it compiles (the call resolves to the inherited `CCNode::onExit`) but never fires. This caused a 5-10 second hang on game exit, because the session task kept polling and Geode's async-runtime shutdown waited on it. Shutdown now uses the `Exiting` game event plus editor-presence polling.
@@ -723,13 +799,14 @@ Unknown keys are rejected with `UNSUPPORTED_PROPERTY`; values outside range are 
 
 | Property | Value |
 | --- | --- |
-| Base | Custom non-modal panel node attached to the editor UI (D8; verify attachment point and touch/key routing) |
-| Default size | About 240 × 220 **points** (GD's coordinate space is 320 points tall), scaled with window size; never taller than the visible area minus margins |
+| Base | Custom non-modal panel node attached to `EditorUI` as a plain `CCLayer` (D8; S6 resolved in 0.9.0) |
+| Default size | 216 × 196 **points** (GD's coordinate space is 320 points tall); never taller than the visible area minus margins |
 | Position | Bottom-right with margin |
 | Resizable / draggable | No (v1) |
 | States | Expanded, collapsed (title-bar chip) |
-| Toggle | Geode keybind `toggle-chat`, default Ctrl+Shift+C (verify conflicts with editor shortcuts) |
+| Toggle | Geode keybind `toggle-chat`, default Ctrl+Shift+C |
 | Lifetime | Created with the editor layer, destroyed when it closes |
+| Touch | Claims the **message area only**, at priority `-1`. Lower values dispatch first, so a lower value steals scroll drags from the panel's own `ScrollLayer`; `-1` sits behind the children and ahead of the editor layer at `0`. Claiming the whole panel makes Send dead. |
 
 ## 8.2 Layout
 
@@ -756,7 +833,7 @@ Unknown keys are rejected with `UNSUPPORTED_PROPERTY`; values outside range are 
 | Property | Value |
 | --- | --- |
 | Component | Scroll layer containing a stack of message nodes |
-| Text renderer | `MDTextArea` for Markdown assistant/system text; `geode::Label` for short labels and the thinking indicator |
+| Text renderer | `geode::Label` with `chatFont.fnt`. **Not** `bigFont.fnt`: it is size 32 and draws lowercase as capitals, so body text becomes an all-caps wall at double height. `chatFont.fnt` is size 16 with real lowercase. Markdown is **not** rendered (`MDTextArea` unused); fence lines are stripped so they are not shown literally. |
 | User messages | Right-aligned, distinct background |
 | Assistant messages | Left-aligned, default background |
 | System messages | Centered, muted, smaller font |
@@ -788,21 +865,21 @@ Mod-generated system messages may use colour tags.
 
 | Property | Value |
 | --- | --- |
-| Component | `geode::TextInput` |
-| Placeholder | "Type your message..." |
+| Component | `geode::TextInput`, with `setCommonFilter(CommonFilter::Any)`. The default filter rejects punctuation including `!` and `'`. |
+| Placeholder | "Ask about this level..." |
 | Send | Enter or Send button |
 | Max length | `max-message-length` (default 2000) |
 | While processing | Input disabled and greyed; the Send button becomes **Stop** (sends `cancel_turn`) |
 | Multi-line | No (v1) |
-| Focus behaviour | When focused, typed characters must not trigger editor hotkeys (verify, S6) |
+| Focus behaviour | Enter is caught in a `$modify` hook on `EditorUI::keyDown` (S6). While a GD text field has focus, keyboard events do **not** reach a mod layer at all, and `TextInput` does not forward `enterPressed`; see §0.1. |
 
 ## 8.6 Keyboard
 
 | Shortcut | Action |
 | --- | --- |
 | Ctrl+Shift+C (rebindable) | Toggle panel expanded/collapsed |
-| Enter | Send message (input focused) |
-| Escape | Input focused: unfocus. Otherwise: collapse the panel. Must not trigger the editor pause menu while the panel consumes it (verify). |
+| Enter | Send message, when the input has focus. Routed via `EditorUI::keyDown`; see §0.1. |
+| Escape | **Not implemented.** Input focused: unfocus. Otherwise: collapse the panel. |
 
 ## 8.7 Empty State
 
@@ -932,7 +1009,7 @@ A Geode mod cannot run headless in CI, so the protocol is the test seam.
 | S2 | **RESOLVED (0.6.0).** No WebSocket dependency: hand-written RFC 6455 client on `arc::TcpStream` (D14, §6.1.10), plus a bundled SHA-1 for the handshake. | **Met.** Round trip verified against the Python sidecar: handshake accepted, token accepted, `hello` parsed, response and `history` frames decoded, clean close. Token handshake and the absence of an `Origin` header confirmed on the wire. |
 | S3 | **Advanced:** can undo entries be grouped per transaction via `addToUndoList` / `handleAction` (§6.1.5)? | Either grouping works (A2 via Ctrl+Z) or the bookkeeping fallback is adopted. Also measure per-slice refresh cost and `m_increaseMaxUndoRedo` behaviour at 5000 objects. |
 | S4 | Which hooks reliably detect user adds/removes/moves/selection? | Coalesced `level_changed` working with correct `source` tagging. |
-| S6 | Non-modal panel attachment, touch/key routing, hotkey leakage, Escape handling. | Panel usable while editing; typing doesn't trigger editor hotkeys. |
+| S6 | **RESOLVED (0.9.0).** Non-modal panel attachment, touch/key routing, hotkey leakage, Escape handling. | **Met, with corrections.** The panel attaches to `EditorUI` as a plain `CCLayer` and the editor stays fully usable. Two findings contradict the original assumptions: Touch priority must be **behind** the panel's own children (`-1`), not ahead of them, or the panel steals scroll drags from its own `ScrollLayer`; and keyboard input does **not** reach a mod layer at all while a text field has focus — `EditorUI::keyDown` is the only route that works. Escape handling is still unverified. |
 | S7 | Unique ID stability across undo/redo; which object IDs crash on programmatic creation. | D9 confirmed or revised; initial denylist. |
 
 S5 (bitmap-font glyph coverage) was retired in 0.5.0 — see §8.3.1. All other spike IDs are unchanged, so existing references to S4, S6 and S7 remain valid.
@@ -956,8 +1033,18 @@ Not yet exercised: reconnection after a mid-session sidecar restart, and the 400
 
 ## Phase 3 — Chat UI
 
+**Status: exit criteria met (0.9.0).** The panel works end to end against the scripted
+sidecar: connection state shown, messages sent and rendered, thinking indicator,
+turn summary, cancellation path available, and the transcript scrollable. Verified in
+the editor; see §0.1 for the measurements and the traps found.
+
 - Panel shell, message list, input with Send/Stop, sanitiser, thinking indicator, action summary with Revert, setup/connection states.
 - **Exit:** panel works end-to-end against the fake sidecar.
+
+Not yet done, and deliberately so: Markdown rendering (`MDTextArea`) and the `Revert`
+action on the summary bubble. Revert needs a transaction id from the sidecar, which the
+scripted provider does not open. The mouse wheel does not scroll the transcript; drag
+does.
 
 ## Phase 4 — Sidecar
 

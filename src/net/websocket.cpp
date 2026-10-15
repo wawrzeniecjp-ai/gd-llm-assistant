@@ -2,7 +2,9 @@
 
 #include "sha1.hpp"
 
+#include <Geode/loader/Log.hpp>
 #include <Geode/utils/base64.hpp>
+#include <Geode/utils/async.hpp>
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -252,6 +254,10 @@ arc::Future<Result<>> WebSocket::sendFrame(std::uint8_t opcode, std::string_view
         ));
     }
 
+    // The whole frame is built before the lock is taken, so the critical section
+    // covers only the write. Building under the lock would make the section
+    // longer for no benefit.
+    std::scoped_lock lock(m_shared->sendMutex);
     if (auto sent = co_await m_stream.sendAll(frame.data(), frame.size()); !sent) {
         co_return Err(fmt::format("send failed: {}", sent.unwrapErr()));
     }
@@ -263,11 +269,39 @@ arc::Future<Result<>> WebSocket::sendText(std::string_view text) {
 }
 
 arc::Future<Result<>> WebSocket::close(std::uint16_t code, std::string_view reason) {
+    if (m_shared->closed.exchange(true)) {
+        // Already shut down; a second close would write to a dead stream and
+        // report a spurious failure for what is really a completed shutdown.
+        co_return Ok();
+    }
+
     std::string payload;
     payload.push_back(static_cast<char>((code >> 8) & 0xFFu));
     payload.push_back(static_cast<char>(code & 0xFFu));
     payload.append(reason);
-    co_return co_await sendFrame(Opcode::Close, payload);
+
+    (void) co_await sendFrame(Opcode::Close, payload);
+
+    // A close frame is the polite half; shutting the stream down is what
+    // actually releases the reader. Without it a pending receive would sit there
+    // until the peer closed, which is how the editor-close path used to hang.
+    forceClose();
+    co_return Ok();
+}
+
+void WebSocket::forceClose() {
+    if (m_shared->closed.exchange(true)) {
+        return;
+    }
+    geode::log::debug("websocket: forcing the stream shut");
+    // Best effort by design: the usual reason to be here is that the session is
+    // ending, and a failure to shut down a socket we are abandoning anyway is
+    // not worth propagating.
+    arc::spawn([this]() -> arc::Future<> {
+        if (auto result = co_await m_stream.shutdown(qsox::ShutdownMode::Both); !result) {
+            geode::log::debug("websocket: shutdown failed: {}", result.unwrapErr());
+        }
+    });
 }
 
 arc::Future<Result<std::string>> WebSocket::readMessage() {

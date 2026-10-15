@@ -19,6 +19,7 @@
 #include "../exec/editor_jobs.hpp"
 #include "../exec/handler_verification.hpp"
 #include "../exec/job_queue.hpp"
+#include "../ui/panel_host.hpp"
 
 using namespace geode::prelude;
 
@@ -54,12 +55,19 @@ void runDeveloperProbesOnce() {
     async::spawn(exec::runHandlerVerification);
 }
 
-/// How long a single receive may block before the loop re-checks the stop flag.
+/// How often the watchdog ticks: checks for a queued frame, and for the editor
+/// closing or the game exiting.
 ///
-/// A bare blocking receive would make `stop()` wait for the sidecar to send
-/// something, and an idle sidecar never does. Polling keeps the socket touched
-/// by one thread only, which is what makes shutdown safe without a lock.
-constexpr auto kPollInterval = asp::time::Duration::fromMillis(250);
+/// This is the latency ceiling on sending a queued frame, so it is short enough
+/// that pressing Send feels immediate, and long enough that a handful of
+/// wake-ups a second is negligible. It is *not* a timeout applied to the
+/// receive -- the receive must never be cancelled, which is the whole reason
+/// this is a separate task (see `net::WebSocket`).
+constexpr auto kWachdogInterval = asp::time::Duration::fromMillis(150);
+
+/// Correlation id of the `hello` request. The mod issues exactly one request, so
+/// the only `response` it should ever receive carries this id.
+constexpr char const* kHelloRequestId = "m-1";
 
 /// Reconnect backoff: 1 s doubling to a 30 s cap (SPEC.md 7.8 step 5).
 constexpr int kInitialBackoffSecs = 1;
@@ -104,7 +112,7 @@ std::string configuredUrl() {
 std::string buildHello(std::string_view token, editor::Snapshot const& snapshot) {
     auto hello = matjson::Value::object();
     hello["type"] = "hello";
-    hello["id"] = "m-1";
+    hello["id"] = kHelloRequestId;
 
     auto payload = matjson::Value::object();
     payload["protocol_version"] = 1;
@@ -223,6 +231,18 @@ std::pair<std::string, std::string> splitCode(std::string const& error) {
     return { error.substr(0, colon), std::move(message) };
 }
 
+/// Reads a string field, tolerating its absence and its wrong type alike.
+///
+/// Every field read out of a sidecar frame goes through this. The sidecar is a
+/// separate process that may be a different version, so a missing or mistyped
+/// field is a normal condition to survive, not a bug to assert on.
+std::string stringField(matjson::Value const& object, char const* key) {
+    if (!object.isObject() || !object.contains(key)) {
+        return {};
+    }
+    return object[key].asString().unwrapOr(std::string());
+}
+
 } // namespace
 
 Bridge& Bridge::get() {
@@ -255,6 +275,158 @@ void Bridge::onGameExiting() {
     stop();
 }
 
+void Bridge::setConnectionStatus(ui::Status status, std::string systemText) {
+    auto& host = ui::PanelHost::get();
+    host.postStatus(status);
+
+    if (m_lastStatus.has_value() && *m_lastStatus == status) {
+        return;
+    }
+    m_lastStatus = status;
+
+    if (!systemText.empty()) {
+        host.postSystem(std::move(systemText));
+    }
+}
+
+void Bridge::enqueueFrame(std::string frame) {
+    {
+        std::scoped_lock lock(m_outboundMutex);
+        m_outbound.push_back(std::move(frame));
+    }
+    // Nothing wakes the session loop, so a queued frame waits for the current
+    // receive to time out. That is why the poll interval is short (see
+    // kPollInterval): it is also the worst-case send latency.
+}
+
+void Bridge::sendUserMessage(std::string text) {
+    // Rendered immediately rather than echoed back by the sidecar: the user's
+    // own message is not level content, so waiting for a round trip would add
+    // latency for nothing and read as the UI being slow.
+    ui::PanelHost::get().postUserMessage(text);
+
+    auto payload = matjson::Value::object();
+    payload["message_id"] = fmt::format("u-{}", m_nextId.fetch_add(1));
+    payload["text"] = std::move(text);
+
+    auto frame = matjson::Value::object();
+    frame["type"] = "user_message";
+    frame["id"] = matjson::Value(nullptr);
+    frame["payload"] = std::move(payload);
+
+    log::info("sending user_message");
+    enqueueFrame(frame.dump(0));
+}
+
+void Bridge::sendCancelTurn() {
+    std::string turnId;
+    {
+        std::scoped_lock lock(m_turnMutex);
+        turnId = m_activeTurnId;
+    }
+    if (turnId.empty()) {
+        log::warn("cancel requested with no active turn");
+        return;
+    }
+
+    auto payload = matjson::Value::object();
+    payload["turn_id"] = std::move(turnId);
+
+    auto frame = matjson::Value::object();
+    frame["type"] = "cancel_turn";
+    frame["id"] = matjson::Value(nullptr);
+    frame["payload"] = std::move(payload);
+
+    log::info("sending cancel_turn");
+    enqueueFrame(frame.dump(0));
+}
+
+/// Drains queued outbound frames into the socket.
+///
+/// Called by the watchdog, which is the only thing that can observe the queue
+/// while the receive loop is blocked in an await.
+arc::Future<> Bridge::flushOutbound(net::WebSocket& socket) {
+    std::deque<std::string> pending;
+    {
+        std::scoped_lock lock(m_outboundMutex);
+        pending.swap(m_outbound);
+    }
+
+    for (auto& frame : pending) {
+        auto sent = co_await socket.sendText(frame);
+        if (!sent) {
+            log::error("sending a queued frame failed: {}", sent.unwrapErr());
+            co_return;
+        }
+    }
+    co_return;
+}
+
+arc::Future<> Bridge::watchSession(
+    std::shared_ptr<net::WebSocket> socket, std::shared_ptr<SessionState> state
+) {
+    while (state->running) {
+        co_await arc::sleep(kWachdogInterval);
+        if (!state->running) {
+            break;
+        }
+
+        co_await flushOutbound(*socket);
+
+        if (m_stopRequested) {
+            log::info("watchdog: stop requested; ending the session");
+            break;
+        }
+
+        if (m_gameExiting) {
+            // The game is going down, so do not hop to the main thread: nothing
+            // may be left to service the callback, which would hang instead.
+            log::info("watchdog: the game is exiting; ending the session");
+            break;
+        }
+
+        // `LevelEditorLayer` is destroyed when the user leaves the editor and
+        // does not declare a bindable `onExit` (see onGameExiting), so the
+        // editor's presence is polled.
+        auto editorOpen = co_await async::waitForMainThread<bool>(
+            [] { return LevelEditorLayer::get() != nullptr; }
+        );
+        if (!editorOpen) {
+            log::warn("watchdog: could not check the editor; ending the session");
+            break;
+        }
+        if (!*editorOpen) {
+            log::info("watchdog: the editor closed; ending the session");
+            m_stopRequested = true;
+            break;
+        }
+    }
+
+    // Teardown, exactly once. Whichever of the two tasks gets here first does
+    // it; the other finds the flag set and does nothing.
+    if (state->tornDown.exchange(true)) {
+        co_return;
+    }
+
+    // SPEC.md 7.8 step 6: tell the sidecar before closing. Events carry a null
+    // id (7.3); the default-constructed Value is an object, so build it explicitly.
+    auto closed = matjson::Value::object();
+    closed["type"] = "editor_closed";
+    closed["id"] = matjson::Value(nullptr);
+    closed["payload"] = matjson::Value::object();
+
+    // Best effort: if the socket is already gone there is nobody to tell, and
+    // that is not worth an error line.
+    if (auto sent = co_await socket->sendText(closed.dump(0)); !sent) {
+        log::debug("editor_closed not delivered: {}", sent.unwrapErr());
+    }
+    (void) co_await socket->close();
+
+    // Unblocks the receive loop, which is the only way it can be woken.
+    socket->forceClose();
+    co_return;
+}
+
 arc::Future<> Bridge::run(std::string url) {
     auto backoffSecs = kInitialBackoffSecs;
 
@@ -270,6 +442,10 @@ arc::Future<> Bridge::run(std::string url) {
                 "no handshake token at {} -- start the sidecar first; retrying in {}s",
                 path.string(), backoffSecs
             );
+            setConnectionStatus(
+                ui::Status::Disconnected,
+                "Can't reach the sidecar. Start it, then wait a moment while this retries."
+            );
         } else {
             auto connected = co_await net::WebSocket::connect(url);
             if (!connected) {
@@ -277,17 +453,27 @@ arc::Future<> Bridge::run(std::string url) {
                     "sidecar unreachable at {} ({}); retrying in {}s",
                     url, connected.unwrapErr(), backoffSecs
                 );
+                setConnectionStatus(
+                    ui::Status::Disconnected,
+                    fmt::format("Can't reach the sidecar at {}. Retrying...", url)
+                );
             } else {
                 log::info("connected to the sidecar at {}", url);
                 // Reset only after a successful connect, so a sidecar that
                 // accepts and immediately drops us still backs off.
                 backoffSecs = kInitialBackoffSecs;
-                co_await session(std::move(connected).unwrap(), token);
+                co_await session(
+                    std::make_shared<net::WebSocket>(std::move(connected).unwrap()), token
+                );
 
                 if (m_stopRequested) {
                     break;
                 }
                 log::info("sidecar connection lost; reconnecting in {}s", backoffSecs);
+                setConnectionStatus(
+                    ui::Status::Reconnecting,
+                    fmt::format("Connection lost. Reconnecting in {}s...", backoffSecs)
+                );
             }
         }
 
@@ -299,7 +485,7 @@ arc::Future<> Bridge::run(std::string url) {
     log::info("bridge stopped");
 }
 
-arc::Future<> Bridge::session(net::WebSocket socket, std::string token) {
+arc::Future<> Bridge::session(std::shared_ptr<net::WebSocket> socket, std::string token) {
     // Read the level identity on the main thread, for the hello payload.
     auto snapshot = co_await async::waitForMainThread<editor::Snapshot>(
         [] {
@@ -314,11 +500,11 @@ arc::Future<> Bridge::session(net::WebSocket socket, std::string token) {
     );
     if (!snapshot) {
         log::error("could not read editor state on the main thread; closing the session");
-        (void) co_await socket.close();
+        (void) co_await socket->close();
         co_return;
     }
 
-    if (auto sent = co_await socket.sendText(buildHello(token, *snapshot)); !sent) {
+    if (auto sent = co_await socket->sendText(buildHello(token, *snapshot)); !sent) {
         log::error("sending hello failed: {}", sent.unwrapErr());
         co_return;
     }
@@ -328,52 +514,28 @@ arc::Future<> Bridge::session(net::WebSocket socket, std::string token) {
             : std::string("(unnamed)")
     );
 
-    while (!m_stopRequested) {
-        // Bounded wait, so the stop flag is observed even while idle. A bare
-        // blocking receive would never return on an idle sidecar, which is what
-        // stopped `stop()` from taking effect.
-        auto received = co_await arc::timeout(kPollInterval, socket.receiveText());
-        if (!received) {
-            if (m_gameExiting) {
-                // Do not hop to the main thread while the game is going down:
-                // nothing may service the callback, which would hang instead.
-                log::info("game is exiting; ending the session");
-                break;
-            }
-            // `LevelEditorLayer` is destroyed when the user leaves the editor.
-            // There is no bindable `onExit` for it (see onGameExiting), so the
-            // editor's presence is polled instead.
-            auto editorOpen = co_await async::waitForMainThread<bool>(
-                [] { return LevelEditorLayer::get() != nullptr; }
-            );
-            if (!editorOpen) {
-                log::warn("could not check the editor on the main thread; ending the session");
-                break;
-            }
-            if (!*editorOpen) {
-                log::info("editor closed; ending the session");
-                stop();
-                break;
-            }
-            continue;
-        }
+    // The watchdog owns everything that has to happen *while* we are blocked in
+    // the receive below: flushing queued frames, and noticing that the session
+    // should end. Spawned rather than awaited, so the two run concurrently; the
+    // shared_ptrs are what make that safe, since the watchdog outlives nothing but
+    // keeps both the socket and its own session state alive on its own.
+    auto state = std::make_shared<SessionState>();
+    async::spawn([this, socket, state] { return watchSession(socket, state); });
 
-        auto message = std::move(*received);
+    while (!m_stopRequested) {
+        // Deliberately no timeout: cancelling this await would corrupt the
+        // stream in two separate ways. See `net::WebSocket`.
+        auto message = co_await socket->receiveText();
         if (!message) {
             log::info("session ended: {}", message.unwrapErr());
             break;
         }
-        co_await handleFrame(message.unwrap(), socket);
+        co_await handleFrame(message.unwrap(), *socket);
     }
 
-    // SPEC.md 7.8 step 6: tell the sidecar before closing.
-    auto closed = matjson::Value::object();
-    closed["type"] = "editor_closed";
-    // Events carry a null id (7.3); the default-constructed Value is an object.
-    closed["id"] = matjson::Value(nullptr);
-    closed["payload"] = matjson::Value::object();
-    (void) co_await socket.sendText(closed.dump(0));
-    (void) co_await socket.close();
+    // Tells the watchdog to finish. It performs the teardown, because it is the
+    // task that can still send once this one has stopped reading.
+    state->running = false;
 }
 
 arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& socket) {
@@ -394,20 +556,36 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
         co_return;
     }
 
-    // Events carry a null id and need no reply. Responses answer a request we
-    // issued (currently only the sidecar's reply to our hello), so they are
-    // resolved rather than answered. Replying to a reply would be wrong: two
-    // sides that both answer each other's replies loop without bound.
+    // Read once, for every kind of frame. Events need the payload as much as
+    // requests do.
+    auto const payload = json.contains("payload") ? json["payload"] : matjson::Value::object();
+
+    // A response answers a request we issued, so it is resolved rather than
+    // answered. Replying to a reply would be wrong: two sides that both answer
+    // each other's replies loop without bound. That loop is not hypothetical --
+    // an early build of this mod triggered it at roughly 200 frames a second.
     //
-    // Checked before normalising the id, so event frames do not trip the
+    // Checked before normalising the id, so a response frame does not trip the
     // malformed-id warning below.
-    if (type == "response" || json["id"].isNull()) {
-        log::debug("ignoring '{}' frame", type);
+    if (type == "response") {
+        auto const responseId = json["id"].asString().unwrapOr(std::string());
+        if (responseId == kHelloRequestId) {
+            applyHelloResult(payload);
+        } else {
+            log::debug("ignoring response to unknown request '{}'", responseId);
+        }
+        co_return;
+    }
+
+    // Events carry a null id and expect no reply (SPEC.md 7.3).
+    if (json["id"].isNull()) {
+        // Not a coroutine: events are rendered, not answered, so there is
+        // nothing here to await.
+        handleEvent(type, payload);
         co_return;
     }
 
     auto const requestId = normaliseRequestId(json["id"]);
-    auto const payload = json.contains("payload") ? json["payload"] : matjson::Value::object();
 
     if (type == "ping") {
         auto result = matjson::Value::object();
@@ -525,6 +703,150 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
         socket, requestId, "INVALID_REQUEST",
         fmt::format("'{}' is not implemented yet", type)
     );
+}
+
+void Bridge::applyHelloResult(matjson::Value const& payload) {
+    // A failed handshake is reported as a close code, not a response, so an
+    // `ok: false` hello means the sidecar is a version we cannot talk to.
+    if (!payload.contains("ok") || !payload["ok"].asBool().unwrapOr(false)) {
+        auto const message = payload.contains("error")
+            ? stringField(payload["error"], "message")
+            : std::string("handshake rejected");
+        log::error("hello failed: {}", message);
+        ui::PanelHost::get().postStatus(ui::Status::NeedsSetup);
+        ui::PanelHost::get().postError(message);
+        return;
+    }
+
+    auto const result = payload.contains("result")
+        ? payload["result"]
+        : matjson::Value::object();
+
+    auto const state = stringField(result, "state");
+    auto const detail = stringField(result, "detail");
+
+    log::info("hello accepted: state '{}'", state);
+
+    if (state == "needs_setup") {
+        // The sidecar is reachable but has no usable LLM configuration, so the
+        // panel is not a connection problem to retry -- it is a setup problem
+        // for the user to fix (SPEC.md 8.8).
+        ui::PanelHost::get().postStatus(ui::Status::NeedsSetup);
+        ui::PanelHost::get().postError(
+            detail.empty() ? "The sidecar needs configuration." : detail
+        );
+    } else if (state == "provider_error") {
+        ui::PanelHost::get().postStatus(ui::Status::NeedsSetup);
+        ui::PanelHost::get().postError(
+            detail.empty() ? "The LLM provider rejected the request." : detail
+        );
+    } else {
+        ui::PanelHost::get().postStatus(ui::Status::Ready);
+        ui::PanelHost::get().postSystem("Connected.");
+    }
+}
+
+void Bridge::handleEvent(std::string const& type, matjson::Value const& payload) {
+    auto& host = ui::PanelHost::get();
+
+    if (type == "turn_started") {
+        auto turnId = stringField(payload, "turn_id");
+        {
+            std::scoped_lock lock(m_turnMutex);
+            m_activeTurnId = turnId;
+        }
+        host.postTurnStarted();
+        return;
+    }
+
+    if (type == "assistant_message") {
+        host.postAssistantMessage(stringField(payload, "message_id"), stringField(payload, "text"));
+        return;
+    }
+
+    if (type == "assistant_message_delta") {
+        host.postAssistantDelta(
+            stringField(payload, "message_id"), stringField(payload, "delta")
+        );
+        return;
+    }
+
+    if (type == "turn_finished") {
+        auto const status = stringField(payload, "status");
+
+        // One line per action (SPEC.md 8.9). The `summary` is sidecar-authored
+        // text, so it goes through the panel's sanitiser like any other.
+        std::vector<std::string> lines;
+        if (payload.contains("actions") && payload["actions"].isArray()) {
+            for (auto const& action : payload["actions"]) {
+                auto summary = stringField(action, "summary");
+                if (summary.empty()) {
+                    continue;
+                }
+                auto count = action.contains("count")
+                    ? action["count"].asInt().unwrapOr(0)
+                    : 0;
+                lines.push_back(count > 1 ? fmt::format("{} (x{})", summary, count) : summary);
+            }
+        }
+
+        {
+            std::scoped_lock lock(m_turnMutex);
+            m_activeTurnId.clear();
+        }
+        log::info("turn '{}' finished: {}", stringField(payload, "turn_id"), status);
+        host.postTurnFinished(status, std::move(lines));
+        return;
+    }
+
+    if (type == "sidecar_status") {
+        // Sent when readiness changes mid-session, e.g. the provider starts
+        // failing after a successful handshake.
+        auto const state = stringField(payload, "state");
+        auto const detail = stringField(payload, "detail");
+        if (state == "ready") {
+            host.postStatus(ui::Status::Ready);
+        } else {
+            host.postStatus(ui::Status::NeedsSetup);
+            host.postError(detail.empty() ? fmt::format("Sidecar state: {}", state) : detail);
+        }
+        return;
+    }
+
+    if (type == "history") {
+        // SPEC.md 8.10: the sidecar owns the transcript and replays the tail of
+        // it after `hello`. The panel's own list is only a window onto it, so
+        // the replay replaces rather than appends -- appending would duplicate
+        // anything already rendered this session.
+        host.postClear();
+        if (payload.contains("messages") && payload["messages"].isArray()) {
+            for (auto const& message : payload["messages"]) {
+                auto const role = stringField(message, "role");
+                auto const text = stringField(message, "text");
+                if (role == "user") {
+                    host.postUserMessage(text);
+                } else {
+                    host.postAssistantMessage({}, text);
+                }
+            }
+        }
+        return;
+    }
+
+    if (type == "system_message") {
+        auto const level = stringField(payload, "level");
+        auto const text = stringField(payload, "text");
+        if (level == "error") {
+            host.postError(text);
+        } else {
+            host.postSystem(text);
+        }
+        return;
+    }
+
+    // Unknown events are logged rather than answered: an event has no reply to
+    // send, and a newer sidecar may legitimately send types this build predates.
+    log::debug("ignoring event '{}'", type);
 }
 
 } // namespace gdai::bridge
