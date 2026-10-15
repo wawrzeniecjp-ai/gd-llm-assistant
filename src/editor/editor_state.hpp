@@ -21,6 +21,13 @@ struct Snapshot {
     /// (object type id, count) pairs, most common first, capped at 20 entries.
     std::vector<std::pair<int, int>> selectedByType;
     std::string levelName;
+    /// Persistent editor ID, or 0 when it could not be resolved.
+    ///
+    /// Not `GJGameLevel::m_levelID`, which is 0 for a level that has never been
+    /// uploaded, and not the level name, which collides across levels and breaks
+    /// on rename. Resolved on the main thread so no pointer escapes this struct
+    /// (SPEC.md 6.1.3 rule 5).
+    int levelId = 0;
 };
 
 /// Reads the current editor state.
@@ -40,5 +47,12 @@ Snapshot takeSnapshot();
 /// - `z_layer` naming and `editor_layer` indexing remain unverified
 ///   (Appendix A #11), so `editor_layer` is reported raw, as the game stores it.
 matjson::Value toJson(Snapshot const& snapshot);
+
+/// TEMPORARY (spike): logs `getSaveString` for a few objects of distinct types,
+/// so the key-to-property mapping can be derived from the game rather than from
+/// community docs. Strictly read-only -- it calls no setters and mutates nothing.
+///
+/// Must be called on the main thread. Remove once the key map is captured.
+void dumpSaveStringSamples();
 
 } // namespace gdai::editor

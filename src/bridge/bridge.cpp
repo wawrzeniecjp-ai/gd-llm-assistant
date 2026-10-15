@@ -76,11 +76,19 @@ std::string buildHello(std::string_view token, editor::Snapshot const& snapshot)
     client["geode_version"] = Loader::get()->getVersion().toNonVString();
     payload["client"] = std::move(client);
 
-    // Session key defaults to the level name (SPEC.md 6.2.5).
-    auto const key = snapshot.levelName.empty() ? std::string("unknown") : snapshot.levelName;
+    // Session key: the persistent editor ID when available, else the level name
+    // (SPEC.md 6.2.5). A name is not a stable key -- it collides across levels and
+    // changes on rename -- so the ID is preferred; `cvolton.level-id-api`
+    // supplies it (mod.json dependency).
+    auto const name = snapshot.levelName.empty() ? std::string("unknown") : snapshot.levelName;
+    auto key = name;
+    if (snapshot.levelId != 0) {
+        key = fmt::format("editor-{}", snapshot.levelId);
+    }
+
     auto level = matjson::Value::object();
     level["key"] = key;
-    level["name"] = key;
+    level["name"] = name;
     level["object_count"] = snapshot.objectCount;
     payload["level"] = std::move(level);
 
@@ -221,7 +229,12 @@ arc::Future<> Bridge::run(std::string url) {
 arc::Future<> Bridge::session(net::WebSocket socket, std::string token) {
     // Read the level identity on the main thread, for the hello payload.
     auto snapshot = co_await async::waitForMainThread<editor::Snapshot>(
-        [] { return editor::takeSnapshot(); }
+        [] {
+            // TEMPORARY (spike): capture the save-string key map from a real
+            // level. Remove with editor::dumpSaveStringSamples once captured.
+            editor::dumpSaveStringSamples();
+            return editor::takeSnapshot();
+        }
     );
     if (!snapshot) {
         log::error("could not read editor state on the main thread; closing the session");
@@ -233,6 +246,10 @@ arc::Future<> Bridge::session(net::WebSocket socket, std::string token) {
         log::error("sending hello failed: {}", sent.unwrapErr());
         co_return;
     }
+    log::info(
+        "sent hello: level '{}' (editor id {}), {} objects",
+        snapshot->levelName, snapshot->levelId, snapshot->objectCount
+    );
 
     while (!m_stopRequested) {
         // Bounded wait, so the stop flag is observed even while idle. A bare

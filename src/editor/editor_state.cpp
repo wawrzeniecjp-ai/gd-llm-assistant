@@ -6,7 +6,11 @@
 #include <Geode/binding/LevelEditorLayer.hpp>
 #include <Geode/binding/PlayLayer.hpp>
 
+#include <cvolton.level-id-api/include/EditorIDs.hpp>
+
 #include <algorithm>
+
+using namespace geode::prelude;
 
 namespace gdai::editor {
 namespace {
@@ -62,11 +66,22 @@ Snapshot takeSnapshot() {
 
     // A PlayLayer alongside an open editor means playtesting.
     snapshot.playtesting = PlayLayer::get() != nullptr;
-    snapshot.objectCount = static_cast<int>(editor->m_objectVector.size());
+
+    // `getAllObjects()` (backed by `GJBaseGameLayer::m_objects`) is the live
+    // object list. Do NOT use `LevelEditorLayer::m_objectVector`: measured on a
+    // level with a handful of objects it reported 10000 entries that were all
+    // null, so it is a pre-sized table rather than the object collection.
+    // This resolves the ambiguity flagged in SPEC.md 6.1.6.
+    if (auto* objects = editor->getAllObjects()) {
+        snapshot.objectCount = static_cast<int>(objects->count());
+    }
     snapshot.editorLayer = static_cast<int>(editor->m_currentLayer);
 
     if (editor->m_level != nullptr) {
         snapshot.levelName = editor->m_level->m_levelName;
+        // autoAssign = true, so the ID is stable even for a level that has not
+        // been saved or uploaded yet. 0 means the API could not resolve one.
+        snapshot.levelId = EditorIDs::getID(editor->m_level, true);
     }
 
     if (editor->m_editorUI != nullptr) {
@@ -108,6 +123,84 @@ matjson::Value toJson(Snapshot const& snapshot) {
     result["selected"] = std::move(selected);
 
     return result;
+}
+
+void dumpSaveStringSamples() {
+    auto* editor = LevelEditorLayer::get();
+    if (editor == nullptr) {
+        log::warn("save-string dump: no editor open");
+        return;
+    }
+
+    // One sample per distinct object type, so the samples cover different
+    // property sets rather than the same type repeated. Triggers are the most
+    // informative, because they carry the largest key sets.
+    auto* objects = editor->getAllObjects();
+    if (objects == nullptr) {
+        log::warn("save-string dump: editor reports no object list");
+        return;
+    }
+
+    constexpr std::size_t kMaxSamples = 20;
+
+    // Histogram first: it tells us definitively which object types are present,
+    // so a missing sample can be attributed either to "not placed" or to "not
+    // returned by getAllObjects()" rather than guessed at.
+    std::vector<std::pair<int, int>> histogram;
+    auto const total = objects->count();
+    for (unsigned int i = 0; i < total; ++i) {
+        auto* object = static_cast<GameObject*>(objects->objectAtIndex(i));
+        if (object == nullptr) {
+            continue;
+        }
+        auto const objectType = object->m_objectID;
+        auto const found = std::find_if(
+            histogram.begin(), histogram.end(),
+            [objectType](auto const& entry) { return entry.first == objectType; }
+        );
+        if (found != histogram.end()) {
+            ++found->second;
+        } else {
+            histogram.emplace_back(objectType, 1);
+        }
+    }
+    for (auto const& [objectType, count] : histogram) {
+        log::info("SAVESTRING-HISTOGRAM type={} count={}", objectType, count);
+    }
+
+    std::vector<int> seenTypes;
+    auto sampled = 0;
+    for (unsigned int i = 0; i < total && sampled < kMaxSamples; ++i) {
+        auto* object = static_cast<GameObject*>(objects->objectAtIndex(i));
+        if (object == nullptr) {
+            continue;
+        }
+        auto const objectType = object->m_objectID;
+        if (std::find(seenTypes.begin(), seenTypes.end(), objectType) != seenTypes.end()) {
+            continue;
+        }
+        seenTypes.push_back(objectType);
+
+        // Read-only: getSaveString serialises, it does not mutate.
+        //
+        // Both y values are logged deliberately. They differ by a constant
+        // offset, because the save-string y is in level coordinates while
+        // `getPositionY()` is the cocos position on the editor layer. That
+        // offset is the `ground_y` relationship SPEC.md 7.5 needs, and it must
+        // be measured rather than assumed -- a wrong baseline would silently
+        // misplace every generated object.
+        log::info(
+            "SAVESTRING type={} uniqueID={} cocosY={:.1f} | {}",
+            objectType, object->m_uniqueID, object->getPositionY(),
+            object->getSaveString(editor)
+        );
+        ++sampled;
+    }
+
+    log::info(
+        "save-string dump: {} distinct types sampled from {} objects",
+        sampled, total
+    );
 }
 
 } // namespace gdai::editor
