@@ -1,27 +1,33 @@
-"""WebSocket server skeleton (SPEC.md 7.1, 7.2, 7.8).
+"""WebSocket server (SPEC.md 7.1, 7.2, 7.3, 7.8).
 
-Implements the connection lifecycle up to and including the handshake:
+Implements the connection lifecycle:
 
 1. Listen on a loopback address; refuse non-loopback unless opted in.
 2. Reject any upgrade carrying an `Origin` header (browsers always send one).
 3. Allow exactly one authenticated client; close extras with 4003.
 4. Require `hello` with a valid token as the first frame (4001 otherwise).
 5. Reply with the `hello` result and push `history`.
+6. Issue requests to the mod and correlate replies by `id` (7.3), with a
+   per-request timeout.
 
-The LLM tool loop, transactions and editor requests are Phase 4 work and are
-deliberately absent here.
+The LLM tool loop, transactions and the editor request set beyond `ping` /
+`get_editor_state` are Phase 4 work and are deliberately absent here.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+from dataclasses import dataclass
 from http import HTTPStatus
+from typing import Any
 
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
-from websockets.http11 import Request, Response
+from websockets.http11 import Request
+from websockets.http11 import Response as HttpResponse
 
 from . import __version__, protocol
 from .auth import load_or_create_token, token_matches
@@ -36,6 +42,20 @@ CLOSE_PROTOCOL_MISMATCH = 4002
 CLOSE_ANOTHER_CLIENT = 4003
 
 
+@dataclass(frozen=True)
+class Response:
+    """A correlated reply from the mod (SPEC.md 7.3)."""
+
+    ok: bool
+    result: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+
+    @property
+    def code(self) -> str | None:
+        """The error code, when the response failed."""
+        return None if self.error is None else self.error.get("code")
+
+
 class SidecarServer:
     """Single-client, authenticated protocol endpoint."""
 
@@ -44,12 +64,16 @@ class SidecarServer:
         self.token = load_or_create_token(config.token_path)
         self._client: ServerConnection | None = None
         self._client_lock = asyncio.Lock()
+        # Outstanding requests keyed by correlation id. The two senders use
+        # disjoint prefixes (m- / s-) so an id is unambiguous in logs (7.3).
+        self._pending: dict[str, asyncio.Future[Response]] = {}
+        self._next_request_id = 0
 
     # -- connection lifecycle -----------------------------------------
 
     async def rejects_origin(
         self, connection: ServerConnection, request: Request
-    ) -> Response | None:
+    ) -> HttpResponse | None:
         """Refuse browser-originated upgrades.
 
         The mod does not send an `Origin` header; browsers always do. Rejecting
@@ -89,11 +113,117 @@ class SidecarServer:
         log.info("client ready for level %r", level_key)
         await self._send_event(websocket, "history", {"messages": []})
 
+        # The read loop must already be running before we issue any request:
+        # otherwise the reply would sit in the socket with nothing to dispatch
+        # it, and `request()` would deadlock until its timeout.
+        reader = asyncio.create_task(self._read_loop(websocket), name="sidecar-read-loop")
+        try:
+            if self.config.probe_on_connect:
+                await self._probe(websocket)
+            await reader
+        finally:
+            reader.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reader
+            # Never leave a caller awaiting a reply that can no longer arrive.
+            self._fail_pending("client disconnected")
+
+    async def _read_loop(self, websocket: ServerConnection) -> None:
         async for raw in websocket:
             frame = self._decode(raw)
             if frame is None:
                 continue
             await self._dispatch(websocket, frame)
+
+    def _fail_pending(self, reason: str) -> None:
+        """Resolve every outstanding request with a failure, and forget them."""
+        for request_id, future in list(self._pending.items()):
+            if not future.done():
+                future.set_result(
+                    Response(ok=False, error={"code": "CANCELLED", "message": reason})
+                )
+            self._pending.pop(request_id, None)
+
+    # -- requesting the mod (SPEC.md 7.3, 7.5) -------------------------
+
+    async def request(
+        self,
+        type_name: str,
+        payload: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> Response:
+        """Send a request to the mod and await its correlated response.
+
+        Never raises for a protocol-level failure: a timeout or a disconnect is
+        reported as `ok=False` with the appropriate error code, so callers can
+        tell the user what happened (SPEC.md 11).
+        """
+        websocket = self._client
+        if websocket is None:
+            return Response(
+                ok=False,
+                error={"code": "EDITOR_NOT_OPEN", "message": "no client is connected"},
+            )
+
+        self._next_request_id += 1
+        request_id = f"s-{self._next_request_id}"
+        future: asyncio.Future[Response] = asyncio.get_running_loop().create_future()
+        self._pending[request_id] = future
+
+        frame = {"type": type_name, "id": request_id, "payload": payload or {}}
+        try:
+            await websocket.send(json.dumps(frame))
+            return await asyncio.wait_for(
+                future, timeout if timeout is not None else self.config.request_timeout_s
+            )
+        except TimeoutError:
+            log.warning("request %s (%s) timed out", request_id, type_name)
+            return Response(
+                ok=False,
+                error={
+                    "code": "INTERNAL_ERROR",
+                    "message": f"request {type_name} timed out",
+                },
+            )
+        finally:
+            self._pending.pop(request_id, None)
+
+    def _resolve(self, frame: dict[str, Any]) -> None:
+        """Complete the pending request this response belongs to."""
+        request_id = frame.get("id")
+        if not isinstance(request_id, str) or request_id not in self._pending:
+            log.warning("response for unknown or missing request id %r", request_id)
+            return
+
+        payload = frame.get("payload") or {}
+        response = Response(
+            ok=bool(payload.get("ok")),
+            result=payload.get("result"),
+            error=payload.get("error"),
+        )
+
+        future = self._pending.pop(request_id)
+        if not future.done():
+            future.set_result(response)
+
+    async def _probe(self, websocket: ServerConnection) -> None:
+        """Phase 1 smoke check: exercise `ping` and `get_editor_state`.
+
+        Enabled by `probe_on_connect`. Verifies the request/response path end to
+        end and logs what the mod reports, which is the Phase 1 exit criterion.
+        """
+        pong = await self.request("ping", {}, timeout=5)
+        if not pong.ok or pong.result != {"pong": True}:
+            log.error("probe: ping failed: %s", pong.error)
+            return
+        log.info("probe: ping -> pong")
+
+        state = await self.request("get_editor_state", {}, timeout=5)
+        if not state.ok:
+            # Expected outside the editor, and informative either way.
+            log.info("probe: get_editor_state -> %s", state.code)
+            return
+        log.info("probe: get_editor_state -> %s", json.dumps(state.result))
 
     # -- handshake -----------------------------------------------------
 
@@ -170,6 +300,15 @@ class SidecarServer:
     # -- dispatch ------------------------------------------------------
 
     async def _dispatch(self, websocket: ServerConnection, frame: dict) -> None:
+        # A response answers a request; it is never itself a request, so it must
+        # never draw a reply -- not even an error reply for a malformed one.
+        # Replying to a reply invites an unbounded echo loop between the two
+        # sides, which is exactly what an early build of the mod triggered.
+        # Resolve first, and return unconditionally.
+        if frame.get("type") == "response":
+            self._resolve(frame)
+            return
+
         problems = protocol.validate_envelope(frame)
         if problems:
             log.warning("invalid envelope: %s", "; ".join(problems))
@@ -182,6 +321,7 @@ class SidecarServer:
             return
 
         type_name = frame["type"]
+
         spec = protocol.spec_for(type_name)
         if spec is None:
             log.warning("unknown message type %r", type_name)

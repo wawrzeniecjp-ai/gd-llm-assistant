@@ -66,6 +66,11 @@ class SidecarConfig(BaseSettings):
     allow_non_loopback: bool = False
     token_path: Path = Field(default_factory=_default_token_path)
 
+    # Phase 1 verification aid: after a successful handshake, issue `ping` and
+    # `get_editor_state` and log the results. Off by default; the real client
+    # drives requests from the editor lifecycle instead.
+    probe_on_connect: bool = False
+
     # --- Tool loop limits (SPEC.md 6.2.3, 10.2) -----------------------
     max_tool_rounds: int = Field(default=10, ge=1, le=100)
     # Bounded by the mod's hard maximum: the mod's caps are authoritative (D10).

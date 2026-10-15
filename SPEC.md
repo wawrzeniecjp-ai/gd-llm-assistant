@@ -5,13 +5,21 @@
 | Field | Value |
 | --- | --- |
 | Project name | GD AI Assistant |
-| Document version | 0.6.0 |
-| Status | Draft — pre-implementation (S2 transport spike passed) |
+| Document version | 0.7.0 |
+| Status | Draft — pre-implementation (Phase 1 bridge verified in-editor) |
 | Target platform | Windows only (initial release) |
 | Target Geode version | v5.11.x (Geode SDK 5.11.1 verified locally; requires C++23). Geode v6 is WIP — see §15 Q3 |
 | Target GD version | 2.2081 |
 
-## 0.1 Changes from 0.5.0
+## 0.1 Changes from 0.6.0
+
+- **Phase 1 exit criteria met, verified in the editor.** The mod connected on editor open, completed `hello`, answered `ping` and `get_editor_state`, and closed cleanly on editor close. Measured against a real level: 10000 objects, 0 selected, `editor_layer` 0.
+- **New trap recorded (§6.1.11):** `LevelEditorLayer` does **not** declare `onExit` in the Geode bindings, unlike `PlayLayer` and most other layers. A `$modify` hook on it compiles (the call resolves to the inherited `CCNode::onExit`) but never fires. This caused a 5-10 second hang on game exit, because the session task kept polling and Geode's async-runtime shutdown waited on it. Shutdown now uses the `Exiting` game event plus editor-presence polling.
+- **New protocol invariant (§7.3):** a `response` must never draw a reply, not even an error reply for a malformed one. Replying to a reply lets the two sides echo without bound. Both sides now enforce this; the sidecar checks for `response` *before* envelope validation.
+- **`matjson` gotcha:** `matjson::Value()` default-constructs an **object**, not null. Event frames therefore need `matjson::Value(nullptr)`; the wrong form emitted `"id": {}`, which the sidecar rejected as `INVALID_REQUEST`.
+- **`ground_y` and `camera` are still omitted** from `get_editor_state` responses: their derivation is unverified, and a wrong `ground_y` would silently misplace generated objects. The schema requires only `object_count`, `grid_size` and `playtesting`.
+
+## 0.2 Changes from 0.5.0
 
 - **S2 resolved — no WebSocket dependency.** The bridge uses a hand-written RFC 6455 client on `arc::TcpStream` (D14, §6.1.10). This satisfies §12's "avoid unmaintained libraries": websocketpp is neglected, and any third-party library would bring its own thread and event loop, which §6.1.3 forbids bridging into Arc.
 - **S2 verified on the wire, not just compiled.** A mod load completed the full round trip against the Python sidecar: handshake accepted (`Sec-WebSocket-Accept` independently verified), token accepted, `hello` parsed with the correct mod/GD/Geode versions, and both the response and the pushed `history` frame decoded. The client frames ran on `arc-worker-*` threads, confirming §6.1.3.
@@ -19,7 +27,7 @@
 - **New modules:** `src/net/websocket.{hpp,cpp}` (handshake, masked text frames, fragmentation reassembly, ping/pong, close, 4 MB inbound cap) and `src/net/sha1.{hpp,cpp}`. Recorded in §6.1.10 and the §6.1.9 layout.
 - **`Origin` omission is load-bearing:** the client deliberately sends no `Origin` header, which is what makes D11's rejection rule enforceable. Now stated explicitly in §6.1.10.
 
-## 0.2 Changes from 0.4.0
+## 0.3 Changes from 0.4.0
 
 - **Version target settled and raised:** Geode SDK **5.11.1** is installed and the target is now **v5.11.x**. Geode v6 exists only as a work-in-progress migration guide, so no v6 work is in scope. Resolves §15 Q3 and Appendix A #1.
 - **Toolchain verified end to end:** Clang 23.1.3 (scoop LLVM), Ninja, CMake ≥ 3.29, Git, MSVC 14.51 + Windows SDK 10.0.26100 (VS BuildTools), Geode CLI 3.9.0, and `GEODE_SDK` set per workspace. Recorded in the new §6.1.9.
@@ -31,7 +39,7 @@
 - **Job-completion primitive confirmed:** Arc provides `arc::oneshot`, `arc::mpsc`, `arc::Semaphore` and `arc::Notify`; `arc::Mutex` is the async-aware lock (§6.1.4, Appendix A #9).
 - **New build-configuration section (§6.1.9):** Arc ships only its Core and Time features by default, so the mod's `CMakeLists.txt` must opt into the rest; the expected repository layout is specified there.
 
-## 0.3 Changes from 0.3.0
+## 0.4 Changes from 0.3.0
 
 - **Topology flipped (proposed):** the mod is the WebSocket client; the sidecar is the server. Resolves the port/role contradictions in 0.3.0 (§5, D1).
 - **Corrected API claims:** `createObject` / `removeObject` take `noUndo` (0.3.0 had it inverted); v4 coroutine/`Popup<>` APIs replaced with v5 equivalents (§6.1).
@@ -362,6 +370,7 @@ The network-capable Arc primitives (`arc::TcpStream`, `arc::UdpSocket`) require 
 - The `gd` value is checked against `GEODE_GD_VERSION` (2.2081) exactly, or accepts `*`.
 - `setup_geode_mod` reads `mod.json` from `CMAKE_CURRENT_SOURCE_DIR`, which is why the mod project must stay at the repository root (§6.1.9, repository layout).
 - `geode sdk install-binaries` is required before the first configure; without it the SDK fails at `Geode/CMakeLists.txt` with "No valid loader binary to link to".
+- `LevelEditorLayer` has no bindable `onExit`; see §6.1.11 before hooking any lifecycle function.
 
 **Repository layout.** No repository existed before this revision; the following top-level layout is a prerequisite for Phase 1:
 
@@ -404,6 +413,25 @@ Decision D14: the WebSocket client is hand-written against RFC 6455, on `arc::Tc
 **Threading.** Every method is a coroutine awaited on the async runtime; nothing in `src/net/` touches Cocos2d or GD objects (§6.1.3). Verified during the spike: the round trip ran on `arc-worker-*` threads, not the main thread.
 
 **Open follow-ups** (Phase 1, not blockers): reconnection with exponential backoff (§7.8 step 5), the `hello` retry path on token mismatch (4001), and coverage for the fragmentation and oversized-frame paths, which the spike did not exercise.
+
+### 6.1.11 Editor Lifecycle Hooks (verified)
+
+How the bridge tracks the editor, and the trap that cost a 5-10 second hang on game exit.
+
+**Connecting** is straightforward: `$modify(LevelEditorLayer)` and start the bridge from `init`, gated on the `auto-connect` setting (§6.1.8).
+
+**Disconnecting is not.** `LevelEditorLayer` does **not** declare `onExit` in the Geode bindings — unlike `PlayLayer`, `GauntletSelectLayer`, `GJShopLayer` and many others, which do. A `$modify` hook on `LevelEditorLayer::onExit` therefore compiles, because the call resolves to the inherited `cocos2d::CCNode::onExit`, but the hook is never installed and never fires. There is no compile-time or run-time indication of this.
+
+The consequence was that the session task never observed a stop request, kept polling indefinitely, and Geode's async-runtime shutdown ([`loader/src/main.cpp`](https://github.com/geode-sdk/geode)) blocked waiting on that task — which the user experienced as a 5-10 second hang on exit. Nothing in the log said so; the only symptom was a silent gap between the last mod log line and `Shutting down logger and async runtime..`.
+
+Two mechanisms replace it:
+
+1. **Editor close is polled.** Each 250 ms idle tick hops to the main thread and checks `LevelEditorLayer::get()`, which is null once the editor is gone. Detecting it sends `editor_closed`, closes the socket, and ends the run loop — so leaving the editor does not trigger a pointless reconnect.
+2. **Game exit uses `$on_game(Exiting)`.** `GameEventType::Exiting` is documented as firing when the game is about to exit, before static destructors, which is the reliable signal. It sets a flag that both stops the loop and suppresses the main-thread hop, since nothing may service such a callback during teardown.
+
+The poll's failure path matters too: if the main-thread dispatch cannot be scheduled at all, the loop ends the session rather than continuing without a way to observe the editor.
+
+**Rule for future hooks:** before relying on a `$modify` hook for a lifecycle function, confirm the function is declared on that specific class in the bindings, not merely inherited. `grep` the generated bindings for the class, do not infer from a sibling class that has it.
 
 ## 6.2 Sidecar Server (Python)
 
@@ -563,6 +591,10 @@ Every message uses the same envelope:
 ```
 
 Unsolicited errors use an `error` event (§7.6). Each request kind has a documented timeout; a missing response after the timeout is treated as `INTERNAL_ERROR` by the caller.
+
+**Invariant: a response never draws a reply.** A frame of type `response` answers an earlier request and is never itself a request, so it must not be answered — *including* when it is malformed. Answering a malformed response with an error response lets the two sides echo each other without bound: the invalid reply is rejected, the rejection is replied to, and so on. This is not hypothetical; it happened during Phase 1, when one side sent `"id": {}` (see §6.1.11's `matjson` note) and the resulting loop flooded the log at roughly 200 warnings per second until the connection was killed.
+
+Both sides therefore resolve or discard responses *before* any validation that could generate a reply. The sidecar checks `type == "response"` ahead of envelope validation, and the mod ignores any frame that is a `response` or carries a `null` id (the shape of an event, §7.4). A regression test covers the sidecar half.
 
 ## 7.4 Chat Messages
 
@@ -898,9 +930,13 @@ S5 (bitmap-font glyph coverage) was retired in 0.5.0 — see §8.3.1. All other 
 
 ## Phase 1 — WebSocket Bridge
 
+**Status: exit criteria met (0.7.0).** Verified in the editor: connection on editor open, `hello` handshake, `ping` and `get_editor_state` round trips, and a clean close on editor close. See §6.1.11 for the lifecycle mechanics and §7.3 for the response invariant.
+
 - Client connection, `hello`/token/Origin handling, `ping`, `get_editor_state`.
-- Reconnect with backoff.
+- Reconnect with backoff (1 s doubling to a 30 s cap).
 - **Exit:** a Python server and a fake mod complete the handshake; editor state queries work without frame hitches; A5.
+
+Not yet exercised: reconnection after a mid-session sidecar restart, and the 4001 token-mismatch retry path. Both need deliberate fault injection and are carried into Phase 2.
 
 ## Phase 2 — Editor API Layer
 
@@ -971,7 +1007,7 @@ Items asserted in this document that are not yet confirmed, with their 0.5.0 sta
 8. `createObjectsFromString` object limit value and suitability as a batch fast path.
 9. **Resolved (0.5.0):** Arc provides `arc::oneshot`, `arc::mpsc`, `arc::Semaphore` and `arc::Notify`; `arc::Mutex` is the async-aware lock.
 10. **Resolved (0.5.0):** no generic editor `update()` exists; vanilla `updateObjectLabel` / `updateObjectSection` / `quickUpdateAllPositions` / `updateGridLayer` / `updateGameObjects` replace it, so `nwo5` is not needed (§6.1.6).
-11. z-layer enum names and `editor_layer` indexing.
+11. **Partly resolved (0.7.0):** `editor_layer` reported 0 for the base layer of a real level, which is consistent with 0-based indexing. Still unverified: z-layer enum names, and whether non-base layers report 1, 2, ... Full resolution belongs with S-bindings in Phase 2.
 12. **Resolved (0.5.0):** keybinds are core Geode (`geode::Keybind`). Still unverified: whether Ctrl+Shift+C collides with editor shortcuts (S6).
 13. Geode index policy for LLM/network mods.
 14. **Resolved (0.5.0):** Arc ships Core and Time only; the rest must be enabled in `CMakeLists.txt` before the SDK is added (§6.1.9). Whether the newer-than-tested toolchain builds cleanly is S1.

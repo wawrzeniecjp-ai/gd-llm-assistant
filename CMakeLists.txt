@@ -19,6 +19,8 @@ add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
 
 add_library(${PROJECT_NAME} SHARED
     src/main.cpp
+    src/bridge/bridge.cpp
+    src/editor/editor_state.cpp
     src/net/sha1.cpp
     src/net/websocket.cpp
 )
