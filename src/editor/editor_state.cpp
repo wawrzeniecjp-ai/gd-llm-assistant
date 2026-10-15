@@ -10,6 +10,8 @@
 
 #include <algorithm>
 
+#include "transaction.hpp"
+
 using namespace geode::prelude;
 
 namespace gdai::editor {
@@ -423,6 +425,91 @@ void runUndoProbe() {
     editor->m_redoObjects->removeAllObjects();
 
     log::info("undo probe: done; {} objects now present (started with {})", countObjects(), before);
+}
+
+void runTransactionProbe() {
+    auto* editor = LevelEditorLayer::get();
+    if (editor == nullptr) {
+        log::warn("transaction probe: no editor open");
+        return;
+    }
+
+    constexpr int kBatch = 3;
+    constexpr float kProbeY = 750.f;
+
+    auto const countObjects = [editor] {
+        auto* objects = editor->getAllObjects();
+        return objects == nullptr ? 0 : static_cast<int>(objects->count());
+    };
+
+    auto const before = countObjects();
+    log::info("transaction probe: starting with {} objects", before);
+
+    auto& transactions = TransactionManager::get();
+    if (transactions.isOpen()) {
+        // Left over from an abandoned run; end it so this probe can proceed.
+        transactions.abortOpen("transaction probe");
+    }
+
+    auto opened = transactions.begin("probe");
+    if (!opened) {
+        log::warn("transaction probe: begin failed: {}", opened.unwrapErr());
+        return;
+    }
+    auto const txnId = opened.unwrap();
+    log::info("transaction probe: opened {}", txnId);
+
+    // Create with noUndo, which keeps this turn off the user's undo stack and is
+    // the behaviour the real create_objects job will use (Option A, D2).
+    auto created = 0;
+    for (auto i = 0; i < kBatch; ++i) {
+        auto* object = editor->createObject(
+            1, cocos2d::CCPoint { 100.f + static_cast<float>(i) * 30.f, kProbeY }, true
+        );
+        if (object != nullptr) {
+            transactions.recordCreated(object->m_uniqueID);
+            ++created;
+        }
+    }
+    auto const afterCreate = countObjects();
+    log::info(
+        "transaction probe: recorded {} creations, {} objects now present",
+        created, afterCreate
+    );
+
+    auto ended = transactions.end(txnId);
+    if (!ended) {
+        log::warn("transaction probe: end failed: {}", ended.unwrapErr());
+        return;
+    }
+    log::info(
+        "transaction probe: ended, summary {}",
+        ended.unwrap()["summary"].dump(0)
+    );
+
+    // The measurement that matters: does the bookkeeping restore the level?
+    auto reverted = transactions.revert(txnId);
+    if (!reverted) {
+        log::warn("transaction probe: revert failed: {}", reverted.unwrapErr());
+        return;
+    }
+    auto const afterRevert = countObjects();
+    log::info(
+        "TRANSACTION-PROBE-RESULT: {} -> {} -> {} objects (started {}, expected {})",
+        before, afterCreate, afterRevert, before, before
+    );
+    log::info(
+        "transaction probe: {}",
+        afterRevert == before ? "PASS (level restored)" : "FAIL (count did not return)"
+    );
+
+    // Reverting twice must be refused, which is what the UI relies on to hide the
+    // Revert action once it has been used.
+    if (auto second = transactions.revert(txnId); !second) {
+        log::info("transaction probe: second revert correctly refused: {}", second.unwrapErr());
+    } else {
+        log::warn("transaction probe: second revert was allowed, which it should not be");
+    }
 }
 
 void runUndoShapeProbe() {

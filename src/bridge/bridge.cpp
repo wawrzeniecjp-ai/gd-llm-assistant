@@ -41,6 +41,7 @@ void runDeveloperProbesOnce() {
     editor::runDifferentialProbe();
     editor::runUndoProbe();
     editor::runUndoShapeProbe();
+    editor::runTransactionProbe();
     log::info("developer probes: done");
 }
 

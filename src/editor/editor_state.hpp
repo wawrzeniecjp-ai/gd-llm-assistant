@@ -67,7 +67,17 @@ void dumpSaveStringSamples();
 /// level is left as it was found. Must be called on the main thread.
 void runDifferentialProbe();
 
-/// TEMPORARY (spike S3, second half): determines the **shape** of an undo entry.
+/// TEMPORARY (dev): exercises the transaction path end to end.
+///
+/// Opens a transaction, creates objects with `noUndo`, records them, ends the
+/// turn, then reverts and checks the object count returns to where it started.
+/// It is the only way to test `TransactionManager` without the Phase 2 request
+/// handlers, and deliberately restricts itself to APIs already proven safe in
+/// earlier probes -- it never calls `handleAction`/`undoLastAction`, which is
+/// what crashed the game once.
+void runTransactionProbe();
+
+/// TEMPORARY (dev): determines the **shape** of an undo entry.
 ///
 /// The first half measured that the default path gives one undo entry per
 /// created object, so a batch create would need N Ctrl+Z presses.
