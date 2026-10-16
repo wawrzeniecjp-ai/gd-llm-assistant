@@ -74,8 +74,58 @@ correctly against a real editor. That is deferred, not lost.
 | Loader | Game runs? | Mods load? |
 | --- | --- | --- |
 | v5.11.1 release (`413ac9b`) | **No** — crashes at startup in `CCEGLView::onGLFWWindowFocus` via Geode's `GLFWFocusCallback` | n/a |
-| nightly (`a6b9a91`) | Briefly (~1 min), then crashes at the same place | **No** — version gate, then an export mismatch |
-| v5.11.2 release (`3909856`) | **No** — dies in the first ~2 s of startup | **No** — never gets far enough |
+| nightly (`a6b9a91`) | Briefly, then crashes at the same place | **No** — version gate, then the export problem below |
+| v5.11.2 release (`3909856`) | **Yes**, when launched **through Steam** | **No** — same export problem |
+
+### The real blocker, identified precisely
+
+**Geometry Dash 2.209 removed three exported functions from its own
+`libcocos2d.dll`.** A mod built against the 2.2081 bindings imports them, so it cannot
+load, and the only symptom is `ERROR_PROC_NOT_FOUND` — which names no symbol.
+
+Found by diffing the import table of the built mod against the exports of the *new* game
+DLL (`dumpbin /imports` and `/exports`). Our mod imports 1088 symbols from
+`libcocos2d.dll`; exactly three are gone:
+
+```
+cocos2d::CCTouchDispatcher::registerForcePrio(cocos2d::CCObject*, int)
+DS_Dictionary::loadRootSubDictFromCompressedFile(char const*)
+DS_Dictionary::saveRootSubDictToCompressedFile(char const*)
+```
+
+This is the answer to "we don't know whether the API changed, and by how much". The API
+*has* changed, in a small and specific way, and it is a **game-side** change: nothing about
+it is Geode's doing or ours.
+
+Two further checks that close off the alternatives:
+
+- **Rebuilding will not fix it.** The `Geode.lib` import library shipped in v5.11.2 is
+  **byte-identical** (SHA-256 `9EC4373A…`) to the SDK's 5.11.1 one, so a rebuild produces
+  the same imports. The problem is the game's DLL, not Geode's.
+- **`Geode.dll` is innocent.** All 94 of our imports from it are present in v5.11.2's 2418
+  exports — zero missing. So the earlier `ERROR_PROC_NOT_FOUND` under the nightly was the
+  same three cocos symbols, not a Geode ABI change; the ABI theory was wrong.
+
+**When this clears:** a mod built against 2.209's cocos bindings, which requires the SDK
+to publish them. That is the single remaining dependency, and it is upstream.
+
+### Correction to an earlier reading
+
+An earlier note in this section claimed v5.11.2 "removes the version gate" (0 errors
+against 10). That was **wrong**, and worth recording because the mistake is easy to
+repeat: the count was taken from a log that had *stopped early*. v5.11.2's run died at
+`Entry took 0.017s`, before the version check had printed anything, so "0 errors" meant
+"the check never ran". Under a successful launch v5.11.2 reports the same gate as every
+other build. **A count of zero is only meaningful once you know the code that produces it
+actually ran.**
+
+### Launching the game: through Steam
+
+Launches via `Start-Process GeometryDash.exe` died silently in ~2 s — no crash log, no
+error line, no Windows application-error event. The same binary launched **through Steam**
+runs. This is a Steam/DRM behaviour, not a Geode fault, and it invalidated several of the
+earlier "the game dies" observations: those runs had simply not been started the way the
+game expects. Any future in-editor testing must launch via Steam.
 
 **v5.11.2 outcome.** Its notes say "Fix 2.209 crashes", and it does remove the version
 gate (zero `doesn't support this version` errors, against ten before). But the game still
@@ -112,10 +162,9 @@ reasons that each needed an experiment to find:
    function was not found.
    ```
 
-   A DLL built against the release loader (413ac9b) cannot bind to the nightly's
-   `Geode.dll`. Repackaging the manifest does not help, because this is an import-table
-   failure at load time, not a metadata check. Resolving it would mean linking against the
-   nightly's `Geode.lib` — i.e. building against an unreleased, moving ABI.
+   A DLL built against the 2.2081 bindings cannot bind to the 2.209 game DLLs. Repackaging
+   the manifest does not help, because this is an import-table failure at load time, not a
+   metadata check — see "The real blocker" above for the three symbols responsible.
 
 Also confirmed: **the SDK has no 2.209 bindings**, so declaring 2.209 in `mod.json` stops
 the build outright (`Mod ... is made for Geometry Dash version 2.209 but this version of
@@ -123,10 +172,8 @@ Geode is for GD version 2.2081`).
 
 **Conclusion: waiting is the correct call, and nothing is lost by it.** Three loader builds
 have been tried and none works, so there is nothing further to attempt from this side. When
-Geode publishes a loader that supports 2.209 *and* the SDK ships matching bindings, this is a
-rebuild-and-go — no code changes, because the blocker is neither our mod nor its design.
-**The game is not playable in any configuration** while this lasts; that is a Geode
-problem for the whole scene, not something to work around here.
+the SDK ships 2.209 bindings, this is a rebuild-and-go — no code changes, because the
+blocker is neither our mod nor its design. The game itself runs on v5.11.2.
 
 All experimental state was reverted: `mod.json` is back to 2.2081, the third-party
 `cvolton.level-id-api` manifest was restored from a backup, all 11 mods are back in place,
