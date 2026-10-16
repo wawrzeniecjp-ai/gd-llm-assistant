@@ -62,19 +62,40 @@ correctly against a real editor. That is deferred, not lost.
    one). Recorded as attempted so it is not suggested again. Third-party downgrade tools
    exist and are not used here: they mean running an unverified binary against a game
    install.
-2. **Wait for Geode.** The fix is not ours. See the timeline below for what that means.
-3. **Try a Geode nightly loader — TRIED, HALF-WORKING.** It fixes the crash, so the game
-   is playable again, but it still cannot load mods. See the outcome below. **The nightly
-   is installed**; the release files are backed up at
-   `%USERPROFILE%\geode-loader-backup-413ac9b`.
-4. **Continue on the unblocked work** (see the table above), and re-verify in the editor
-   once any of the above lands.
+2. **Wait for Geode.** The fix is not ours. Three loader builds have now been tried (see
+   below) and none works, so this is the remaining option.
+3. **Nightly and v5.11.2 loaders — TRIED, BOTH FAIL.** Neither restores in-editor testing.
+   See the outcomes below. **v5.11.2 is installed**; the v5.11.1 release files are backed
+   up at `%USERPROFILE%\geode-loader-backup-413ac9b`.
+4. **Continue on the unblocked work** (see the table above).
 
-### Nightly attempt: outcome (measured 2026-10-16)
+### Loader attempts: three builds, three failures (measured 2026-10-16)
 
-Installed `geode-a6b9a91-win.zip` from the `nightly` pre-release. Result: **the game
-launches and runs** — the crash is gone — but **not one mod loads**, for two independent
-reasons, and both had to be found by experiment:
+| Loader | Game runs? | Mods load? |
+| --- | --- | --- |
+| v5.11.1 release (`413ac9b`) | **No** — crashes at startup in `CCEGLView::onGLFWWindowFocus` via Geode's `GLFWFocusCallback` | n/a |
+| nightly (`a6b9a91`) | Briefly (~1 min), then crashes at the same place | **No** — version gate, then an export mismatch |
+| v5.11.2 release (`3909856`) | **No** — dies in the first ~2 s of startup | **No** — never gets far enough |
+
+**v5.11.2 outcome.** Its notes say "Fix 2.209 crashes", and it does remove the version
+gate (zero `doesn't support this version` errors, against ten before). But the game still
+does not run: it dies during startup with **no crash log, no error line, and no Windows
+application-error event** — the log simply stops after `Entry took 0.012s`.
+
+Isolating the cause took three runs, and the answer is not flattering for the release:
+
+- with all 11 mods installed — dies;
+- with only our mod and its dependency — dies identically;
+- with **zero mods installed — dies identically**.
+
+So it is Geode itself, not our mod and not another mod. The warning banner's advice
+("it is probably caused by an outdated mod") is actively misleading here; the mods are
+not involved.
+
+**Nightly outcome.** Installed `geode-a6b9a91-win.zip` from the `nightly` pre-release. The
+game *does* launch, which is more than the releases manage, but it crashed about a minute
+in (same `onGLFWWindowFocus` stack), and **not one mod loads**, for two independent
+reasons that each needed an experiment to find:
 
 1. **The version gate.** Every mod declares `gd.win = 2.2081`, and the loader rejects each
    one with `This mod doesn't support this version of Geometry Dash (2.2081)` — 11 errors,
@@ -100,14 +121,16 @@ Also confirmed: **the SDK has no 2.209 bindings**, so declaring 2.209 in `mod.js
 the build outright (`Mod ... is made for Geometry Dash version 2.209 but this version of
 Geode is for GD version 2.2081`).
 
-**Conclusion: waiting is the correct call, and nothing is lost by it.** When Geode
-publishes a loader that supports 2.209 *and* the SDK ships matching bindings, this is a
+**Conclusion: waiting is the correct call, and nothing is lost by it.** Three loader builds
+have been tried and none works, so there is nothing further to attempt from this side. When
+Geode publishes a loader that supports 2.209 *and* the SDK ships matching bindings, this is a
 rebuild-and-go — no code changes, because the blocker is neither our mod nor its design.
-In the meantime the game is playable on the nightly, which it was not before.
+**The game is not playable in any configuration** while this lasts; that is a Geode
+problem for the whole scene, not something to work around here.
 
 All experimental state was reverted: `mod.json` is back to 2.2081, the third-party
-`cvolton.level-id-api` manifest was restored from a backup, and our installed `.geode` was
-rebuilt cleanly. `git status` is clean.
+`cvolton.level-id-api` manifest was restored from a backup, all 11 mods are back in place,
+and our installed `.geode` was rebuilt cleanly. `git status` is clean.
 
 ### Timeline evidence (checked 2026-10-16)
 
