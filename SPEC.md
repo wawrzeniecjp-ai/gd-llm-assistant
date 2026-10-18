@@ -127,25 +127,19 @@ runs. This is a Steam/DRM behaviour, not a Geode fault, and it invalidated sever
 earlier "the game dies" observations: those runs had simply not been started the way the
 game expects. Any future in-editor testing must launch via Steam.
 
-**v5.11.2 outcome.** Its notes say "Fix 2.209 crashes", and it does remove the version
-gate (zero `doesn't support this version` errors, against ten before). But the game still
-does not run: it dies during startup with **no crash log, no error line, and no Windows
-application-error event** — the log simply stops after `Entry took 0.012s`.
+**v5.11.2 outcome.** Its notes say "Fix 2.209 crashes", and under a Steam launch the game
+**does run**. Mods still do not load, and the reason is the cocos export removal described
+above — not the loader.
 
-Isolating the cause took three runs, and the answer is not flattering for the release:
-
-- with all 11 mods installed — dies;
-- with only our mod and its dependency — dies identically;
-- with **zero mods installed — dies identically**.
-
-So it is Geode itself, not our mod and not another mod. The warning banner's advice
-("it is probably caused by an outdated mod") is actively misleading here; the mods are
-not involved.
+An earlier version of this section claimed v5.11.2 "removes the version gate (zero errors
+against ten)" and that the game died during startup. **Both were wrong.** The zero came from
+a log that had stopped early, before the check ran, and the "death" was the non-Steam launch
+path. Kept here because the two mistakes have the same shape: reading a measurement whose
+preconditions had not been met.
 
 **Nightly outcome.** Installed `geode-a6b9a91-win.zip` from the `nightly` pre-release. The
-game *does* launch, which is more than the releases manage, but it crashed about a minute
-in (same `onGLFWWindowFocus` stack), and **not one mod loads**, for two independent
-reasons that each needed an experiment to find:
+game launches but crashed about a minute in (same `onGLFWWindowFocus` stack), and **not one
+mod loads**, for two independent reasons that each needed an experiment to find:
 
 1. **The version gate.** Every mod declares `gd.win = 2.2081`, and the loader rejects each
    one with `This mod doesn't support this version of Geometry Dash (2.2081)` — 11 errors,
@@ -153,7 +147,7 @@ reasons that each needed an experiment to find:
    check with `geode package new --binary <existing dll>`) *did* clear it: the error count
    dropped to 10, and our mod advanced to the next failure. So the gate is real and is
    cleared by the declaration.
-2. **The loader changed its exports.** Past the gate, the mod fails to load anyway:
+2. **The cocos export removal.** Past the gate, the mod fails to load anyway:
 
    ```
    Failed to load binary for mod wawrzeniecjp.gd-ai-assistant:
@@ -166,18 +160,52 @@ reasons that each needed an experiment to find:
    the manifest does not help, because this is an import-table failure at load time, not a
    metadata check — see "The real blocker" above for the three symbols responsible.
 
-Also confirmed: **the SDK has no 2.209 bindings**, so declaring 2.209 in `mod.json` stops
-the build outright (`Mod ... is made for Geometry Dash version 2.209 but this version of
-Geode is for GD version 2.2081`).
+### The Geode v6 branch (investigated 2026-10-16)
+
+`geode-sdk/geode` has a **v6** branch with 2.209 work in it, and it is the only place the
+fix exists. Findings:
+
+**It has what we need.** `update versions to 2.209`, `update 2.209 libs`, and
+`add most of 2.209 header additions` are all on v6, along with `add new touch dispatcher
+members` — the class our missing `registerForcePrio` belongs to.
+
+**No v6 binary exists anywhere.** No release, no tag, no nightly (the `nightly` tag tracks
+`main`, at `c1ca042`). Using v6 means **building the Geode loader from source**.
+
+**Our porting cost looks low.** The largest v6 breaking change is `gd:: removal (wip)` and
+our source contains **zero** `gd::` usages. `V6 event cleanup` is the other risk and has not
+been assessed.
+
+**The cheap path does not work, and the reason is precise.** The 2.209 bindings *did* turn
+out to exist in `geode-sdk/bindings` (`bindings/2.209` and `bindings/2.2091`), and the SDK
+exposes a supported override — its own default is guarded by
+`if (NOT DEFINED GEODE_GD_VERSION)`, so a mod project can set it. Building with
+`GEODE_GD_VERSION = 2.2091` therefore *did* switch Codegen to the 2.2091 bindings. It then
+failed to compile, for instructive reasons:
+
+- `2.209`'s `GeometryDash.bro` has an **upstream typo** — `= win = 0xd6920` (double `=`)
+  at line 15705 — which Codegen rejects. `2.2091` is clean.
+- `2.2091` then fails against the v5 SDK's cocos headers because the bindings need
+  **matching headers that only v6 ships**: `scrollWheel` changed return type
+  `void` → `bool`; new classes `CCKeyboardActionManager` and `CCTouchClipper`; several
+  base classes absent.
+
+That last point is the important one: **bindings and cocos headers are a matched pair.**
+The bindings alone cannot bridge the gap, so v6 cannot be used piecemeal — it is the loader,
+the headers and the bindings together, or nothing.
+
+Worth recording the confirmed API deltas for the eventual port: `scrollWheel` returns
+`bool` in 2.209, and there are new input classes. Neither affects the sidecar.
 
 **Conclusion: waiting is the correct call, and nothing is lost by it.** Three loader builds
-have been tried and none works, so there is nothing further to attempt from this side. When
-the SDK ships 2.209 bindings, this is a rebuild-and-go — no code changes, because the
-blocker is neither our mod nor its design. The game itself runs on v5.11.2.
-
-All experimental state was reverted: `mod.json` is back to 2.2081, the third-party
-`cvolton.level-id-api` manifest was restored from a backup, all 11 mods are back in place,
-and our installed `.geode` was rebuilt cleanly. `git status` is clean.
+have been tried and none works, and the one branch that has a fix is an unreleased,
+daily-changing WIP that must be built from source. When v6 releases, this is a rebuild-and-go
+with minor porting — no design changes, because the blocker is the game's DLL and, after
+that, a handful of Geode API renames.
+All experimental state was reverted: `mod.json` is back to 2.2081, `CMakeLists.txt` carries
+no version override, the third-party `cvolton.level-id-api` manifest was restored from a
+backup, all 11 mods are back in place, and our installed `.geode` was rebuilt cleanly.
+`git status` is clean.
 
 ### Timeline evidence (checked 2026-10-16)
 
