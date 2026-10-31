@@ -6,6 +6,7 @@
 #include <Geode/binding/LevelEditorLayer.hpp>
 
 #include "../editor/properties.hpp"
+#include "../editor/save_properties.hpp"
 #include "../editor/transaction.hpp"
 
 #include <algorithm>
@@ -1042,10 +1043,174 @@ std::unique_ptr<Job> makeErrorJob(std::string errorObject) {
     return std::make_unique<ErrorJob>("INVALID_REQUEST", std::move(errorObject));
 }
 
+// ---------------------------------------------------------------------------
+// get_save_properties / set_save_property (SPEC.md 7.5.4)
+// ---------------------------------------------------------------------------
+
+/// Reports one object's raw save-string properties.
+///
+/// The values are deliberately **not** interpreted here. The sidecar has a generated
+/// key-to-name table (SPEC.md 7.5.3) covering 511 keys across 48 classes, and it is the
+/// only side that knows what key 51 means. The mod's job is to hand over the pairs.
+class GetSavePropertiesJob final : public EditorJob {
+public:
+    explicit GetSavePropertiesJob(std::int32_t uniqueId) : m_uniqueId(uniqueId) {}
+
+    bool step() override {
+        if (checkEditor()) {
+            return true;
+        }
+        if (m_finished) {
+            return true;
+        }
+        m_finished = true;
+
+        auto entries = editor::readSaveEntries(m_uniqueId);
+        if (!entries) {
+            m_error = entries.unwrapErr();
+            return true;
+        }
+        m_entries = std::move(entries.unwrap());
+        m_found = true;
+        return true;
+    }
+
+    JobOutcome takeOutcome() override {
+        if (m_editorClosed) {
+            return editorClosedOutcome();
+        }
+        if (!m_found) {
+            // The read path already produces a coded message ("CODE: text"), and
+            // `splitCode` in the bridge turns it back into code plus text -- the same
+            // route the transaction requests use.
+            return JobOutcome::failure(
+                "OBJECT_NOT_FOUND",
+                m_error.empty() ? "No matching objects." : m_error
+            );
+        }
+
+        auto properties = matjson::Value::array();
+        for (auto const& entry : m_entries) {
+            auto item = matjson::Value::object();
+            item["key"] = entry.key;
+            item["value"] = entry.value;
+            properties.push(std::move(item));
+        }
+
+        auto result = matjson::Value::object();
+        result["object_id"] = m_uniqueId;
+        result["properties"] = std::move(properties);
+        result["count"] = static_cast<int>(m_entries.size());
+        return JobOutcome::success(std::move(result));
+    }
+
+    std::string_view type() const override {
+        return "get_save_properties";
+    }
+
+private:
+    std::int32_t m_uniqueId;
+    std::vector<editor::SaveEntry> m_entries;
+    std::string m_error;
+    bool m_found = false;
+};
+
+/// Sets one save-string key on every target, rebuilding each object.
+///
+/// One object per slice, like `create_objects`: rebuilding is remove-plus-create, which
+/// is more expensive than a field write, so a batch of them must not land in one frame.
+///
+/// **The IDs change.** Each replacement is a new object with a new unique id, reported
+/// back so the caller can carry on working with it.
+class SetSavePropertyJob final : public EditorJob {
+public:
+    SetSavePropertyJob(std::vector<std::int32_t> targets, int key, std::string value)
+        : m_targets(std::move(targets)), m_key(key), m_value(std::move(value)) {}
+
+    bool step() override {
+        if (checkEditor()) {
+            return true;
+        }
+        if (m_index >= m_targets.size()) {
+            return true;
+        }
+
+        auto const uniqueId = m_targets[m_index];
+        ++m_index;
+
+        auto rewritten = editor::rewriteSaveProperty(uniqueId, m_key, m_value);
+        if (!rewritten) {
+            log::warn(
+                "set_save_property: object {} key {} failed: {}",
+                uniqueId, m_key, rewritten.unwrapErr()
+            );
+            m_failures.push_back(uniqueId);
+            return false;
+        }
+
+        auto const newId = rewritten.unwrap();
+        if (newId == uniqueId) {
+            // Nothing changed, which means the value was already what was asked for.
+            ++m_unchanged;
+            return false;
+        }
+        ++m_modified;
+        m_replacements.emplace_back(uniqueId, newId);
+        return false;
+    }
+
+    JobOutcome takeOutcome() override {
+        if (m_editorClosed) {
+            return editorClosedOutcome();
+        }
+
+        auto replacements = matjson::Value::array();
+        for (auto const& [oldId, newId] : m_replacements) {
+            auto item = matjson::Value::object();
+            item["old_id"] = oldId;
+            item["new_id"] = newId;
+            replacements.push(std::move(item));
+        }
+        auto failed = matjson::Value::array();
+        for (auto const id : m_failures) {
+            failed.push(id);
+        }
+
+        auto result = matjson::Value::object();
+        result["modified_count"] = m_modified;
+        result["unchanged_count"] = m_unchanged;
+        result["replacements"] = std::move(replacements);
+        result["failed"] = std::move(failed);
+        // Said plainly, because it is surprising and it matters: any id the caller was
+        // holding for these objects is now stale, including ones it created this turn.
+        result["ids_changed"] = true;
+
+        if (m_modified == 0 && m_unchanged == 0 && !m_failures.empty()) {
+            return JobOutcome::failure("OBJECT_NOT_FOUND", "No matching objects.");
+        }
+        return JobOutcome::success(std::move(result));
+    }
+
+    std::string_view type() const override {
+        return "set_save_property";
+    }
+
+private:
+    std::vector<std::int32_t> m_targets;
+    int m_key;
+    std::string m_value;
+    std::vector<std::pair<std::int32_t, std::int32_t>> m_replacements;
+    std::vector<std::int32_t> m_failures;
+    std::size_t m_index = 0;
+    int m_modified = 0;
+    int m_unchanged = 0;
+};
+
 bool isImplementedRequest(std::string_view type) {
     return type == "create_objects" || type == "modify_objects" || type == "delete_objects"
         || type == "set_selection" || type == "query_objects" || type == "summarize_region"
         || type == "get_object_properties" || type == "list_object_types"
+        || type == "get_save_properties" || type == "set_save_property"
         // The transaction requests are not queue jobs -- the bridge handles them with
         // a main-thread hop -- but they must be listed here, because this predicate is
         // the gate the bridge uses to reach *any* implemented request.
@@ -1216,6 +1381,63 @@ std::unique_ptr<Job> makeJob(std::string_view type, matjson::Value const& payloa
             return invalid("'object_id' must be an integer");
         }
         return std::make_unique<GetObjectPropertiesJob>(static_cast<std::int32_t>(value.unwrap()));
+    }
+
+    if (type == "get_save_properties") {
+        if (!payload.contains("object_id")) {
+            return invalid("'object_id' is required");
+        }
+        auto value = payload["object_id"].asInt();
+        if (!value.ok()) {
+            return invalid("'object_id' must be an integer");
+        }
+        return std::make_unique<GetSavePropertiesJob>(static_cast<std::int32_t>(value.unwrap()));
+    }
+
+    if (type == "set_save_property") {
+        if (!payload.contains("targets")) {
+            return invalid("'targets' is required");
+        }
+        auto targets = parseIdList(payload["targets"]);
+        if (!targets.has_value() || targets->empty()) {
+            return invalid("'targets' must be a non-empty list of ids");
+        }
+        if (targets->size() > kMaxObjectsPerRequest) {
+            return limitExceeded(fmt::format("at most {} targets", kMaxObjectsPerRequest));
+        }
+        if (!payload.contains("key")) {
+            return invalid("'key' is required");
+        }
+        auto key = payload["key"].asInt();
+        if (!key.ok() || key.unwrap() <= 0) {
+            return invalid("'key' must be a positive integer save-string key");
+        }
+        // The value goes through as text. Coercing it here would mean re-deriving the
+        // game's own encodings (dot-separated group lists, `a`-separated HSV, base64
+        // text); the sidecar knows the type from the property table and sends the exact
+        // text the save string should contain.
+        if (!payload.contains("value")) {
+            return invalid("'value' is required");
+        }
+        auto value = payload["value"];
+        std::string text;
+        if (auto asText = value.asString(); asText.ok()) {
+            text = asText.unwrap();
+        } else if (auto asInt = value.asInt(); asInt.ok()) {
+            text = fmt::format("{}", asInt.unwrap());
+        } else if (auto asDouble = value.asDouble(); asDouble.ok()) {
+            text = fmt::format("{}", asDouble.unwrap());
+        } else if (auto asBool = value.asBool(); asBool.ok()) {
+            // The game writes booleans as 0/1, and `true` in a save string would be read
+            // back as zero -- a wrong value rather than an error.
+            text = asBool.unwrap() ? "1" : "0";
+        } else {
+            return invalid("'value' must be a string, number or boolean");
+        }
+
+        return std::make_unique<SetSavePropertyJob>(
+            std::move(*targets), static_cast<int>(key.unwrap()), std::move(text)
+        );
     }
 
     if (type == "query_objects") {

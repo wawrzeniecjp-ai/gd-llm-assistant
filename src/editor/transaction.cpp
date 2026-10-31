@@ -117,6 +117,19 @@ bool TransactionManager::hasModified(std::int32_t uniqueId) const {
         [uniqueId](auto const& entry) { return entry.first == uniqueId; });
 }
 
+void TransactionManager::forgetModified(std::int32_t uniqueId) {
+    if (!m_hasOpen) {
+        return;
+    }
+    auto const removed = std::erase_if(
+        m_open.modified, [uniqueId](auto const& entry) { return entry.first == uniqueId; }
+    );
+    if (removed > 0) {
+        log::info("transaction {}: forgot {} recorded change(s) for replaced object {}",
+            m_open.id, removed, uniqueId);
+    }
+}
+
 void TransactionManager::recordModified(
     std::int32_t uniqueId,
     std::vector<std::pair<std::string, PropertyValue>> priorValues

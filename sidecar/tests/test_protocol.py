@@ -63,6 +63,9 @@ def test_registry_covers_every_message_in_the_spec() -> None:
         # colour channels: level state, not object state
         "get_color_channel",
         "set_color_channel",
+        # save-string properties: the escape hatch for everything the mod has no name for
+        "get_save_properties",
+        "set_save_property",
         # events, mod -> sidecar
         "editor_closed",
         "level_changed",

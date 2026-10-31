@@ -250,6 +250,26 @@
                     "required": ["direction", "payload", "result"],
                     "additionalProperties": false
                 },
+                "get_save_properties": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/getSavePropertiesPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/savePropertiesResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "set_save_property": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/setSavePropertyPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/setSavePropertyResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
                 "get_color_channel": {
                     "type": "object",
                     "properties": {

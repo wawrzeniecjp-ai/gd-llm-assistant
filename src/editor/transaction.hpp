@@ -95,6 +95,14 @@ public:
     /// True if this turn has already noted a change to the given object.
     [[nodiscard]] bool hasModified(std::int32_t uniqueId) const;
 
+    /// Drops any recorded property changes for an object.
+    ///
+    /// Called when the object is **replaced** rather than modified -- a save-string
+    /// rewrite removes the original and creates a new one, so recorded prior values are
+    /// keyed to an id that will never be found again. Leaving them makes revert log a
+    /// spurious "not found for property restore" and hides the real reason.
+    void forgetModified(std::int32_t uniqueId);
+
 private:
     TransactionManager() = default;
 

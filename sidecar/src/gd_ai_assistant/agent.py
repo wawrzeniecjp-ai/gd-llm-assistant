@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from . import catalog as catalog_module
-from . import properties_table, tools
+from . import properties_table, save_properties, tools
 from .agent_prompt import system_prompt
 from .providers.base import (
     AssistantTurn,
@@ -254,6 +254,14 @@ class ToolLoop:
         self._objects_used = 0
         self._text = ""
 
+        # Object ids that changed because a save-string write rebuilt the object.
+        #
+        # Kept for the turn and applied to every later call's ids, because a model that
+        # keeps using a stale id gets OBJECT_NOT_FOUND for an object it can see in its
+        # own earlier results -- a dead end it cannot diagnose. Never invents an id;
+        # only follows one that was reported.
+        self._renamed_ids: dict[int, int] = {}
+
     # -- public entry point ---------------------------------------------
 
     async def run(self, *, turn_id: str, message_id: str, user_text: str) -> TurnResult:
@@ -464,6 +472,20 @@ class ToolLoop:
                 True,
             )
 
+        # Repair stale ids before anything looks at them. A save-string write rebuilds the
+        # object, so the id the model is holding may no longer exist; following the
+        # reported replacement keeps its next call working instead of failing with
+        # OBJECT_NOT_FOUND on an object it can see in its own earlier results.
+        if self._renamed_ids and isinstance(call.arguments, dict):
+            remapped = self._remap_ids(call.arguments)
+            if remapped != call.arguments:
+                log.info(
+                    "remapped stale object ids for %s: %s",
+                    call.name,
+                    {old: new for old, new in self._renamed_ids.items()},
+                )
+                call = ToolCall(id=call.id, name=call.name, arguments=remapped)
+
         if tool.protocol_type is None:
             # Local tools: no editor round trip. Dispatched by name because more than one
             # tool now lives here, and falling through to the catalog for all of them
@@ -501,6 +523,16 @@ class ToolLoop:
             if is_error:
                 return opened, True
 
+        # Save-property tools need work on this side before the request goes out, and one
+        # of them needs post-processing, so they are not a plain pass-through.
+        if tool.spec.name == "set_save_property":
+            prepared = await self._prepare_set_save_property(call.arguments)
+            if "error" in prepared:
+                return prepared, True
+            call = ToolCall(id=call.id, name=call.name, arguments=prepared["arguments"])
+            result, is_error = await self._call_mod(tool, call, prepared)
+            return result, is_error
+
         response = await self._link.request(tool.protocol_type, call.arguments)
         if not response.ok:
             error = response.error or {}
@@ -513,11 +545,128 @@ class ToolLoop:
             )
 
         result = response.result if isinstance(response.result, dict) else {}
+        if tool.spec.name == "get_save_properties":
+            result = save_properties.describe_save_properties(result)
         if tool.mutates_objects:
             self._objects_used += tool.object_count(call.arguments)
         if tool.is_action:
             self._actions.append(_describe(tool.spec.name, call.arguments, result))
         return result, False
+
+    async def _prepare_set_save_property(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Turn a property *name* into a key, and refuse keys the mod will reject.
+
+        Both are done here rather than in the mod because only the sidecar has the
+        generated name table (SPEC.md 7.5.3). Catching a reserved key before the request
+        is worth the round trip: the mod's refusal would otherwise arrive after the
+        object had already been looked up, and the message the model sees would be a
+        generic error rather than "use modify_objects instead".
+        """
+        raw_key = arguments.get("key")
+        if raw_key is None:
+            key, info = save_properties.resolve_key(arguments.get("property"))
+        else:
+            key, info = save_properties.resolve_key(raw_key)
+
+        if key is None:
+            return {"error": info.get("error", "could not resolve that property name"), **info}
+
+        blocked = save_properties.check_writable(key)
+        if blocked is not None:
+            return {"error": f"key {key} cannot be written this way: {blocked}"}
+
+        if "value" not in arguments:
+            return {"error": "'value' is required"}
+
+        table = properties_table.load_table()
+        name = table.name_for_key(key)
+        kind = None
+        if name:
+            for entry in table.all_entries():
+                if entry.key == key:
+                    kind = entry.type
+                    break
+
+        # Rebuild the arguments the mod sees: key resolved, value encoded.
+        forwarded = {
+            "targets": list(arguments.get("targets") or []),
+            "key": key,
+            "value": save_properties.encode_value(arguments["value"], kind),
+        }
+        if not forwarded["targets"]:
+            return {"error": "'targets' must be a non-empty list of ids"}
+
+        return {
+            "arguments": forwarded,
+            "resolved": {"key": key, "name": name, "type": kind, **info},
+        }
+
+    async def _call_mod(
+        self, tool: tools.Tool, call: ToolCall, prepared: dict[str, Any]
+    ) -> tuple[dict[str, Any], bool]:
+        """Send a prepared save-property request and annotate the result."""
+        assert tool.protocol_type is not None
+        response = await self._link.request(tool.protocol_type, call.arguments)
+        if not response.ok:
+            error = response.error or {}
+            return (
+                {
+                    "error": error.get("message", "the request failed"),
+                    "code": error.get("code", "INTERNAL_ERROR"),
+                },
+                True,
+            )
+
+        result = dict(response.result) if isinstance(response.result, dict) else {}
+        resolved = prepared.get("resolved", {})
+        result["property"] = resolved
+
+        # Make the id change impossible to miss. The model has to carry on with the new
+        # ids, and a replacement list buried in a result object is easy to skim past --
+        # so it is also spelled out, and remembered for the rest of the turn so a later
+        # call can be corrected automatically.
+        replacements = result.get("replacements") or []
+        for item in replacements:
+            old_id, new_id = item.get("old_id"), item.get("new_id")
+            if isinstance(old_id, int) and isinstance(new_id, int):
+                self._renamed_ids[old_id] = new_id
+        if replacements:
+            result["note"] = (
+                "The object(s) were rebuilt, so their ids changed. Use the `new_id` "
+                "values from here on; the old ids no longer exist."
+            )
+
+        self._objects_used += tool.object_count(call.arguments)
+        if tool.is_action:
+            self._actions.append(_describe(tool.spec.name, call.arguments, result))
+        return result, False
+
+    def _remap_ids(self, arguments: Any) -> Any:
+        """Follow object ids that changed because of a save-property write.
+
+        A rebuilt object has a new id, and a model that keeps using the old one gets
+        OBJECT_NOT_FOUND for an object it can see in its own earlier results. Remapping
+        here turns that dead end into a working call, and is only ever a *repair*: it
+        never invents an id, only follows one that was reported.
+        """
+        if not self._renamed_ids:
+            return arguments
+        if isinstance(arguments, dict):
+            remapped = {}
+            for key, value in arguments.items():
+                if key in {"targets", "object_id"} and isinstance(value, int):
+                    remapped[key] = self._renamed_ids.get(value, value)
+                elif key in {"targets", "ids"} and isinstance(value, list):
+                    remapped[key] = [
+                        self._renamed_ids.get(item, item) if isinstance(item, int) else item
+                        for item in value
+                    ]
+                else:
+                    remapped[key] = self._remap_ids(value)
+            return remapped
+        if isinstance(arguments, list):
+            return [self._remap_ids(item) for item in arguments]
+        return arguments
 
     async def _begin_transaction(self) -> tuple[dict[str, Any], bool]:
         response = await self._link.request("begin_transaction", {"label": self._turn_id})
@@ -583,6 +732,7 @@ class ToolLoop:
         self._txn_id = None
         self._objects_used = 0
         self._text = ""
+        self._renamed_ids = {}
 
     def _result(self, status: str, text: str, *, txn_id: str | None = None) -> TurnResult:
         return TurnResult(

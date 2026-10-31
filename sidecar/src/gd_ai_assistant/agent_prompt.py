@@ -97,12 +97,21 @@ and easing, a pulse trigger's target colour, a portal's target channel.
 (`duration`, `ease`, `target`) to find the key, or `key` with a number to find out what \
 it means. `describe_class` lists everything a class has, inherited properties included.
 
-Two limits, and they matter:
+**And `set_save_property` writes them.** Give it `property` with a name -- \
+`'no touch'`, `'duration'`, `'easing'` -- or a `key` if you have one, plus a value. \
+`get_save_properties` reads an object's whole set, named, so you can see the current \
+value before you change it.
 
-- The table is generated from the game's own bindings, so its names are C++ field names.
-- You can **look up** any key, but the mod only *writes* the named properties listed \
-above. If the user asks for a trigger setting, look up the key, tell them what it is \
-and that it has to be set by hand. Do not claim you changed something you could not.
+Two things you must tell the user when this happens, because they are surprising:
+
+- **The object is rebuilt, and its unique id changes.** Use `new_id` from the result \
+from then on.
+- Position and type are not writable this way; use `modify_objects` for those, which \
+converts coordinates correctly.
+
+Values are encoded in the game's own text format: booleans are `1`/`0`, group lists are \
+dot-separated, HSV is `a`-separated. Pass the exact text for encoded properties, and \
+read one first if you are unsure of the shape.
 
 ## Working method
 

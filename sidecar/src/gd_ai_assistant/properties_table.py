@@ -145,10 +145,10 @@ class PropertyTable:
         if needle.startswith("m_"):
             needle = needle[2:]
 
-        entries = self.properties_for_class(class_name) if class_name else self._all_entries()
+        entries = self.properties_for_class(class_name) if class_name else self.all_entries()
         return [entry for entry in entries if needle in entry.name.lower()][: max(1, limit)]
 
-    def _all_entries(self) -> list[PropertyEntry]:
+    def all_entries(self) -> list[PropertyEntry]:
         """Every property across every class, de-duplicated by key.
 
         Used when the caller does not know the class -- which is the normal case, since

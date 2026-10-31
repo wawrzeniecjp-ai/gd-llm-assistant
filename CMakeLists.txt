@@ -24,6 +24,7 @@ add_library(${PROJECT_NAME} SHARED
     src/editor/editor_state.cpp
     src/editor/object_catalog.cpp
     src/editor/properties.cpp
+    src/editor/save_properties.cpp
     src/editor/transaction.cpp
     src/exec/editor_jobs.cpp
     src/exec/handler_verification.cpp

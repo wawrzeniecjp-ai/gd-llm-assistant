@@ -255,14 +255,91 @@ def _build() -> dict[str, Tool]:
                     "type": "object",
                     "required": ["class"],
                     "additionalProperties": False,
-                    "properties": {
-                        "class": {"type": "string", "description": "Class name."}
-                    },
+                    "properties": {"class": {"type": "string", "description": "Class name."}},
                 },
             ),
             protocol_type=None,
             mutates_objects=False,
             is_action=False,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="get_save_properties",
+                description=(
+                    "Read **every** property of one object, named where the game's "
+                    "bindings name it. Use this for settings you have no named property "
+                    "for -- a trigger's flags, durations, easing -- and to see a "
+                    "property's current value before changing it. Companion to "
+                    "set_save_property."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["object_id"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "object_id": {
+                            "type": "integer",
+                            "description": "The object's unique id.",
+                        }
+                    },
+                },
+            ),
+            protocol_type="get_save_properties",
+            mutates_objects=False,
+            is_action=False,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="set_save_property",
+                description=(
+                    "Write any property of an object by its save-string key, including "
+                    "settings this mod has no named property for. Pass `key` (a number) "
+                    "or `property` (a name such as 'no touch', 'duration', 'easing') -- "
+                    "a name is resolved against the game's own field names. "
+                    "**This rebuilds the object, so its unique id changes**; the result "
+                    "gives the new id and you must use it from then on. Not for "
+                    "position or type: use modify_objects for x/y/rotation."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["targets"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "targets": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "minItems": 1,
+                            "description": "Object unique ids.",
+                        },
+                        "key": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": (
+                                "Save-string key, e.g. 121. Prefer `property` unless you "
+                                "already have the key."
+                            ),
+                        },
+                        "property": {
+                            "type": "string",
+                            "description": (
+                                "Property name, e.g. 'no touch', 'duration', 'easing'. "
+                                "Used when `key` is absent."
+                            ),
+                        },
+                        "value": {
+                            "type": ["string", "number", "boolean"],
+                            "description": (
+                                "New value. Booleans become 1/0. For encoded properties "
+                                "(group lists, HSV, text) pass the exact text the save "
+                                "string should carry."
+                            ),
+                        },
+                    },
+                },
+            ),
+            protocol_type="set_save_property",
+            mutates_objects=True,
+            is_action=True,
         ),
         Tool(
             spec=ToolSpec(
