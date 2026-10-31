@@ -33,6 +33,22 @@
             "additionalProperties": false
         },
 
+        "toolCall": {
+            "description": "tool_call (sidecar -> mod, event). Names the tool the turn is running so the panel can show progress instead of a static indicator.",
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["tool"],
+            "properties": {
+                "turn_id": { "type": "string", "maxLength": 64 },
+                "tool": { "type": "string", "maxLength": 64 },
+                "summary": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Optional human-readable line, e.g. 'Created 5 objects'."
+                }
+            },
+            "additionalProperties": false
+        },
         "transactionReverted": {
             "description": "transaction_reverted (mod -> sidecar, event). Lets the sidecar tell the LLM its changes are gone.",
             "x-direction": "m2s",

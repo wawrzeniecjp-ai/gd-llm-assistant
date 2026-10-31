@@ -75,6 +75,13 @@ public:
     /// A turn started: show the thinking indicator and turn Send into Stop.
     void postTurnStarted();
 
+    /// Names the tool the turn is running, shown inside the thinking indicator.
+    ///
+    /// Without this a forty-round turn looks exactly like a frozen one. The name is
+    /// all the panel shows -- a full argument summary would be noise -- and the point
+    /// is that it *changes*, which is what proves work is happening.
+    void postProgress(std::string toolName);
+
     /// A turn ended: hide the indicator, restore Send, and show the summary.
     ///
     /// `txnId` is the transaction the turn opened, or empty if it changed nothing.

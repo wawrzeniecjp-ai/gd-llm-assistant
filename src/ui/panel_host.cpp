@@ -179,6 +179,16 @@ void PanelHost::postTurnStarted() {
     });
 }
 
+void PanelHost::postProgress(std::string toolName) {
+    onPanel([toolName = std::move(toolName)](ChatPanel& panel) {
+        // The thinking indicator may not exist yet if the event arrives before
+        // `turn_started`; `setProgress` copes with that and the name is picked up when
+        // the indicator is created.
+        panel.setThinking(true);
+        panel.setProgress(std::move(toolName));
+    });
+}
+
 void PanelHost::postTurnFinished(
     std::string status, std::vector<std::string> lines, std::string txnId
 ) {

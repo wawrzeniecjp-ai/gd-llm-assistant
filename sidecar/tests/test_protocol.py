@@ -39,6 +39,7 @@ def test_registry_covers_every_message_in_the_spec() -> None:
         "transaction_reverted",
         # chat, sidecar -> mod
         "turn_started",
+        "tool_call",
         "assistant_message",
         "assistant_message_delta",
         "turn_finished",
@@ -91,6 +92,7 @@ def test_requests_declare_a_result_and_events_do_not() -> None:
                 "turn_started",
                 "assistant_message",
                 "assistant_message_delta",
+                "tool_call",
                 "turn_finished",
                 "sidecar_status",
                 "system_message",

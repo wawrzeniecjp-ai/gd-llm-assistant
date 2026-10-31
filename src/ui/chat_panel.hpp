@@ -183,6 +183,14 @@ public:
     /// Shows or hides the animated thinking indicator (SPEC.md 8.9).
     void setThinking(bool on);
 
+    /// Names the tool the turn is currently running, or clears it.
+    ///
+    /// Shown inside the thinking indicator instead of the bare word "Thinking". A
+    /// long turn and a hung one look identical otherwise, so this is what tells the
+    /// user the assistant is working rather than stuck -- and *what* it is doing, which
+    /// is the difference between watching progress and waiting blindly.
+    void setProgress(std::string toolName);
+
     /// Replaces the thinking indicator with a turn summary (SPEC.md 8.9).
     ///
     /// `txnId` is the transaction the turn opened, or empty when it changed
@@ -286,6 +294,21 @@ private:
 
     void tickThinking(float dt);
 
+    /// Rewrites the wrapped draft preview to match the input box.
+    ///
+    /// `TextInput` is single-line and shrinks its own label to fit, so a long message
+    /// becomes unreadable while it is being typed and cannot be broken across lines.
+    /// The preview mirrors the draft above the input at a fixed size, shown only when
+    /// the draft no longer fits on one line -- so a short message looks exactly as it
+    /// did before.
+    void updateDraftPreview();
+
+    /// The rect the draft preview occupies, empty when it is hidden.
+    [[nodiscard]] cocos2d::CCRect draftPreviewRect() const;
+
+    /// The input row's rect, in the panel's own space.
+    [[nodiscard]] cocos2d::CCRect inputRowRect() const;
+
     /// Applies `m_hidden` and `m_playtestHidden` to the node's visibility.
     void applyVisibility();
 
@@ -324,6 +347,15 @@ private:
     CCContentLayer* m_messageContent = nullptr;
     cocos2d::CCNode* m_inputRow = nullptr;
     geode::TextInput* m_input = nullptr;
+
+    /// Wrapped mirror of the draft, shown only when it does not fit on one line.
+    geode::Label* m_draftPreview = nullptr;
+
+    /// Height reserved for the preview, or 0 when it is hidden.
+    float m_draftPreviewHeight = 0.f;
+
+    /// The tool the running turn is using, or empty. Shown by the thinking indicator.
+    std::string m_progressTool;
     InputForwarder m_inputForwarder;
     cocos2d::CCLabelBMFont* m_buttonLabel = nullptr;
     geode::Button* m_actionButton = nullptr;

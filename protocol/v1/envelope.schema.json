@@ -48,6 +48,15 @@
                     "required": ["direction", "payload"],
                     "additionalProperties": false
                 },
+                "tool_call": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "chat.schema.json#/$defs/toolCall" }
+                    },
+                    "required": ["direction", "payload"],
+                    "additionalProperties": false
+                },
                 "transaction_reverted": {
                     "type": "object",
                     "properties": {

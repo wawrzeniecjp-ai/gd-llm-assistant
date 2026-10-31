@@ -459,7 +459,27 @@ class ToolLoop:
 
     # -- tool execution --------------------------------------------------
 
+    async def _report_progress(self, tool_name: str) -> None:
+        """Best-effort: a missing progress event must never break a turn.
+
+        Sending an event is the one place in the loop where a transport failure has
+        nothing to do with the work being done. If it fails, the turn continues -- the
+        user loses a label, not the edits.
+        """
+        try:
+            await self._link.send_event("tool_call", {"turn_id": self._turn_id, "tool": tool_name})
+        except Exception as exc:  # noqa: BLE001 -- deliberately broad, see above
+            log.debug("could not report progress for %s: %s", tool_name, exc)
+
     async def _execute(self, call: ToolCall) -> tuple[dict[str, Any], bool]:
+        # Tell the panel what is happening before doing it, not after.
+        #
+        # A turn can run forty rounds, and the panel shows one indicator heading for all
+        # of them, so without this a working turn and a frozen one look identical. Sent
+        # before the call so the name appears while the work is in flight -- after would
+        # only narrate history.
+        await self._report_progress(call.name)
+
         tool = tools.get(call.name)
         if tool is None:
             # A hallucinated tool name is recoverable information, not a reason to

@@ -386,6 +386,10 @@ void ChatPanel::buildInput() {
         // not usable.
         input->setCommonFilter(CommonFilter::Any);
         input->setID("input"_spr);
+        // The callback fires on every keystroke and is the only signal the panel gets
+        // while the user types: `TextInput` forwards `textChanged` through our delegate
+        // chain, so this works even though `m_inputForwarder` owns the node's delegate.
+        input->setCallback([this](std::string const&) { updateDraftPreview(); });
         m_inputRow->addChild(input, 1);
         m_input = input;
 
@@ -412,6 +416,28 @@ void ChatPanel::buildInput() {
         m_buttonLabel->setScale(kInputScale);
     }
 
+    // Wrapped mirror of the draft, above the input box.
+    //
+    // `TextInput` is single-line: once the text is wider than the box it scales its own
+    // label down (via `setLimitLabelWidth`), so a long request becomes unreadable at
+    // exactly the moment it matters, and there is no way to break a line. This is not a
+    // multi-line input -- that would mean a custom text field with its own caret and
+    // selection -- but it makes the draft *legible* while typing, which is the actual
+    // complaint. One line at a time: it appears only when the draft overflows.
+    auto preview = Label::create("", kFont);
+    if (preview) {
+        preview->setAnchorPoint({ 0.f, 1.f });
+        preview->setScale(kTextScale);
+        preview->setColor({ 200, 213, 230 });
+        preview->setAlignment(Label::Alignment::Left);
+        preview->setVisible(false);
+        preview->setID("draft-preview"_spr);
+        addChild(preview, 1);
+        m_draftPreview = preview;
+    } else {
+        log::warn("panel: could not create the draft preview");
+    }
+
     auto button = Button::createWithSpriteFrameName("GJ_button_01.png", [this](Button* sender) {
         onSubmit(sender);
     });
@@ -431,15 +457,36 @@ void ChatPanel::buildInput() {
 // ---------------------------------------------------------------------------
 
 float ChatPanel::messageAreaHeight() const {
-    return m_size.height - kHeaderHeight - kInputHeight - 4.f * kPad;
+    // The draft preview takes its space from the transcript rather than the input row.
+    // Growing the input row instead would push the whole panel's contents up and make
+    // the panel re-measure every time a character is typed.
+    return m_size.height - kHeaderHeight - kInputHeight - 4.f * kPad - m_draftPreviewHeight;
 }
 
 cocos2d::CCRect ChatPanel::messageAreaRect() const {
     return {
         kPad,
-        kPad + kInputHeight + kPad,
+        kPad + kInputHeight + kPad + m_draftPreviewHeight,
         m_size.width - 2.f * kPad,
         messageAreaHeight(),
+    };
+}
+
+cocos2d::CCRect ChatPanel::inputRowRect() const {
+    // The whole strip the input and Send button live in, including the margins: a click
+    // in the gap between them is a click on the panel, not on the editor behind it.
+    return { 0.f, 0.f, m_size.width, kPad + kInputHeight + kPad };
+}
+
+cocos2d::CCRect ChatPanel::draftPreviewRect() const {
+    if (m_draftPreviewHeight <= 0.f) {
+        return {};
+    }
+    return {
+        kPad,
+        kPad + kInputHeight + kPad,
+        m_size.width - 2.f * kPad,
+        m_draftPreviewHeight,
     };
 }
 
@@ -502,6 +549,12 @@ void ChatPanel::relayout() {
         m_actionButton->setPosition({ width - kPad - kButtonWidth * 0.5f, kPad + kInputHeight * 0.5f });
     }
 
+    if (m_draftPreview) {
+        auto const preview = draftPreviewRect();
+        m_draftPreview->setPosition({ preview.origin.x, preview.origin.y + preview.size.height });
+        m_draftPreview->setMaxWidth(usableTextWidth() / kTextScale);
+    }
+
     // Re-laid out rather than just re-scrolled: collapsing and expanding changes the
     // visible height, and the wrapping of every message depends on it.
     refreshLayout();
@@ -522,7 +575,13 @@ void ChatPanel::applyVisibility() {
     // set directly: the user hid it, or the player is testing the level. Deriving it
     // means neither can undo the other -- leaving playtest must not reveal a panel
     // the user chose to hide.
-    setVisible(!m_hidden && !m_playtestHidden);
+    auto const visible = !m_hidden && !m_playtestHidden;
+    setVisible(visible);
+
+    // Toggling the touch handler rather than only returning false from
+    // `ccTouchBegan`: a hidden panel should not be in the dispatcher at all, so the
+    // editor's own gestures are untouched rather than being claimed and dropped.
+    setTouchEnabled(visible);
 }
 
 void ChatPanel::setHidden(bool hidden) {
@@ -729,6 +788,9 @@ void ChatPanel::setThinking(bool on) {
     if (!m_messageContent) return;
 
     if (!on) {
+        // The tool name belongs to the turn that just ended; leaving it set would make
+        // the next turn open by naming a tool it has not called yet.
+        m_progressTool.clear();
         if (m_thinkingNode) {
             unschedule(schedule_selector(ChatPanel::tickThinking));
             m_messageNodes.erase(
@@ -768,9 +830,82 @@ void ChatPanel::tickThinking(float dt) {
     // without a glyph for a fancier character degrades to a blank box.
     static constexpr std::array<char const*, 3> kDots { ".", "..", "..." };
     m_thinkingStep = (m_thinkingStep + 1) % static_cast<int>(kDots.size());
+    // The tool name replaces the bare word when there is one. A long turn and a hung
+    // one are otherwise indistinguishable, and "Thinking..." for forty rounds tells the
+    // user nothing about whether anything is happening.
+    auto const label = m_progressTool.empty() ? std::string("Thinking") : m_progressTool;
     m_thinkingNode->setString(
-        fmt::format("Thinking{}", kDots[static_cast<size_t>(m_thinkingStep)]).c_str()
+        fmt::format("{}{}", label, kDots[static_cast<size_t>(m_thinkingStep)]).c_str()
     );
+}
+
+void ChatPanel::setProgress(std::string toolName) {
+    if (m_progressTool == toolName) {
+        return;
+    }
+    m_progressTool = std::move(toolName);
+    if (m_thinkingNode) {
+        // Repainted immediately rather than waiting up to 0.4 s for the next tick: the
+        // point of the change is to show the switch as it happens.
+        tickThinking(0.f);
+    }
+}
+
+void ChatPanel::updateDraftPreview() {
+    if (!m_draftPreview || !m_input) {
+        return;
+    }
+
+    auto const text = std::string(m_input->getString());
+    if (text.empty()) {
+        if (m_draftPreviewHeight > 0.f) {
+            m_draftPreviewHeight = 0.f;
+            m_draftPreview->setVisible(false);
+            relayout();
+        }
+        return;
+    }
+
+    // Measured **before** wrapping. A label with a max width reports the wrapped width,
+    // so the only way to ask "does this fit on one line" is to lay it out unwrapped
+    // first. A width of 0 turns line breaking off.
+    m_draftPreview->setMaxWidth(0.f);
+    m_draftPreview->setString(text.c_str());
+    auto const unwrapped = m_draftPreview->getContentSize().width;
+
+    // Thresholded at the point the *input box* would start shrinking, not the point the
+    // text would overflow.
+    //
+    // `TextInput` scales its label down as soon as the text exceeds `m_maxLabelWidth`, so
+    // it is already unreadable well before it runs off the end of the box. Waiting for an
+    // overflow meant the preview appeared only after the thing it exists to replace had
+    // become illegible.
+    auto const inputWidth = (m_size.width - 2.f * kPad - kButtonWidth - kPad) / 0.62f;
+    auto const limit = inputWidth - 12.f;
+
+    if (unwrapped <= limit) {
+        // It still fits the input at full size, so the preview would be a second copy of
+        // legible text in a different place.
+        if (m_draftPreviewHeight > 0.f) {
+            m_draftPreviewHeight = 0.f;
+            m_draftPreview->setVisible(false);
+            relayout();
+        }
+        return;
+    }
+
+    m_draftPreview->setMaxWidth(usableTextWidth() / kTextScale);
+    // Capped, so a pasted wall of text cannot swallow the transcript. Three lines is
+    // enough to see what is being written and where the end of it is.
+    auto const capped = std::min(
+        m_draftPreview->getScaledContentSize().height, 3.f * kInputHeight * kTextScale
+    );
+
+    m_draftPreview->setVisible(true);
+    if (std::abs(capped - m_draftPreviewHeight) > 0.5f) {
+        m_draftPreviewHeight = capped;
+        relayout();
+    }
 }
 
 void ChatPanel::showTurnSummary(
@@ -778,6 +913,7 @@ void ChatPanel::showTurnSummary(
     std::string const& txnId
 ) {
     setThinking(false);
+    setProgress({});
 
     std::string text;
     if (status == "completed") {
@@ -962,7 +1098,12 @@ std::string ChatPanel::draft() const {
 }
 
 void ChatPanel::clearDraft() {
-    if (m_input) m_input->setString("", false);
+    if (m_input) {
+        m_input->setString("", false);
+    }
+    // `triggerCallback = false` above means the text-change callback does not fire, so
+    // the preview would otherwise stay on screen showing a message that was just sent.
+    updateDraftPreview();
 }
 
 void ChatPanel::setOnSubmit(geode::Function<void(std::string)> onSubmit) {
@@ -1099,11 +1240,31 @@ void ChatPanel::registerWithTouchDispatcher() {
 }
 
 bool ChatPanel::ccTouchBegan(cocos2d::CCTouch* touch, cocos2d::CCEvent* event) {
+    // A hidden panel must not eat clicks.
+    //
+    // `setVisible(false)` stops drawing but leaves the targeted delegate registered, so
+    // an invisible panel was still claiming touches over the editor -- with Ctrl+Shift+H
+    // hiding it, clicks in that corner of the screen did nothing at all. Checking here
+    // is the belt; `applyVisibility` takes the delegate out of the dispatcher as the
+    // braces, because a delegate that is never called is cheaper than one that is.
+    if (!isVisible() || m_hidden || m_playtestHidden) {
+        return false;
+    }
+
     auto point = convertTouchToNodeSpace(touch);
-    // Claim the message area so a scroll drag cannot also pane the editor. The
-    // header (collapse button) and the input row (text input, send) are left
-    // alone: claiming them is what previously made Send look broken.
-    auto claimed = m_expanded && messageAreaRect().containsPoint(point);
+
+    // Claim the message area so a scroll drag cannot also pane the editor.
+    //
+    // The input row is claimed too, and that is new: the text field only claims the
+    // *text* part of its own box, so a click in the empty space beside the text fell
+    // through to the editor and pressed a button underneath the panel. Claiming the
+    // strip does not take the click away from the field or from Send -- both are
+    // registered at `kCCMenuHandlerPriority` (-128), which dispatches before this
+    // delegate at -1 -- it only catches what nothing else wanted.
+    auto claimed = m_expanded
+        && (messageAreaRect().containsPoint(point)
+            || inputRowRect().containsPoint(point)
+            || draftPreviewRect().containsPoint(point));
     log::debug("panel: touch at ({}, {}) claimed={}", point.x, point.y, claimed);
     return claimed;
 }

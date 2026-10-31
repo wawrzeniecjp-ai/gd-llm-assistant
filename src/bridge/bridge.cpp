@@ -900,6 +900,17 @@ void Bridge::handleEvent(std::string const& type, matjson::Value const& payload)
         return;
     }
 
+    if (type == "tool_call") {
+        // Progress, not content. The panel puts this in the thinking indicator, which is
+        // the only thing on screen during a long turn -- so a name that changes is what
+        // distinguishes "working" from "hung".
+        auto const tool = stringField(payload, "tool");
+        if (!tool.empty()) {
+            ui::PanelHost::get().postProgress(tool);
+        }
+        return;
+    }
+
     if (type == "assistant_message") {
         host.postAssistantMessage(stringField(payload, "message_id"), stringField(payload, "text"));
         return;
