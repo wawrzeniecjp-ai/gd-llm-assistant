@@ -114,12 +114,7 @@ def test_blank_env_values_are_treated_as_unset(tmp_path) -> None:
     """
     env = tmp_path / ".env"
     env.write_text(
-        "llm_provider=\n"
-        "api_key=\n"
-        "model=\n"
-        "turn_token_budget=\n"
-        "catalog_path=\n"
-        "base_url=\n",
+        "llm_provider=\napi_key=\nmodel=\nturn_token_budget=\ncatalog_path=\nbase_url=\n",
         encoding="utf-8",
     )
 

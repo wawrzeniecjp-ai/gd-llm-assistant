@@ -635,6 +635,17 @@ Detecting user and assistant edits requires hooks on the relevant editor functio
 - `selection_changed` is throttled to 250 ms and capped at 200 IDs.
 - Events are suppressed during playtest and while a job is mid-slice for the same source, then flushed once.
 
+**What is actually implemented (0.11.0), and why it differs.** S4 was never done, and hooking the editor's mutation paths is invasive, so `level_changed` comes from the poll the drain already performs — one `CCArray::count()` per frame. It reports **structural** changes (creations and deletions), not a bare move or rotate, and never a bounding box. That is the right trade for the problem it solves: the damage from stale context is the model believing objects exist that the user has deleted.
+
+Two details that are easy to get wrong, both found by testing:
+
+- **The baseline must update during a transaction too.** Skipping it while a transaction is open leaves the baseline at its pre-edit value, so the turn's own edits get reported as the user's the moment the transaction closes — the exact opposite of the intent. A transaction absorbs its changes silently instead.
+- **A one-shot "already reported" flag loses information.** Add two objects, delete them again, and with a flag the deletion is swallowed. Comparing against the last *reported* count with a 250 ms window reports a later edit eventually, which is why the flag was replaced. Verified: add, add, delete produces `+1`, `+1`, `-1`.
+
+`selection_changed` is still **not** emitted. The assistant discovers selection through `get_editor_state`.
+
+The sidecar does not act on `level_changed` mid-turn — it would interleave with the turn's own events. It marks the history stale, and the next turn opens with a note telling the model its picture may be out of date and to re-query (see `agent.History`). The same marker is set by `transaction_reverted`, since a Ctrl+Z invalidates earlier reasoning just as a hand edit does.
+
 ### 6.1.8 Mod Settings (mod.json)
 
 ```json
@@ -1143,6 +1154,20 @@ Mod-generated system messages may use colour tags.
 | Ctrl+Shift+C (rebindable) | Toggle panel expanded/collapsed |
 | Enter | Send message, when the input has focus. Routed via `EditorUI::keyDown`; see §0.1. |
 | Escape | **Not implemented.** Input focused: unfocus. Otherwise: collapse the panel. |
+
+**Enter must not start playtest.** Enter is also the editor's playtest shortcut, so
+sending a message started the level — which read as the mod playing the game by itself.
+Suppressing the key was not enough: swallowing `keyDown`, and then `keyUp` as well, both
+left playtest starting, because the shortcut is not resolved through
+`EditorUI::keyDown` in v6 (v6 added `CCKeyboardActionManager`, and many editor
+shortcuts go through keybind handling rather than the layer's virtual).
+
+The fix blocks the **action**: `EditorUI::onPlaytest` is swallowed for 750 ms after a
+message is submitted, armed in `submitDraft` so it applies to every submit path. Pressing
+Enter deliberately after that window still plays the level, which was verified.
+
+The general lesson, since this cost three attempts: when a key does two things, find the
+action and block that. Blocking the key only works if you own the path it travels.
 
 ## 8.7 Empty State
 

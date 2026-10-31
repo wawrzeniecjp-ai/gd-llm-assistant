@@ -52,7 +52,16 @@ public:
 
     /// Sends a `cancel_turn` event. Safe to call from the main thread.
     void sendCancelTurn();
-
+    /// Queues a `level_changed` event (SPEC.md 7.6) for an edit made by hand.
+    ///
+    /// `delta` is the change in object count: positive for creations, negative for
+    /// deletions. Only structural changes are reported, and only outside a
+    /// transaction, so this never narrates the assistant's own work back to itself.
+    ///
+    /// The sidecar uses it to tell the model its picture of the level is stale, so
+    /// "add a platform above the spikes" is not answered against spikes that have
+    /// since been deleted. Safe to call from the main thread.
+    void sendLevelChanged(int delta);
     /// True while a session is running or a reconnect is pending.
     bool isActive() const {
         return m_active.load();

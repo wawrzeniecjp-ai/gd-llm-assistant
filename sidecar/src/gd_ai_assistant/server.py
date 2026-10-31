@@ -408,14 +408,27 @@ class SidecarServer:
             return
 
         if type_name == "transaction_reverted":
-            # Acknowledged so the turn's reported state stops claiming the edits
-            # are still in place. Nothing else depends on it until Phase 4's
-            # session persistence lands.
+            # The user undid a turn's work with Ctrl+Z. The transcript stays, but the
+            # model must not keep believing those edits are still in place.
             log.info("transaction reverted by the mod: %r", frame["payload"].get("txn_id"))
+            self._history.mark_level_changed()
             return
 
-        # Everything else is Phase 4 work (tool loop, requests to the mod).
-        log.info("unhandled message type %r (not implemented yet)", type_name)
+        if type_name == "level_changed":
+            # The level was edited by hand. Marked rather than acted on: the loop
+            # tells the model at the start of the next turn, because sending a
+            # message mid-turn would interleave with the turn's own events.
+            payload = frame["payload"]
+            log.info(
+                "level changed by hand: +%s -%s ~%s",
+                payload.get("added", 0),
+                payload.get("removed", 0),
+                payload.get("modified", 0),
+            )
+            self._history.mark_level_changed()
+            return
+
+        log.info("unhandled message type %r", type_name)
 
     # -- turns ---------------------------------------------------------
 

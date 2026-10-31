@@ -355,6 +355,25 @@ void Bridge::sendCancelTurn() {
     enqueueFrame(frame.dump(0));
 }
 
+void Bridge::sendLevelChanged(int delta) {
+    auto payload = matjson::Value::object();
+    // The schema wants counts by kind (SPEC.md 7.6). A negative delta means objects
+    // went away; a positive one means they appeared. Modifications are not
+    // distinguishable by a count, so they are reported as zero rather than guessed.
+    payload["added"] = delta > 0 ? delta : 0;
+    payload["removed"] = delta < 0 ? -delta : 0;
+    payload["modified"] = 0;
+    payload["source"] = "user";
+
+    auto frame = matjson::Value::object();
+    frame["type"] = "level_changed";
+    frame["id"] = matjson::Value(nullptr);
+    frame["payload"] = std::move(payload);
+
+    log::info("level changed outside the assistant ({} objects)", delta);
+    enqueueFrame(frame.dump(0));
+}
+
 /// Drains queued outbound frames into the socket.
 ///
 /// Called by the watchdog, which is the only thing that can observe the queue
@@ -634,6 +653,7 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
             snapshot->objectCount, snapshot->editorLayer, snapshot->selectedCount,
             snapshot->playtesting
         );
+        // The sidecar re-reads the level here, so it is no longer stale.
         co_return co_await sendResult(socket, requestId, editor::toJson(*snapshot));
     }
 

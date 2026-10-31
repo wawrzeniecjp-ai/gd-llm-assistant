@@ -103,11 +103,23 @@ class History:
     stale tool result is a statement about a level state that the user has since
     edited, and feeding it back invites the model to reason from fiction. Anything
     it needs it can re-query.
+
+    The transcript also survives the user editing by hand, which is deliberate:
+    closing and reopening a level should not erase the conversation. But the level
+    changing underneath it is *not* harmless, so `mark_level_changed` records that
+    the assistant's picture of the level is out of date, and the loop tells the
+    model so at the start of the next turn.
+
+    Without that, a user who deletes everything and asks "now add a platform above
+    the spikes" would be answered against a level that no longer has spikes, and
+    the model has no way to notice. Sending a note is cheaper and more reliable
+    than expecting it to re-query something it believes it already knows.
     """
 
     def __init__(self, token_budget: int) -> None:
         self._messages: list[Message] = []
         self._token_budget = token_budget
+        self._level_changed = False
 
     def __len__(self) -> int:
         return len(self._messages)
@@ -124,6 +136,21 @@ class History:
 
     def clear(self) -> None:
         self._messages.clear()
+        self._level_changed = False
+
+    def mark_level_changed(self) -> None:
+        """Record that the level changed outside the assistant."""
+        self._level_changed = True
+
+    def take_level_changed(self) -> bool:
+        """True once if the level changed since the last call, then reset.
+
+        Consumed rather than sticky: the notice is about a specific edit, and
+        repeating it every turn would teach the model to ignore it.
+        """
+        was_changed = self._level_changed
+        self._level_changed = False
+        return was_changed
 
     def _trim(self) -> None:
         """Drop the oldest messages until the budget is met.
@@ -212,6 +239,26 @@ class ToolLoop:
 
     async def _drive(self, user_text: str) -> TurnResult:
         messages = self._history.messages()
+
+        # Announce a hand edit *before* the user's message, so the model reads it as
+        # context rather than as something the user just said.
+        #
+        # Only on a changed level, and only as a note: the alternative -- clearing
+        # history -- would throw away a conversation the user can still see on
+        # screen, which is worse. See `History`.
+        if self._history.take_level_changed():
+            messages.append(
+                Message(
+                    role="user",
+                    text=(
+                        "[system note] The level changed outside the assistant since the "
+                        "last turn: objects were added, modified or removed by hand. "
+                        "Do not assume anything you were told or did earlier is still "
+                        "true. Re-query the editor state before acting on it."
+                    ),
+                )
+            )
+
         messages.append(Message(role="user", text=user_text))
 
         status = COMPLETED

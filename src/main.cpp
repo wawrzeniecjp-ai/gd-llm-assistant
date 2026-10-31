@@ -2,7 +2,10 @@
 #include <Geode/modify/LevelEditorLayer.hpp>
 #include <Geode/ui/GeodeUI.hpp>
 
+#include <chrono>
+
 #include "bridge/bridge.hpp"
+#include "editor/transaction.hpp"
 #include "exec/job_queue.hpp"
 #include "net/sha1.hpp"
 #include "ui/panel_host.hpp"
@@ -25,6 +28,37 @@ double frameBudgetMs() {
 
 /// True while the drain loop should keep re-arming itself.
 bool g_draining = false;
+
+/// Object count as last reported to the sidecar, or -1 before the first look.
+///
+/// Used to notice edits made **by hand**, so the assistant can be told its picture
+/// of the level is out of date. Spike S4 (proper change detection) was never done,
+/// and hooking the editor's mutation paths is invasive, so this uses the poll the
+/// drain already performs: one `CCArray::count()` per frame, which is cheap.
+///
+/// It catches structural changes -- creations and deletions -- and not a bare move
+/// or rotate, which is the right trade for now: the stale-context problem that
+/// actually hurts is the model believing objects exist that the user deleted.
+int g_reportedObjectCount = -1;
+
+/// When the last `level_changed` was sent, in milliseconds.
+///
+/// Coalescing per SPEC.md 6.1.7 (at most one every 250 ms). A one-shot flag was
+/// tried first and lost information: add two objects, delete them again, and the
+/// deletion was swallowed because the flag was still set, so the sidecar never
+/// heard about it. Comparing against the last *reported* count and rate-limiting
+/// instead means a later edit is always reported eventually.
+double g_lastLevelChangeMs = 0.0;
+constexpr double kLevelChangeCoalesceMs = 250.0;
+
+/// Monotonic milliseconds, for the coalescing window.
+///
+/// `steady_clock` rather than wall time: this measures an interval, and the only
+/// thing that matters is that it never goes backwards.
+double monotonicMs() {
+    using namespace std::chrono;
+    return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
+}
 
 void armDrain();
 
@@ -65,11 +99,38 @@ void armDrain() {
         auto editor = LevelEditorLayer::get();
         if (editor == nullptr) {
             g_draining = false;
+            g_reportedObjectCount = -1;
             gdai::ui::PanelHost::get().detach();
             return;
         }
         gdai::ui::PanelHost::get().attach(editor);
         gdai::exec::JobQueue::get().drain(frameBudgetMs());
+
+        // Notice hand edits.
+        //
+        // The baseline is updated on *every* frame, including while a transaction is
+        // open. Skipping it then would leave the baseline at its pre-edit value, and
+        // the turn's own edits would be reported as the user's the moment the
+        // transaction closed -- exactly the opposite of what this is for. So a
+        // transaction absorbs its changes silently instead of suppressing the update.
+        if (auto* objects = editor->getAllObjects()) {
+            auto const count = static_cast<int>(objects->count());
+            auto const ours = gdai::editor::TransactionManager::get().isOpen();
+
+            if (g_reportedObjectCount < 0 || ours) {
+                g_reportedObjectCount = count;
+            } else if (count != g_reportedObjectCount) {
+                auto const nowMs = monotonicMs();
+                if (nowMs - g_lastLevelChangeMs >= kLevelChangeCoalesceMs) {
+                    gdai::bridge::Bridge::get().sendLevelChanged(
+                        count - g_reportedObjectCount
+                    );
+                    g_lastLevelChangeMs = nowMs;
+                    g_reportedObjectCount = count;
+                }
+            }
+        }
+
         armDrain();
     });
 }

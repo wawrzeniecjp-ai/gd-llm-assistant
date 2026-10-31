@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 
 using namespace geode::prelude;
 
@@ -22,6 +23,27 @@ namespace gdai::ui {
 ChatPanel* ChatPanel::s_attached = nullptr;
 
 namespace {
+
+/// Wall-clock-independent milliseconds, for the playtest suppression window.
+double monotonicMs() {
+    using namespace std::chrono;
+    return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
+}
+
+/// While this is in the future, Enter must not start playtest.
+///
+/// Set by `submitDraft`, read by the `EditorUI::onPlaytest` hook. Blocking the
+/// *action* rather than the key is what makes this work: the shortcut does not go
+/// through `EditorUI::keyDown` in v6, so swallowing the key left it starting anyway.
+double g_suppressPlaytestUntilMs = 0.0;
+
+/// How long to keep blocking playtest after a submit.
+///
+/// Long enough to cover key-down, the editor's key handling and the resulting
+/// action; short enough that pressing Enter again deliberately still plays the
+/// level. 750 ms is far longer than a frame and far shorter than a person.
+constexpr double kPlaytestSuppressMs = 750.0;
+
 
 constexpr float kPad = 6.f;
 constexpr float kHeaderHeight = 22.f;
@@ -792,6 +814,12 @@ void ChatPanel::submitDraft() {
         m_onSubmit(text);
     }
     clearDraft();
+
+    // Arm the playtest block here rather than in a key hook, so it applies whatever
+    // path submitted: the input node's insertion callback, `EditorUI::keyDown`, or
+    // the Send button. Only the key paths need it, but doing it unconditionally costs
+    // nothing and cannot be bypassed.
+    g_suppressPlaytestUntilMs = monotonicMs() + kPlaytestSuppressMs;
 }
 
 void ChatPanel::onSubmit(CCObject* sender) {
@@ -944,17 +972,33 @@ class $modify(ChatInputNodeHook, CCTextInputNode) {
 // therefore a supported route rather than a guess.
 //
 // Chained, so the editor's own key handling is untouched.
+//
+// Enter needs more than swallowing the key event. Swallowing `keyDown` and then
+// `keyUp` both proved insufficient: sending a message still started playtest,
+// because the shortcut is not resolved through `EditorUI::keyDown` at all (v6 added
+// `CCKeyboardActionManager`, and plenty of editor shortcuts go through keybind
+// handling rather than the layer's own virtual).
+//
+// So the *action* is blocked instead: `onPlaytest` is swallowed for the window
+// `submitDraft` arms. That is trigger-path independent, which is what makes it work.
 class $modify(ChatEditorKeyHook, EditorUI) {
     void keyDown(cocos2d::enumKeyCodes key, double timestamp) {
         if (key == cocos2d::KEY_Enter && gdai::ui::ChatPanel::inputHasFocus()) {
             log::info("panel: Enter via EditorUI::keyDown");
             gdai::ui::ChatPanel::submitFromInputNode();
-            // Not chained: with the panel's input focused, Enter belongs to the
-            // panel, and letting the editor act on it as well would submit the
-            // message *and* do whatever the editor's binding does.
             return;
         }
         EditorUI::keyDown(key, timestamp);
+    }
+
+    void onPlaytest(cocos2d::CCObject* sender) {
+        if (monotonicMs() < g_suppressPlaytestUntilMs) {
+            // Logged rather than silent: this is the only place that proves which
+            // path the shortcut takes, and that has now been guessed wrong twice.
+            log::info("panel: blocking the playtest the message-sending Enter started");
+            return;
+        }
+        EditorUI::onPlaytest(sender);
     }
 };
 

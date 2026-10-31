@@ -30,6 +30,7 @@ from gd_ai_assistant.agent import (
 from gd_ai_assistant.providers import FailingProvider, ScriptedProvider
 from gd_ai_assistant.providers.base import (
     AssistantTurn,
+    Message,
     Provider,
     ProviderError,
     ToolCall,
@@ -582,6 +583,72 @@ async def test_history_is_trimmed_to_its_budget() -> None:
     # Trimmed from the front, so the most recent exchange survives.
     assert len(history) < 50
     assert history.messages()[-1].text == "assistant reply 49"
+
+
+# -- stale level state ---------------------------------------------------
+
+
+class RecordingProvider(Provider):
+    """Records the messages it is given, and answers nothing in particular."""
+
+    name = "recording"
+
+    def __init__(self) -> None:
+        self.seen: list[list[Message]] = []
+
+    async def complete(self, *, system, messages, tools) -> AssistantTurn:  # noqa: A002
+        self.seen.append([Message(role=m.role, text=m.text) for m in messages])
+        return AssistantTurn(text="ok", stop_reason="end_turn", usage=Usage(1, 1))
+
+
+async def test_a_hand_edit_is_announced_once_before_the_user_message() -> None:
+    """A deleted-objects level must not be answered against the old picture.
+
+    The transcript is kept (closing and reopening a level should not erase the
+    conversation), so the only signal the model gets that reality moved is this
+    note. It is consumed once, so it does not become permanent noise.
+    """
+    link = FakeLink()
+    history = History(token_budget=8000)
+    provider = RecordingProvider()
+    loop = ToolLoop(link=link, provider=provider, catalog=catalog.load_catalog(), history=history)
+
+    history.mark_level_changed()
+    await loop.run(turn_id="t-1", message_id="m1", user_text="add a platform")
+
+    first = provider.seen[0]
+    assert "level changed outside the assistant" in first[0].text
+    # The note comes before the message, so it reads as context, not as something
+    # the user just said.
+    assert first[0].role == "user"
+    assert first[1].text == "add a platform"
+
+    # Consumed: the next turn must not repeat it.
+    await loop.run(turn_id="t-2", message_id="m2", user_text="and another")
+    second = provider.seen[1]
+    assert all("level changed outside the assistant" not in m.text for m in second)
+
+
+async def test_an_unchanged_level_gets_no_note() -> None:
+    link = FakeLink()
+    provider = RecordingProvider()
+    loop = ToolLoop(
+        link=link,
+        provider=provider,
+        catalog=catalog.load_catalog(),
+        history=History(token_budget=8000),
+    )
+
+    await loop.run(turn_id="t-1", message_id="m1", user_text="hello")
+
+    assert all("level changed" not in m.text for m in provider.seen[0])
+
+
+def test_history_clear_also_clears_the_change_flag() -> None:
+    history = History(token_budget=8000)
+    history.mark_level_changed()
+    history.clear()
+    assert history.take_level_changed() is False
 
 
 # -- schema agreement ----------------------------------------------------
