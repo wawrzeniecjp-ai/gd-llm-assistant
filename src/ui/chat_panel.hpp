@@ -135,6 +135,28 @@ public:
         return m_expanded;
     }
 
+    /// The attached panel, or null. For hooks that have no `this` of their own.
+    [[nodiscard]] static ChatPanel* attached();
+
+    /// User-level hide: the panel is not drawn at all.
+    void setHidden(bool hidden);
+    [[nodiscard]] bool isHidden() const {
+        return m_hidden;
+    }
+
+    /// Playtest-level hide, deliberately separate from the user's choice.
+    ///
+    /// Playtesting needs the panel out of the way, but it must come back exactly as
+    /// the user left it -- including not reappearing if they had hidden it themselves.
+    /// One flag shared between the two would lose that.
+    void setPlaytestHidden(bool hidden);
+
+    /// Scrolls the transcript by `y` **if the cursor is over it**.
+    ///
+    /// Returns true when the wheel event was consumed, which is what stops it also
+    /// scrolling the level behind the panel.
+    bool handleScroll(float y);
+
     /// Updates the header dot (SPEC.md 8.8).
     void setStatus(Status status);
 
@@ -231,6 +253,8 @@ private:
 
     void tickThinking(float dt);
 
+    /// Applies `m_hidden` and `m_playtestHidden` to the node's visibility.
+    void applyVisibility();
 
     /// Reserved id of the thinking indicator, so it can never collide with a
     /// protocol message id (those are server-generated).
@@ -238,6 +262,12 @@ private:
 
     bool m_expanded = true;
     bool m_processing = false;
+
+    /// Hidden by the user, via the hide keybind.
+    bool m_hidden = false;
+
+    /// Hidden because the player is testing the level.
+    bool m_playtestHidden = false;
     Status m_status = Status::Disconnected;
 
     cocos2d::CCNode* m_background = nullptr;

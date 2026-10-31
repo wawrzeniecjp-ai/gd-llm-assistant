@@ -51,6 +51,9 @@ int g_reportedObjectCount = -1;
 double g_lastLevelChangeMs = 0.0;
 constexpr double kLevelChangeCoalesceMs = 250.0;
 
+/// Tracked so the panel is hidden and restored once per transition, not every frame.
+bool g_wasPlaytesting = false;
+
 /// Monotonic milliseconds, for the coalescing window.
 ///
 /// `steady_clock` rather than wall time: this measures an interval, and the only
@@ -68,6 +71,20 @@ void togglePanel() {
     } else {
         log::warn("panel: toggle requested with no editor open");
     }
+}
+
+/// Hides the panel entirely, or brings it back if it was hidden.
+///
+/// Distinct from collapsing: a collapsed panel still shows its header, which is still
+/// something over the level. This removes it from view completely, for when the narrow
+/// strip of header is in the way too.
+void togglePanelHidden() {
+    auto& host = gdai::ui::PanelHost::get();
+    if (host.attach(LevelEditorLayer::get()) == nullptr) {
+        log::warn("panel: hide requested with no editor open");
+        return;
+    }
+    host.setHidden(!host.isHidden());
 }
 
 /// Runs one drain, then re-arms for the next frame.
@@ -104,6 +121,22 @@ void armDrain() {
             return;
         }
         gdai::ui::PanelHost::get().attach(editor);
+
+        // Get out of the way while the level is being played, and come back after.
+        //
+        // Playtesting keeps the editor layer alive with a `PlayLayer` on top, so this
+        // poll is the reliable signal -- the same one `takeSnapshot` uses. Hiding is
+        // a separate flag from the user's own hide, so leaving playtest restores what
+        // they chose rather than always revealing the panel.
+        auto const playtesting = PlayLayer::get() != nullptr;
+        if (playtesting != g_wasPlaytesting) {
+            g_wasPlaytesting = playtesting;
+            // Logged because this poll is the fallback path: the editor's own playtest
+            // hooks do the hiding, and this exists to cover the cases they miss. Seeing
+            // whether it fires is how the two are told apart when something goes wrong.
+            log::info("panel: playtest poll -> {}", playtesting ? "playing" : "editing");
+            gdai::ui::PanelHost::get().setPlaytestHidden(playtesting);
+        }
         gdai::exec::JobQueue::get().drain(frameBudgetMs());
 
         // Notice hand edits.
@@ -210,6 +243,15 @@ $on_mod(Loaded) {
         [](Keybind const&, bool down, bool repeat, double) {
             if (down && !repeat) {
                 togglePanel();
+            }
+        }
+    );
+
+    listenForKeybindSettingPresses(
+        "hide-chat",
+        [](Keybind const&, bool down, bool repeat, double) {
+            if (down && !repeat) {
+                togglePanelHidden();
             }
         }
     );

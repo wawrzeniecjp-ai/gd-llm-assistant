@@ -42,6 +42,13 @@
             "default": "Ctrl+Shift+C",
             "category": "editor"
         },
+        "hide-chat": {
+            "type": "keybind",
+            "name": "Hide chat panel completely",
+            "description": "Hide the panel entirely, header included, or bring it back. Use this when even the collapsed header is in the way. The panel also hides itself automatically while you playtest.",
+            "default": "Ctrl+Shift+H",
+            "category": "editor"
+        },
         "limits-title": {
             "type": "title",
             "name": "Limits"

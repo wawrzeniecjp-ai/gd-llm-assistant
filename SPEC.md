@@ -1103,8 +1103,10 @@ Unknown keys are rejected with `UNSUPPORTED_PROPERTY`; values outside range are 
 | Default size | 216 × 196 **points** (GD's coordinate space is 320 points tall); never taller than the visible area minus margins |
 | Position | Bottom-right with margin |
 | Resizable / draggable | No (v1) |
-| States | Expanded, collapsed (title-bar chip) |
+| States | Expanded, collapsed (title-bar chip), hidden (nothing drawn at all) |
 | Toggle | Geode keybind `toggle-chat`, default Ctrl+Shift+C |
+| Hide | Geode keybind `hide-chat`, default Ctrl+Shift+H. Removes the panel completely, header included; a collapsed panel still leaves a strip over the level. |
+| Playtest | Hidden automatically while the level is being tested, and restored afterwards. The two reasons to hide are separate flags (`m_hidden`, `m_playtestHidden`) and visibility is derived from both, so leaving playtest reveals the panel only if the user had not hidden it themselves. |
 | Lifetime | Created with the editor layer, destroyed when it closes |
 | Touch | Claims the **message area only**, at priority `-1`. Lower values dispatch first, so a lower value steals scroll drags from the panel's own `ScrollLayer`; `-1` sits behind the children and ahead of the editor layer at `0`. Claiming the whole panel makes Send dead. |
 
@@ -1137,7 +1139,8 @@ Unknown keys are rejected with `UNSUPPORTED_PROPERTY`; values outside range are 
 | User messages | Right-aligned, distinct background |
 | Assistant messages | Left-aligned, default background |
 | System messages | Centered, muted, smaller font |
-| Auto-scroll | To bottom on new message unless the user has scrolled up |
+| Auto-scroll | To bottom on new message. Done through the scroll layer's own `scrollToFromTop`, never by writing the content layer's position: it is a `GenericContentLayer`, whose `setPosition` overrides the y it is given whenever the content is shorter than the view, so a direct write lands somewhere other than where it was asked to go. |
+| Layout | Manual, in `ChatPanel::refreshLayout`: measure each child's **scaled** height, size the content layer to `max(viewport, sum + padding)`, then place children bottom-up (newest last). No `Layout` object, and visibility is never consulted while measuring -- the content layer culls off-screen children by setting their `visible` flag, so measuring only the visible ones makes the transcript shrink as it is scrolled and repack messages on top of the ones it skipped. |
 | History cap | Render the most recent 100 messages; older ones collapse into a "Show earlier" control |
 
 ### 8.3.1 Sanitising Untrusted Text
@@ -1178,8 +1181,10 @@ Mod-generated system messages may use colour tags.
 | Shortcut | Action |
 | --- | --- |
 | Ctrl+Shift+C (rebindable) | Toggle panel expanded/collapsed |
+| Ctrl+Shift+H (rebindable) | Hide the panel entirely, or bring it back |
 | Enter | Send message, when the input has focus. Routed via `EditorUI::keyDown`; see §0.1. |
 | Escape | **Not implemented.** Input focused: unfocus. Otherwise: collapse the panel. |
+| Wheel | Over the transcript: scroll the transcript, not the level. Implemented in a `$modify` of `CCMouseDispatcher::dispatchScrollMSG`, which is the only place the event can be answered before the editor's own wheel handler sees it -- the dispatcher has no priority argument and the editor is registered first. |
 
 **Enter must not start playtest.** Enter is also the editor's playtest shortcut, so
 sending a message started the level — which read as the mod playing the game by itself.
@@ -1194,6 +1199,23 @@ Enter deliberately after that window still plays the level, which was verified.
 
 The general lesson, since this cost three attempts: when a key does two things, find the
 action and block that. Blocking the key only works if you own the path it travels.
+
+**Enter in an empty box still starts playtest, and must release focus.** With no draft
+there is nothing to submit, so the suppression window is never armed and the editor's
+shortcut runs. That is the editor's behaviour, not the mod's, but focus stayed in the
+text field, which made the level unplayable: every keystroke went to the chat box, and
+typing during the attempt turned up in the panel afterwards. `ChatPanel::setPlaytestHidden(true)`
+now calls `TextInput::defocus()`, so focus is released on the transition into playtest
+however the playtest was started.
+
+## 8.6.1 Playtest Auto-Hide
+
+Hiding during playtest is driven by the editor's own actions rather than by a poll:
+`EditorUI::onPlaytest` hides, `EditorUI::onStopPlaytest` and `EditorUI::playtestStopped`
+restore. Those cover every way in and out of playtest (button, keybind, menu) and fire
+before the first frame of the level is drawn. A per-frame `PlayLayer::get()` comparison is
+kept as a fallback and logs when it fires; the flags are idempotent, so the two cannot
+fight.
 
 ## 8.7 Empty State
 

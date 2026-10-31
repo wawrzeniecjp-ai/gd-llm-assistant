@@ -39,6 +39,20 @@ public:
     /// the editor's node tree, so leaving it alive would outlive its parent.
     void detach();
 
+    /// Hides or shows the panel at the user's request.
+    void setHidden(bool hidden);
+
+    /// True when the user has hidden the panel.
+    [[nodiscard]] bool isHidden() const {
+        return m_hidden;
+    }
+
+    /// Hides the panel while the player is testing the level.
+    ///
+    /// Separate from `setHidden` so that leaving playtest restores whatever the user
+    /// had chosen, rather than always revealing the panel.
+    void setPlaytestHidden(bool hidden);
+
     // -- any thread ------------------------------------------------------
 
     void postStatus(Status status);
@@ -106,6 +120,15 @@ private:
     /// is needed.
     std::optional<Status> m_lastStatus;
     std::string m_lastSystemText;
+
+    /// The user's hide choice, remembered across panel rebuilds so reopening a level
+    /// does not reveal a panel the user had hidden. Main thread only.
+    bool m_hidden = false;
+
+    /// Whether the player is currently testing the level, remembered for the same
+    /// reason and kept separate so the two reasons to hide cannot cancel each other.
+    /// Main thread only.
+    bool m_playtestHidden = false;
 
     geode::Function<void(std::string)> m_onSubmit;
     geode::Function<void()> m_onCancel;

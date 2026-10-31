@@ -1,13 +1,15 @@
 #include "chat_panel.hpp"
 
+#include "panel_host.hpp"
+
 #include <Geode/binding/EditorUI.hpp>
+#include <Geode/modify/CCMouseDispatcher.hpp>
 #include <Geode/modify/CCTextInputNode.hpp>
 #include <Geode/modify/EditorUI.hpp>
 #include <Geode/ui/Button.hpp>
 #include <Geode/ui/Label.hpp>
 #include <Geode/ui/NineSlice.hpp>
 #include <Geode/ui/ScrollLayer.hpp>
-#include <Geode/ui/SimpleAxisLayout.hpp>
 #include <Geode/ui/TextInput.hpp>
 #include <Geode/utils/cocos.hpp>
 
@@ -15,6 +17,7 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <limits>
 
 using namespace geode::prelude;
 
@@ -49,6 +52,13 @@ constexpr float kPad = 6.f;
 constexpr float kHeaderHeight = 22.f;
 constexpr float kInputHeight = 26.f;
 constexpr float kButtonWidth = 46.f;
+
+/// Vertical space between messages, and the inset inside the scroll area.
+///
+/// Named because `refreshLayout` places children by hand: the gap and the padding are
+/// now part of the layout arithmetic rather than a layout object's business.
+constexpr float kMessageGap = 4.f;
+constexpr float kMessagePad = 2.f;
 
 /// Touch priority for the panel's claim on the message area.
 ///
@@ -290,40 +300,21 @@ void ChatPanel::buildMessages() {
     m_messages->setMouseEnabled(true);
 
     if (auto content = m_messages->m_contentLayer) {
-        // Bottom-anchored column, built explicitly rather than through
-        // `ScrollLayer::createDefaultListLayout()`. Its defaults are not
-        // documented and, critically, not visible from here -- and getting the
-        // anchoring wrong is invisible in the source and obvious on screen, so
-        // it is worth being able to read the intent off the code.
+        // Laid out manually rather than with a `Layout`.
         //
-        // Reversed axis = children stack downward from the top; combined with
-        // `AxisAlignment::End` that becomes "stack upward from the bottom", which
-        // is what a chat transcript wants. `setAutoGrowAxis(viewHeight)` keeps
-        // the content at least as tall as the window, so a single message sits at
-        // the bottom rather than floating mid-panel.
-        auto layout = SimpleAxisLayout::create(Axis::Column);
-        layout->setGap(4.f);
-        // Items stack downward from the top and the group is packed against the
-        // bottom, which is what a chat transcript wants: oldest message at the top,
-        // newest just above the input row.
+        // Two reasons, both of which were bugs rather than preferences:
         //
-        // `BottomToTop` looks like the natural way to say "anchor to the bottom",
-        // and it silently reverses the transcript -- every new message appeared
-        // above the previous one, so the conversation read backwards.
-        layout->setMainAxisDirection(AxisDirection::TopToBottom);
-        layout->setMainAxisAlignment(MainAxisAlignment::End);
-        layout->setCrossAxisAlignment(CrossAxisAlignment::Start);
-        // Scaling explicitly off, on **both** axes.
+        //  - A layout sizes the content layer from children's **unscaled** sizes while
+        //    the labels are scaled down, so the layer and its children disagreed. The
+        //    logged symptom was `content=204x124 view=204x124` with children positioned
+        //    at y=179 -- the content layer never grew, so there was no scroll range and
+        //    neither dragging nor the wheel could move anything.
+        //  - `setAutoGrowAxis` was lost when this moved from `ColumnLayout` to
+        //    `SimpleAxisLayout`, which has no such method. The comment claiming it was
+        //    there survived, which is how it went unnoticed: the code read correctly.
         //
-        // This is the fix for "the font is still far too large". The main-axis
-        // default is `AxisScaling::ScaleDownGaps`, which scales children to fit,
-        // and a layout that scales a child overrides whatever scale the child set
-        // for itself. So the labels were being rendered at a scale chosen by the
-        // layout rather than by `setScale`, which is why reducing it changed
-        // nothing, and why the text stayed wider than the panel.
-        layout->setMainAxisScaling(AxisScaling::None);
-        layout->setCrossAxisScaling(AxisScaling::None);
-        content->setLayout(layout);
+        // Doing the arithmetic here means the layer height and the child positions come
+        // from the same numbers, so they cannot drift apart again.
         m_messageContent = content;
     } else {
         log::error("panel: ScrollLayer has no content layer");
@@ -472,13 +463,79 @@ void ChatPanel::relayout() {
         m_actionButton->setPosition({ width - kPad - kButtonWidth * 0.5f, kPad + kInputHeight * 0.5f });
     }
 
-    scrollToBottom();
+    // Re-laid out rather than just re-scrolled: collapsing and expanding changes the
+    // visible height, and the wrapping of every message depends on it.
+    refreshLayout();
 }
 
 void ChatPanel::toggle() {
     m_expanded = !m_expanded;
     relayout();
     log::debug("panel: expanded = {}", m_expanded);
+}
+
+ChatPanel* ChatPanel::attached() {
+    return s_attached;
+}
+
+void ChatPanel::applyVisibility() {
+    // Two independent reasons to be invisible, so visibility is derived rather than
+    // set directly: the user hid it, or the player is testing the level. Deriving it
+    // means neither can undo the other -- leaving playtest must not reveal a panel
+    // the user chose to hide.
+    setVisible(!m_hidden && !m_playtestHidden);
+}
+
+void ChatPanel::setHidden(bool hidden) {
+    if (m_hidden == hidden) {
+        return;
+    }
+    m_hidden = hidden;
+    applyVisibility();
+    log::info("panel: {} by the user", hidden ? "hidden" : "shown");
+}
+
+void ChatPanel::setPlaytestHidden(bool hidden) {
+    if (m_playtestHidden == hidden) {
+        return;
+    }
+    m_playtestHidden = hidden;
+
+    // Drop keyboard focus on the way into playtest.
+    //
+    // While the text field is active it takes every keystroke, and the game does not
+    // take it away when the level starts: an Enter pressed in an empty box starts a
+    // playtest (that is the editor's own shortcut) and leaves focus in the field, so
+    // the player's movement keys do nothing and whatever they type during the attempt
+    // appears in the panel afterwards. Releasing it here fixes both, and it is done
+    // from the playtest transition rather than from the key handler so it applies
+    // however the playtest started.
+    if (hidden && m_input) {
+        m_input->defocus();
+    }
+
+    applyVisibility();
+    log::info("panel: {} for playtest", hidden ? "hidden" : "shown");
+}
+
+bool ChatPanel::handleScroll(float y) {
+    if (m_hidden || m_playtestHidden || !m_expanded || m_messages == nullptr) {
+        return false;
+    }
+
+    // Only claim the wheel over the transcript. Everywhere else on the panel -- the
+    // header, the input row, the margins -- the event belongs to whatever is behind,
+    // and swallowing it there would make the panel a dead zone for the editor.
+    auto const mouse = convertToNodeSpace(geode::cocos::getMousePos());
+    if (!messageAreaRect().containsPoint(mouse)) {
+        return false;
+    }
+
+    // The scroll layer already knows how to scroll itself; this only has to deliver
+    // the event and claim it. Doing the arithmetic here instead would duplicate logic
+    // that has to agree with the drag path.
+    m_messages->scrollWheel(y, 0.f);
+    return true;
 }
 
 void ChatPanel::setStatus(Status status) {
@@ -620,8 +677,10 @@ void ChatPanel::clearMessages() {
         m_emptyHint->setVisible(true);
     }
     if (m_messageContent) {
-        m_messageContent->updateLayout();
-        scrollToBottom();
+        // A layout pass, not `updateLayout`: there is no `Layout` on the content layer
+        // any more, so the height has to be recomputed here or the layer keeps the size
+        // the last message gave it.
+        refreshLayout();
     }
 }
 
@@ -639,8 +698,7 @@ void ChatPanel::setThinking(bool on) {
                 m_thinkingNode->removeFromParent();
             }
             m_thinkingNode = nullptr;
-            m_messageContent->updateLayout();
-            scrollToBottom();
+            refreshLayout();
         }
         return;
     }
@@ -697,9 +755,76 @@ void ChatPanel::showTurnSummary(
 }
 
 void ChatPanel::refreshLayout() {
-    if (!m_messageContent) return;
-    m_messageContent->updateLayout();
+    if (!m_messageContent || !m_messages) return;
+
+    auto const viewWidth = m_messages->getContentSize().width;
+    auto const viewHeight = m_messages->getContentSize().height;
+    auto const gap = kMessageGap;
+
+    // Measure with **scaled** sizes, because that is what is drawn. Using the
+    // unscaled size here was part of why the content layer and its children
+    // disagreed about how tall the transcript was.
+    //
+    // `isVisible` is deliberately *not* consulted. The content layer culls children
+    // that scroll out of view -- it sets their `visible` flag from inside
+    // `setPosition` -- so skipping the invisible ones here would measure a transcript
+    // that shrinks as soon as it is scrolled, and the next layout would then pack the
+    // remaining messages on top of the culled ones. That is what overlapping text
+    // looks like: two independent notions of where a message belongs.
+    float total = 0.f;
+    for (auto* node : m_messageNodes) {
+        if (node == nullptr) {
+            continue;
+        }
+        total += node->getScaledContentSize().height + gap;
+    }
+    if (total > 0.f) {
+        total -= gap;  // no gap after the last item
+    }
+
+    // At least as tall as the viewport, so a short conversation sits against the
+    // bottom instead of floating in the middle -- and *more* than the viewport once
+    // it overflows, which is what gives the scroll layer something to scroll.
+    auto const contentHeight = std::max(viewHeight, total + 2.f * kMessagePad);
+    m_messageContent->setContentSize({ viewWidth, contentHeight });
+
+    // Newest at the bottom, built upwards from the padding.
+    //
+    // Bottom-up rather than top-down because the bottom of the content is the end the
+    // scroll layer treats as a resting position (`contentY == 0`), so the newest
+    // message lands exactly where `scrollToBottom` goes looking for it. The labels
+    // anchor top-left, so the y stored here is each message's top edge.
+    float cursor = kMessagePad;
+    for (auto it = m_messageNodes.rbegin(); it != m_messageNodes.rend(); ++it) {
+        auto* node = *it;
+        if (node == nullptr) {
+            continue;
+        }
+        cursor += node->getScaledContentSize().height;
+        node->setPosition({ kMessagePad, cursor });
+        cursor += gap;
+    }
+
     scrollToBottom();
+}
+
+void ChatPanel::scrollToBottom() {
+    if (!m_messageContent || !m_messages) return;
+
+    // "Jump to the newest message" is not a scroll gesture, so it is done through the
+    // scroll layer's own arithmetic instead of by writing a position.
+    //
+    // Writing the position directly is what broke this: the content layer is a
+    // `GenericContentLayer`, and its `setPosition` **overrides** the y it is handed
+    // whenever the content is shorter than the view. Asking for `+overflow` therefore
+    // did not put the content one screen-height down; it put it *above* the viewport,
+    // where the layer's own culling marked every message invisible. The panel went
+    // blank while still believing it had scrolled correctly.
+    //
+    // `scrollToFromTop` clamps the offset itself, so a huge offset simply means "the
+    // far end", i.e. the newest message. When the content fits, the clamp resolves to
+    // zero overflow and this settles at rest.
+    m_messages->scrollToFromTop(std::numeric_limits<float>::max());
 }
 
 void ChatPanel::appendMessageNode(cocos2d::CCNode* node) {
@@ -729,38 +854,6 @@ void ChatPanel::appendMessageNode(cocos2d::CCNode* node) {
     }
 
     refreshLayout();
-}
-
-void ChatPanel::scrollToBottom() {
-    if (!m_messages || !m_messages->m_contentLayer) return;
-
-    // With `AxisAlignment::End` the content layer pins itself to the bottom, so
-    // there is no offset arithmetic to do here -- and deliberately so: the
-    // previous version computed an offset from the content height and pushed the
-    // layer up, which is exactly the kind of formula that is plausible in source
-    // and wrong on screen. This just reports what the layout produced.
-    log::debug(
-        "panel: layout content={}x{} at ({}, {}) view={}x{} children={}",
-        m_messageContent->getContentSize().width,
-        m_messageContent->getContentSize().height,
-        m_messageContent->getPositionX(),
-        m_messageContent->getPositionY(),
-        m_messages->getContentSize().width,
-        m_messages->getContentSize().height,
-        m_messageNodes.size()
-    );
-    for (auto node : m_messageNodes) {
-        log::debug(
-            "panel:   child '{}' size {}x{} scaled {}x{} at ({}, {})",
-            node->getID(),
-            node->getContentSize().width,
-            node->getContentSize().height,
-            node->getScaledContentSize().width,
-            node->getScaledContentSize().height,
-            node->getPositionX(),
-            node->getPositionY()
-        );
-    }
 }
 
 void ChatPanel::setInputEnabled(bool enabled) {
@@ -998,7 +1091,52 @@ class $modify(ChatEditorKeyHook, EditorUI) {
             log::info("panel: blocking the playtest the message-sending Enter started");
             return;
         }
+        // Hidden here, not only by the per-frame playtest poll.
+        //
+        // This is the action that starts playtest whatever triggered it -- button,
+        // keybind, or menu -- so it fires earlier and more reliably than comparing
+        // `PlayLayer::get()` against its previous value. Hiding before the original
+        // runs means the panel is gone before the first frame of the level is drawn.
+        gdai::ui::PanelHost::get().setPlaytestHidden(true);
         EditorUI::onPlaytest(sender);
+    }
+
+    // The two ways back out of playtest. Both are hooked because either can be the one
+    // that runs, depending on how the player leaves; setting the flag twice is a no-op,
+    // so covering both costs nothing and means a missed path cannot strand the panel
+    // hidden.
+    void onStopPlaytest(cocos2d::CCObject* sender) {
+        gdai::ui::PanelHost::get().setPlaytestHidden(false);
+        EditorUI::onStopPlaytest(sender);
+    }
+
+    void playtestStopped() {
+        gdai::ui::PanelHost::get().setPlaytestHidden(false);
+        EditorUI::playtestStopped();
+    }
+};
+
+// Mouse-wheel scrolling over the transcript.
+//
+// The dispatcher has no priority argument -- `addDelegate`, `forceAddDelegate` and no
+// ordering controls -- so registering the panel as another wheel handler would not make
+// it beat the editor, which is already registered. The editor kept the wheel and panned
+// the level instead.
+//
+// Hooking `dispatchScrollMSG` sidesteps the ordering problem entirely: the event is
+// checked once, at the point where it is dispatched, and either consumed here or passed
+// on untouched. That only became possible in Geode v6, where `scrollWheel` returns
+// `bool` -- before that there was no way to say "I handled this".
+class $modify(ChatScrollHook, cocos2d::CCMouseDispatcher) {
+    bool dispatchScrollMSG(float y, float x) {
+        if (auto* panel = gdai::ui::ChatPanel::attached()) {
+            if (panel->handleScroll(y)) {
+                // Returning true consumes the event. Chaining as well would scroll the
+                // transcript *and* the level, which is the bug this hook exists to fix.
+                return true;
+            }
+        }
+        return cocos2d::CCMouseDispatcher::dispatchScrollMSG(y, x);
     }
 };
 

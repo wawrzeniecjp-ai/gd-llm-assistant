@@ -62,6 +62,18 @@ ChatPanel* PanelHost::attach(LevelEditorLayer* editor) {
         panel->addMessage("system", m_lastSystemText);
     }
 
+    // Re-apply the user's hide choice. The panel is rebuilt on every editor open, so
+    // without this a user who hides it would find it back after closing and reopening
+    // a level -- which reads as the setting not having worked.
+    if (m_hidden) {
+        panel->setHidden(true);
+    }
+    // Same for playtest: the flag can be set while no panel exists, because the hook
+    // that sets it runs on the editor's actions rather than on the panel's life.
+    if (m_playtestHidden) {
+        panel->setPlaytestHidden(true);
+    }
+
     log::info(
         "panel: attached at ({}, {}), win size {}x{}",
         panel->getPositionX(), panel->getPositionY(), winSize.width, winSize.height
@@ -74,6 +86,23 @@ void PanelHost::detach() {
     m_panel->removeFromParent();
     m_panel = nullptr;
     log::info("panel: detached");
+}
+
+void PanelHost::setHidden(bool hidden) {
+    m_hidden = hidden;
+    if (m_panel) {
+        m_panel->setHidden(hidden);
+    }
+}
+
+void PanelHost::setPlaytestHidden(bool hidden) {
+    // Remembered even with no panel attached: the editor's playtest hooks can fire
+    // while the panel is being rebuilt, and forgetting the flag there would leave the
+    // panel on screen for the rest of the playtest.
+    m_playtestHidden = hidden;
+    if (m_panel) {
+        m_panel->setPlaytestHidden(hidden);
+    }
 }
 
 // ---------------------------------------------------------------------------
