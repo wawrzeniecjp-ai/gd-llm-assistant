@@ -854,7 +854,7 @@ Accept the mod's connection (authenticated), manage the LLM conversation and too
 
 Transactions are managed by the sidecar automatically (one per turn); they are not LLM tools.
 
-**Loop limits (configurable, §10.2):** `max_tool_rounds` (default 10), `max_objects_per_turn` (default 5000, mirrors the mod limit), per-turn token budget, wall-clock timeout per turn. On hitting a limit the turn ends with `status: "incomplete"` and the assistant states what was and wasn't done.
+**Loop limits (configurable, §10.2):** `max_tool_rounds` (default 40), `max_objects_per_turn` (default 5000, mirrors the mod limit), per-turn token budget, wall-clock timeout per turn. On hitting a limit the turn ends with `status: "incomplete"` and the assistant states what was and wasn't done.
 
 **System prompt must contain:**
 
@@ -1414,10 +1414,10 @@ Loaded from environment variables, a `.env` file, or a config file.
 | `ws_port` | WebSocket listen port | 8765 |
 | `token_path` | Location of the handshake token file | `%LOCALAPPDATA%\gd-ai-assistant\token` |
 | `session_dir` | Directory for session persistence | `./sessions` |
-| `max_tool_rounds` | Tool-loop rounds per turn | 10 |
+| `max_tool_rounds` | Tool-loop rounds per turn | 40 |
 | `max_objects_per_turn` | Objects the sidecar will request mutating per turn | 5000 |
 | `turn_token_budget` | Total LLM tokens per turn | provider-dependent, required to be set |
-| `turn_timeout_s` | Wall-clock cap per turn | 120 |
+| `turn_timeout_s` | Wall-clock cap per turn | 300 |
 | `history_token_budget` | Tokens of history sent per request | 8000 |
 | `log_level` | Logging verbosity | `info` |
 

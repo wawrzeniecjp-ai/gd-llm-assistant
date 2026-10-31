@@ -122,14 +122,29 @@ class SidecarConfig(BaseSettings):
     probe_on_connect: bool = False
 
     # --- Tool loop limits (SPEC.md 6.2.3, 10.2) -----------------------
-    max_tool_rounds: int = Field(default=10, ge=1, le=100)
+    #
+    # 40 rather than 10, because 10 was hit by ordinary work. A single request like
+    # "find a thin spike and put a row of them above the spikes" needs a catalog
+    # search, an editor-state read, an object-type listing, then create and verify --
+    # and a model that checks its own work doubles that. Running out mid-plan is
+    # worse than being slow: the turn ends INCOMPLETE having half-edited the level,
+    # and the user has to work out what happened.
+    #
+    # The cap is a runaway guard, not a budget. The real spend controls are
+    # `turn_token_budget` and `max_objects_per_turn`, both of which still apply, plus
+    # `turn_timeout_s` below.
+    max_tool_rounds: int = Field(default=40, ge=1, le=200)
     # Bounded by the mod's hard maximum: the mod's caps are authoritative (D10).
     max_objects_per_turn: int = Field(default=5000, ge=1, le=20000)
     turn_token_budget: Annotated[int | None, BlankAsNone] = None
     # Fractional so that tests can set a timeout small enough to exercise the
     # timeout path without a slow test; a whole-second floor would make the
     # shortest meaningful case a one-second wait.
-    turn_timeout_s: float = Field(default=120.0, ge=0.05)
+    #
+    # Raised with the round cap: 40 rounds of a tool-using model is several minutes
+    # of wall clock on a slow provider, so the old 120 s would have become the
+    # binding limit instead of the round count.
+    turn_timeout_s: float = Field(default=300.0, ge=0.05)
     history_token_budget: int = Field(default=8000, ge=1)
 
     # How long a request to the mod may take before it is treated as failed.
