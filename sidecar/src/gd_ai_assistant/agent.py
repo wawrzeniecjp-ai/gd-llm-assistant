@@ -526,7 +526,13 @@ def _describe(name: str, arguments: dict[str, Any], result: dict[str, Any]) -> A
         count = int(result.get("count", len(requested)) or 0)
         kinds = _object_kinds(requested)
         detail = f" ({kinds})" if kinds else ""
-        return ActionRecord(kind=name, count=count, summary=f"Created {count} object(s){detail}")
+        # Say where they went. Without a position the summary is unactionable: the
+        # objects are real and on the level, but the user has no way to find them,
+        # which is indistinguishable from the edit having failed.
+        where = _first_position(requested)
+        return ActionRecord(
+            kind=name, count=count, summary=f"Created {count} object(s){detail} at {where}"
+        )
 
     if name == "modify_objects":
         count = int(result.get("modified_count", len(arguments.get("targets") or [])) or 0)
@@ -551,6 +557,20 @@ def _object_kinds(objects: list[Any]) -> str:
     if len(unique) <= 3:
         return ", ".join(f"id {value}" for value in unique)
     return f"{len(unique)} types"
+
+
+def _first_position(objects: list[Any]) -> str:
+    """Where the batch starts, as `x, y`, in the level's own coordinates.
+
+    Reported because a count alone cannot be acted on: the user needs to know where
+    to look, and the assistant cannot see the screen to tell them.
+    """
+    for entry in objects:
+        if isinstance(entry, dict):
+            x, y = entry.get("x"), entry.get("y")
+            if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                return f"x={x:g}, y={y:g}"
+    return "an unknown position"
 
 
 def _dump_result(result: dict[str, Any]) -> str:

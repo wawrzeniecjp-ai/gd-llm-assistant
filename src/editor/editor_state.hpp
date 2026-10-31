@@ -38,14 +38,12 @@ Snapshot takeSnapshot();
 
 /// Converts a snapshot to the protocol result object (SPEC.md 7.5).
 ///
-/// Only fields the mod can supply confidently are emitted; the JSON Schema
-/// marks the rest optional. Specifically:
-///
-/// - `ground_y` is omitted. Its derivation is not yet verified against the
-///   game, and a wrong baseline would silently misplace generated objects.
-/// - `camera` is omitted for the same reason.
-/// - `z_layer` naming and `editor_layer` indexing remain unverified
-///   (Appendix A #11), so `editor_layer` is reported raw, as the game stores it.
+/// `ground_y` and `camera` are both omitted, and for the same reason: neither can be
+/// read reliably from the APIs that look like they provide them. The ground layer's
+/// position tracks the camera rather than describing the level (see `cocosYToLevel`'s
+/// notes in the implementation), so reporting it would be worse than reporting
+/// nothing. Ground placement is instead guided by `lowest_y` from
+/// `list_object_types`, which is a real observed object position.
 matjson::Value toJson(Snapshot const& snapshot);
 
 /// TEMPORARY (spike): logs `getSaveString` for a few objects of distinct types,

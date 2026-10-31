@@ -651,6 +651,71 @@ def test_history_clear_also_clears_the_change_flag() -> None:
     assert history.take_level_changed() is False
 
 
+def test_the_scripted_ground_fallback_is_used_when_the_level_reports_none() -> None:
+    from gd_ai_assistant.providers.scripted import default_plan
+
+    plan = default_plan("add a row of spikes", ground_y=None)
+    objects = plan[1].tool_calls[0].arguments["objects"]
+    assert all(obj["y"] == 105.0 for obj in objects)
+
+
+def test_the_scripted_provider_places_on_the_levels_real_ground() -> None:
+    """The demo must sit on the ground the level reports, not a hard-coded guess.
+
+    This is the bug a user hit: the row was created successfully at y=105 in a level
+    whose ground line was higher, so it was buried and invisible -- and the summary
+    said "Created 4 objects", which reads as success. Correct data, wrong place.
+    """
+    from gd_ai_assistant.providers.scripted import default_plan
+
+    plan = default_plan("add a row of spikes", ground_y=255.0)
+    objects = plan[1].tool_calls[0].arguments["objects"]
+    assert objects, "the plan should create something"
+    assert {obj["y"] for obj in objects} == {255.0}
+
+
+async def test_ground_y_is_read_from_the_editor_state_tool_result() -> None:
+    """End to end: the tool result carries ground_y and the plan honours it."""
+
+    class GroundLink(FakeLink):
+        async def request(self, type_name, payload=None):
+            self.requests.append((type_name, payload or {}))
+            if type_name == "get_editor_state":
+                return Response(ok=True, result={"object_count": 3, "ground_y": 255.0})
+            return Response(ok=True, result={"created": [1, 2, 3], "count": 3})
+
+    link = GroundLink()
+    await make_loop(link, ScriptedProvider()).run(
+        turn_id="t-1", message_id="m1", user_text="add a row of spikes"
+    )
+
+    payload = next(p for name, p in link.requests if name == "create_objects")
+    assert {obj["y"] for obj in payload["objects"]} == {255.0}
+
+
+async def test_the_scripted_provider_plans_every_turn_not_just_the_first() -> None:
+    """One provider instance serves every turn of a session, so the plan must reset.
+
+    This was a real bug: `_planned` was computed once and never cleared, so only the
+    first turn in the sidecar's lifetime did anything and every later turn answered
+    "nothing further planned". A test that builds a fresh provider per turn cannot
+    see it -- which is exactly what every other test here does.
+    """
+    link = FakeLink({"create_objects": {"created": [1, 2, 3], "count": 3}})
+    provider = ScriptedProvider()  # one instance, three turns
+    loop = make_loop(link, provider)
+
+    for turn in range(1, 4):
+        result = await loop.run(
+            turn_id=f"t-{turn}", message_id=f"m{turn}", user_text="add a row of spikes"
+        )
+        assert result.status == COMPLETED
+        assert result.actions, f"turn {turn} planned no actions"
+
+    # Every turn created objects, rather than only the first.
+    assert link.types().count("create_objects") == 3
+
+
 # -- schema agreement ----------------------------------------------------
 
 

@@ -358,6 +358,32 @@ are GD's `CCTextInputNode` behaviour, which implements only left/right/backspace
 - **`matjson` gotcha:** `matjson::Value()` default-constructs an **object**, not null. Event frames therefore need `matjson::Value(nullptr)`; the wrong form emitted `"id": {}`, which the sidecar rejected as `INVALID_REQUEST`.
 - **`ground_y` and `camera` are still omitted** from `get_editor_state` responses: their derivation is unverified, and a wrong `ground_y` would silently misplace generated objects. The schema requires only `object_count`, `grid_size` and `playtesting`.
 
+## 0.1b Ground placement: three wrong answers, then a workable one (2026-10-31)
+
+Ground placement is the one thing in this project that has been wrong in four different
+ways, so the sequence is worth recording — the final answer is a small idea that only
+looks obvious after the others failed.
+
+1. **A hard-coded constant** (`y=105`) in the demo provider. Correct in one level, buried
+   under the ground in the user's. The objects were created, reported, and invisible —
+   indistinguishable from a failed edit.
+2. **`GJGroundLayer::getGroundY()`.** Sounded authoritative; measured **0**.
+3. **The ground layer's node position.** Also wrong, and worse than a constant because it
+   *looks* like a measurement: logged `102.586`, then `153.1`, then `201.27` on the same
+   level. It tracks the camera, so it moves as you scroll. Reporting it would have had the
+   model place objects wherever the view happened to be.
+4. **`lowest_y` from `list_object_types`** — the y of the lowest object actually in the
+   level. Stable, observable, and exactly what "on the ground" means in a level that has
+   ground content. The prompt tells the model to use it and to expect no `ground_y`; an
+   empty level has no `lowest_y`, and the model is told to place at 0 and say so.
+
+`ground_y` is now **deliberately not reported at all**. A missing field is honest; a moving
+number presented as a constant is not.
+
+The general lesson is the same one the scale setter taught (§ docs/save-string-keys.md):
+an API existing, being named plausibly, and returning without error says nothing about
+whether it means what it appears to. Two of the three failures here returned clean values.
+
 ## 0.2 Changes from 0.5.0
 
 - **S2 resolved — no WebSocket dependency.** The bridge uses a hand-written RFC 6455 client on `arc::TcpStream` (D14, §6.1.10). This satisfies §12's "avoid unmaintained libraries": websocketpp is neglected, and any third-party library would bring its own thread and event loop, which §6.1.3 forbids bridging into Arc.

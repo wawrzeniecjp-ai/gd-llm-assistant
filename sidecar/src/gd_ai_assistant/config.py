@@ -66,9 +66,24 @@ def _default_token_path() -> Path:
     return base / "gd-ai-assistant" / "token"
 
 
+def _env_file() -> str | None:
+    """The dotenv file to load, or None to ignore it.
+
+    `GD_AI_ASSISTANT_IGNORE_ENV_FILE` exists so the test suite is independent of the
+    developer's local configuration. Without it, having a real provider configured in
+    `sidecar/.env` makes the tests that assert the `needs_setup` state fail -- a suite
+    whose result depends on whose machine it runs on.
+    """
+    import os
+
+    if os.environ.get("GD_AI_ASSISTANT_IGNORE_ENV_FILE"):
+        return None
+    return ".env"
+
+
 class SidecarConfig(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_env_file(),
         env_file_encoding="utf-8",
         extra="ignore",
     )

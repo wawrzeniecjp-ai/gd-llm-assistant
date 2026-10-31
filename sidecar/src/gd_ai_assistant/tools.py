@@ -151,9 +151,10 @@ def _build() -> dict[str, Tool]:
             spec=ToolSpec(
                 name="search_object_catalog",
                 description=(
-                    "Look up object type ids by name or keyword. Always use this "
-                    "before create_objects: object ids must come from here, never "
-                    "from memory. Returns ids with their category."
+                    "Look up object type ids by name. The built-in catalog is a small "
+                    "seed and will often not have what you need. If it returns nothing, "
+                    "use list_object_types to find a type already in the level, or ask "
+                    "the user. Never guess an id."
                 ),
                 parameters={
                     "type": "object",
@@ -169,6 +170,21 @@ def _build() -> dict[str, Tool]:
                 },
             ),
             protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="list_object_types",
+                description=(
+                    "List the object TYPES already used in this level: id, count, "
+                    "approximate size, and one example position. This is the reliable "
+                    "way to learn an object id -- reuse a type the user already placed "
+                    "rather than guessing from memory. Check this before create_objects."
+                ),
+                parameters={"type": "object", "additionalProperties": False, "properties": {}},
+            ),
+            protocol_type="list_object_types",
             mutates_objects=False,
             is_action=False,
         ),

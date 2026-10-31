@@ -24,6 +24,7 @@ Determinism is the entire point, so nothing here may depend on process state:
 from __future__ import annotations
 
 import asyncio
+import json
 import zlib
 from collections.abc import Callable, Iterable
 from typing import Any
@@ -34,15 +35,21 @@ from .base import AssistantTurn, Message, Provider, ProviderError, ToolCall, Too
 _DEMO_BLOCKS = ("spike", "block", "platform", "saw", "jump pad", "orb")
 
 #: Object type ids for the demo. GD's 1.0 "spike" is id 8, the plain block 1.
-#: Fixed rather than looked up: the scripted provider cannot see tool results, so
-#: it cannot consult the catalog it is about to "search".
+#: Fixed rather than looked up: the scripted provider reads tool results only for the
+#: ground line, so it cannot consult the catalog it is about to "search".
 _DEMO_SPIKE_ID = 8
 
-#: Demo placement. A row on the ground at GD's default ground height, in 30-unit
-#: grid steps from x=300. Fixed for the same reason as the id.
+#: Demo placement: a row in 30-unit grid steps from x=300.
 _DEMO_START_X = 300.0
-_DEMO_GROUND_Y = 105.0
 _DEMO_GRID = 30.0
+
+#: Fallback ground height, used only when `get_editor_state` did not report one.
+#:
+#: It used to be the *only* value, and the result was a row buried under the ground
+#: in a level whose ground line sits higher: created correctly, reported correctly,
+#: and invisible. The real height now comes from the `ground_y` field of the last
+#: `get_editor_state` result, which is what `default_plan` reads.
+_DEMO_GROUND_Y_FALLBACK = 105.0
 
 
 def _seed(text: str) -> int:
@@ -55,6 +62,28 @@ def _last_user_text(messages: Iterable[Message]) -> str:
         if message.role == "user":
             return message.text
     return ""
+
+
+def _ground_y_from(messages: Iterable[Message]) -> float | None:
+    """The level's ground line, read from the most recent `get_editor_state` result.
+
+    The demo used to hard-code a ground height, and in a level whose ground line sits
+    higher the row it created was buried and invisible. Reading it from the tool
+    result is the difference between an edit the user can see and one they cannot.
+
+    Parsed defensively: a tool result is JSON the loop produced, but a malformed or
+    older one should degrade to the fallback rather than raise inside a turn.
+    """
+    for message in reversed(list(messages)):
+        if message.role != "tool":
+            continue
+        try:
+            payload = json.loads(message.text)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("ground_y"), (int, float)):
+            return float(payload["ground_y"])
+    return None
 
 
 class ScriptedProvider(Provider):
@@ -74,7 +103,9 @@ class ScriptedProvider(Provider):
         self._delay_ms = delay_ms
         self._call_counter = 0
         self._rounds = 0
-        self._planned: list[AssistantTurn] | None = None
+        #: Which demo phase the next call should produce.
+        self._phase = 0
+        self._phase_done = False
 
     def next_call_id(self) -> str:
         self._call_counter += 1
@@ -105,16 +136,32 @@ class ScriptedProvider(Provider):
                 return self._turns.pop(0)
             return self._final_turn("The scripted provider has nothing further planned.")
 
-        if self._planned is None:
-            self._planned = list(self._plan(_last_user_text(messages)))
+        # A new turn begins when the last message in the conversation is the user's.
+        #
+        # The plan used to be computed once and never reset, so only the first turn
+        # in the sidecar's lifetime did anything and every later turn answered
+        # "nothing further planned". Invisible in a test that runs one turn per
+        # provider instance, obvious the moment a second message is sent.
+        if self._phase_done or (messages and messages[-1].role == "user"):
+            self._phase = 0
+            self._phase_done = False
 
-        if self._planned:
-            return self._planned.pop(0)
-
-        return self._final_turn(
-            "The scripted provider has nothing further planned. "
-            "Set a real provider to get an actual answer."
+        # One turn at a time, not a precomputed list: the create step needs the
+        # `ground_y` from the `get_editor_state` result, which does not exist yet
+        # when the plan is first consulted. Precomputing the whole plan silently
+        # used the fallback ground height and buried the row under the ground.
+        turn = default_turn(
+            _last_user_text(messages), self._phase, _ground_y_from(messages)
         )
+        if turn is None:
+            self._phase_done = True
+            return self._final_turn(
+                "The scripted provider has nothing further planned. "
+                "Set a real provider to get an actual answer."
+            )
+
+        self._phase += 1
+        return turn
 
     def _final_turn(self, text: str) -> AssistantTurn:
         return AssistantTurn(
@@ -128,61 +175,61 @@ class ScriptedProvider(Provider):
         )
 
 
-def default_plan(user_text: str) -> list[AssistantTurn]:
-    """A small turn derived from `user_text`, for use without a real provider.
+def default_turn(
+    user_text: str, phase: int, ground_y: float | None = None
+) -> AssistantTurn | None:
+    """The demo turn for `phase`, or None when the turn is over.
 
-    Read-only by default, and it only plans a mutation when the message names
-    something it knows how to place. That is deliberate: a demo provider that
-    edits the user's level unasked is worse than one that only surveys it, and the
-    read-only path still exercises the interesting machinery (tool dispatch, the
-    round cap, the summary).
+    Phases rather than a precomputed list because the create step depends on what
+    `get_editor_state` returned, which is not known until that call completes.
     """
     seed = _seed(user_text)
-    lowered = user_text.lower()
-    wanted = next((name for name in _DEMO_BLOCKS if name in lowered), None)
+    wanted = next((name for name in _DEMO_BLOCKS if name.lower() in user_text.lower()), None)
 
-    calls: list[ToolCall] = [
-        # Ids are assigned per provider instance by `ScriptedProvider.tool_call`,
-        # but `default_plan` is a free function so it builds them literally. The
-        # prefix keeps them unique within a conversation, which is all the
-        # providers require.
-        ToolCall(id=f"plan-{seed}-1", name="get_editor_state", arguments={}),
-        ToolCall(
-            id=f"plan-{seed}-2",
-            name="search_object_catalog",
-            arguments={"query": wanted or "spike"},
-        ),
-    ]
+    if phase == 0:
+        return AssistantTurn(
+            text="",
+            tool_calls=[
+                ToolCall(id=f"plan-{seed}-1", name="get_editor_state", arguments={}),
+                ToolCall(
+                    id=f"plan-{seed}-2",
+                    name="search_object_catalog",
+                    arguments={"query": wanted or "spike"},
+                ),
+            ],
+            stop_reason="tool_use",
+            usage=Usage(120, 40),
+        )
 
     if wanted is None:
-        return [
-            AssistantTurn(text="", tool_calls=calls, stop_reason="tool_use", usage=Usage(120, 40)),
-            AssistantTurn(
-                text=(
-                    "I looked at the level and the object catalog. "
-                    f"You asked: {user_text}\n"
-                    "Nothing was changed. This is the scripted provider: name a "
-                    "block type (spike, block, platform, saw) and I will place a "
-                    "small row of them to demonstrate the edit path."
-                ),
-                stop_reason="end_turn",
-                usage=Usage(200, 60),
+        # Read-only: only say so, and only once.
+        if phase != 1:
+            return None
+        return AssistantTurn(
+            text=(
+                f"You asked: {user_text}\n"
+                "Nothing was changed. This is the scripted provider: name a block type "
+                "(spike, block, platform, saw) and I will place a small row of them to "
+                "demonstrate the edit path."
             ),
-        ]
+            stop_reason="end_turn",
+            usage=Usage(200, 60),
+        )
 
     count = 3 + seed % 3  # 3..5
-    objects = [
-        {
-            "id": _DEMO_SPIKE_ID,
-            "x": _DEMO_START_X + index * _DEMO_GRID,
-            "y": _DEMO_GROUND_Y,
-        }
-        for index in range(count)
-    ]
+    # Sit on the level's actual ground line, read from the editor-state result.
+    ground = ground_y if ground_y is not None else _DEMO_GROUND_Y_FALLBACK
 
-    return [
-        AssistantTurn(text="", tool_calls=calls, stop_reason="tool_use", usage=Usage(120, 40)),
-        AssistantTurn(
+    if phase == 1:
+        objects = [
+            {
+                "id": _DEMO_SPIKE_ID,
+                "x": _DEMO_START_X + index * _DEMO_GRID,
+                "y": ground,
+            }
+            for index in range(count)
+        ]
+        return AssistantTurn(
             text="",
             tool_calls=[
                 ToolCall(
@@ -193,17 +240,32 @@ def default_plan(user_text: str) -> list[AssistantTurn]:
             ],
             stop_reason="tool_use",
             usage=Usage(160, 50),
-        ),
-        AssistantTurn(
+        )
+
+    if phase == 2:
+        return AssistantTurn(
             text=(
-                f"Placed {count} {wanted}s along the ground starting at x={_DEMO_START_X:g}. "
+                f"Placed {count} {wanted}s along the ground at y={ground:g}, "
+                f"starting at x={_DEMO_START_X:g}. "
                 "This is the scripted provider, so the placement is a fixed demo rather "
                 "than a response to the level."
             ),
             stop_reason="end_turn",
             usage=Usage(220, 70),
-        ),
-    ]
+        )
+
+    return None
+
+
+def default_plan(user_text: str, ground_y: float | None = None) -> list[AssistantTurn]:
+    """All demo turns for one request, for tests that want the whole sequence."""
+    turns: list[AssistantTurn] = []
+    for phase in range(8):
+        turn = default_turn(user_text, phase, ground_y)
+        if turn is None:
+            break
+        turns.append(turn)
+    return turns
 
 
 class FailingProvider(Provider):

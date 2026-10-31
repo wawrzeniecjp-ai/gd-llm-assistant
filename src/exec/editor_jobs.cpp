@@ -678,7 +678,6 @@ private:
 class SummarizeRegionJob final : public EditorJob {
 public:
     explicit SummarizeRegionJob(QueryFilters filters) : m_filters(std::move(filters)) {}
-
     bool step() override {
         if (checkEditor()) {
             return true;
@@ -772,6 +771,151 @@ private:
     double m_minY = 0.0;
     double m_maxX = 0.0;
     double m_maxY = 0.0;
+};
+
+/// Reports the distinct object **types** present in the level.
+///
+/// This exists because there is no authoritative source of object names. The game
+/// exposes `m_objectID` and nothing else -- no names, no categories -- so any
+/// "ID 8 is a spike" table in the sidecar would be somebody's memory, and a wrong
+/// guess silently places the wrong object.
+///
+/// What is available is far better: the types the user has actually built with.
+/// Those ids are real, they exist in this level, and they are guaranteed creatable.
+/// So the assistant can be shown "type 37 appears 12 times, roughly 60x30 units,
+/// first at (300, 105)" and reuse it, instead of inventing an id.
+///
+/// The size is included on purpose: with a count, a bounding size and a position,
+/// a model can tell a small repeated hazard from a wide platform without either of
+/// them being named.
+class ListObjectTypesJob final : public EditorJob {
+public:
+    bool step() override {
+        if (checkEditor()) {
+            return true;
+        }
+        if (m_finished) {
+            return true;
+        }
+        m_finished = true;
+
+        auto* objects = editor()->getAllObjects();
+        if (objects == nullptr) {
+            m_done = true;
+            return true;
+        }
+
+        struct Accum {
+            int count = 0;
+            double width = 0.0;
+            double height = 0.0;
+            double sampleX = 0.0;
+            double sampleY = 0.0;
+        };
+        std::vector<std::pair<std::int32_t, Accum>> types;
+
+        auto const total = objects->count();
+        for (unsigned int i = 0; i < total; ++i) {
+            auto* object = static_cast<GameObject*>(objects->objectAtIndex(i));
+            if (object == nullptr) {
+                continue;
+            }
+            auto const typeId = object->m_objectID;
+
+            auto const found = std::find_if(
+                types.begin(), types.end(),
+                [typeId](auto const& entry) { return entry.first == typeId; }
+            );
+            auto& slot = found != types.end() ? found->second : [&]() -> Accum& {
+                types.emplace_back(typeId, Accum {});
+                return types.back().second;
+            }();
+
+            // Record the first sighting's size and position as representative. A
+            // later one may be scaled differently; averaging would describe no
+            // actual object.
+            // Each object's own level-space y, tracked separately from the per-type
+            // sample. Using the type's first sighting here would report the lowest
+            // *type* rather than the lowest object, which is a different number the
+            // moment a type appears more than once.
+            auto const objectY = editor::cocosYToLevel(object->getPositionY());
+            if (!m_lowestYKnown || objectY < m_lowestY) {
+                m_lowestY = objectY;
+                m_lowestYKnown = true;
+            }
+
+            if (slot.count == 0) {
+                slot.sampleX = object->getPositionX();
+                slot.sampleY = objectY;
+                if (auto const& rect = object->getObjectRect(); rect.size.width > 0.f) {
+                    slot.width = rect.size.width;
+                    slot.height = rect.size.height;
+                }
+            }
+            ++slot.count;
+        }
+
+        // Most-used first: the level's vocabulary, in the order that is useful.
+        std::sort(types.begin(), types.end(), [](auto const& lhs, auto const& rhs) {
+            return lhs.second.count > rhs.second.count;
+        });
+        if (types.size() > kMaxTypes) {
+            types.resize(kMaxTypes);
+        }
+
+        auto result = matjson::Value::object();
+        result["total_objects"] = static_cast<int>(total);
+
+        // The lowest object in the level, in level coordinates.
+        //
+        // This is the practical answer to "where is the ground": the ground line
+        // cannot be read from `GJGroundLayer` (its `getGroundY()` returns 0 and its
+        // node position tracks the camera, so it moves as you scroll -- measured
+        // 102, then 153, on the same level). But the lowest thing the user has built
+        // is stable, observable, and exactly what "on the ground" means in practice.
+        //
+        // Reported as a hint rather than as `ground_y`, because a level with nothing
+        // near the ground has no meaningful lowest object.
+        if (m_lowestYKnown) {
+            result["lowest_y"] = m_lowestY;
+        }
+
+        auto listed = matjson::Value::array();
+        for (auto const& [typeId, acc] : types) {
+            auto entry = matjson::Value::object();
+            entry["id"] = typeId;
+            entry["count"] = acc.count;
+            entry["width"] = acc.width;
+            entry["height"] = acc.height;
+            entry["sample_x"] = acc.sampleX;
+            entry["sample_y"] = acc.sampleY;
+            listed.push(std::move(entry));
+        }
+        result["types"] = std::move(listed);
+        m_result = std::move(result);
+        m_done = true;
+        return true;
+    }
+
+    JobOutcome takeOutcome() override {
+        if (m_editorClosed) {
+            return editorClosedOutcome();
+        }
+        return JobOutcome::success(matjson::Value(m_result));
+    }
+
+    std::string_view type() const override {
+        return "list_object_types";
+    }
+
+private:
+    static constexpr std::size_t kMaxTypes = 40;
+
+    bool m_finished = false;
+    bool m_done = false;
+    bool m_lowestYKnown = false;
+    double m_lowestY = 0.0;
+    matjson::Value m_result = matjson::Value::object();
 };
 
 // ---------------------------------------------------------------------------
@@ -893,7 +1037,20 @@ std::unique_ptr<Job> makeErrorJob(std::string errorObject) {
 bool isImplementedRequest(std::string_view type) {
     return type == "create_objects" || type == "modify_objects" || type == "delete_objects"
         || type == "set_selection" || type == "query_objects" || type == "summarize_region"
-        || type == "get_object_properties";
+        || type == "get_object_properties" || type == "list_object_types"
+        // The transaction requests are not queue jobs -- the bridge handles them with
+        // a main-thread hop -- but they must be listed here, because this predicate is
+        // the gate the bridge uses to reach *any* implemented request.
+        //
+        // They were missing for a long time, and the effect was total rather than
+        // partial: `begin_transaction` fell through to "unhandled request type", the
+        // tool loop treats a failed begin as fatal for that call, and so **no mutating
+        // tool ever executed**. The assistant reported creating objects and created
+        // nothing. It went unnoticed because the earlier end-to-end test ran with the
+        // developer probes enabled, and the objects that appeared in the level were the
+        // probe's, not the assistant's.
+        || type == "begin_transaction" || type == "end_transaction"
+        || type == "revert_transaction";
 }
 
 std::unique_ptr<Job> makeJob(std::string_view type, matjson::Value const& payload) {
@@ -953,6 +1110,11 @@ std::unique_ptr<Job> makeJob(std::string_view type, matjson::Value const& payloa
         }
 
         return std::make_unique<CreateObjectsJob>(std::move(requests));
+    }
+
+    if (type == "list_object_types") {
+        // No payload: it always describes the whole level.
+        return std::make_unique<ListObjectTypesJob>();
     }
 
     if (type == "modify_objects") {

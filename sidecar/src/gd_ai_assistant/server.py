@@ -282,6 +282,15 @@ class SidecarServer:
             return
         log.info("probe: get_editor_state -> %s", json.dumps(state.result))
 
+        # The object-type inventory matters more than the counts above: it is the
+        # only trustworthy source of object ids, so a break in it silently makes
+        # the assistant unable to create anything. Cheap to check here.
+        types = await self.request("list_object_types", {}, timeout=10)
+        if not types.ok:
+            log.error("probe: list_object_types failed: %s", types.error)
+            return
+        log.info("probe: list_object_types -> %s", json.dumps(types.result))
+
     # -- handshake -----------------------------------------------------
 
     async def _handshake(self, websocket: ServerConnection) -> str | None:

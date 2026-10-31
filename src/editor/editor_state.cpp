@@ -2,6 +2,7 @@
 
 #include <Geode/binding/EditorUI.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
+#include <Geode/binding/GJGroundLayer.hpp>
 #include <Geode/binding/GameObject.hpp>
 #include <Geode/binding/LevelEditorLayer.hpp>
 #include <Geode/binding/PlayLayer.hpp>
@@ -76,6 +77,18 @@ Snapshot takeSnapshot() {
         snapshot.objectCount = static_cast<int>(objects->count());
     }
     snapshot.editorLayer = static_cast<int>(editor->m_currentLayer);
+
+    // `ground_y` is deliberately **not** reported.
+    //
+    // `GJGroundLayer` looked like the answer and is not: `getGroundY()` returns 0, and
+    // the layer node's position tracks the camera -- measured 102, then 153, then
+    // 201 on the same level as it was scrolled. Anything read from it is a moving
+    // number dressed up as a constant, and a model placing objects against it puts
+    // them wherever the camera happened to be.
+    //
+    // The usable ground reference is the lowest object the user has built, which
+    // `list_object_types` reports as `lowest_y`: stable, observable, and exactly what
+    // "on the ground" means in a level that has one.
 
     if (editor->m_level != nullptr) {
         snapshot.levelName = editor->m_level->m_levelName;
