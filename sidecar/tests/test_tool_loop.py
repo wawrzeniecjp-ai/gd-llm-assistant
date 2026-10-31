@@ -24,6 +24,7 @@ from gd_ai_assistant.agent import (
     COMPLETED,
     FAILED,
     INCOMPLETE,
+    REVERTED_NOTE,
     History,
     ToolLoop,
 )
@@ -648,7 +649,49 @@ def test_history_clear_also_clears_the_change_flag() -> None:
     history = History(token_budget=8000)
     history.mark_level_changed()
     history.clear()
-    assert history.take_level_changed() is False
+    assert history.take_level_changed() is None
+
+
+async def test_a_revert_is_described_as_a_revert_not_as_a_hand_edit() -> None:
+    """The two causes need different notes, and the revert one is the sharper.
+
+    After a hand edit the level is merely unknown. After a revert the model's own
+    transcript says the work succeeded, so "something changed" invites it to defend
+    work that no longer exists; the note has to say the work is gone.
+    """
+    link = FakeLink()
+    history = History(token_budget=8000)
+    provider = RecordingProvider()
+    loop = ToolLoop(link=link, provider=provider, catalog=catalog.load_catalog(), history=history)
+
+    history.mark_level_changed(REVERTED_NOTE)
+    await loop.run(turn_id="t-1", message_id="m1", user_text="what did you just do?")
+
+    note = provider.seen[0][0]
+    assert note.role == "user"
+    assert "undid your last turn" in note.text
+    # It must not reuse the ids from the undone work.
+    assert "object ids" in note.text
+
+
+def test_a_note_taken_twice_is_only_delivered_once() -> None:
+    history = History(token_budget=8000)
+    history.mark_level_changed(REVERTED_NOTE)
+    assert history.take_level_changed() == REVERTED_NOTE
+    assert history.take_level_changed() is None
+
+
+def test_a_hand_edit_does_not_downgrade_a_pending_revert_note() -> None:
+    """The mod reports both, in that order, for one revert.
+
+    Reverting changes the object count, so the mod's change detector sends a
+    `level_changed` right after the `transaction_reverted`. Letting the vaguer note
+    win would leave the model free to insist the work was done.
+    """
+    history = History(token_budget=8000)
+    history.mark_level_changed(REVERTED_NOTE)
+    history.mark_level_changed()
+    assert history.take_level_changed() == REVERTED_NOTE
 
 
 def test_the_scripted_ground_fallback_is_used_when_the_level_reports_none() -> None:

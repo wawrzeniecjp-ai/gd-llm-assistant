@@ -76,7 +76,15 @@ public:
     void postTurnStarted();
 
     /// A turn ended: hide the indicator, restore Send, and show the summary.
-    void postTurnFinished(std::string status, std::vector<std::string> lines);
+    ///
+    /// `txnId` is the transaction the turn opened, or empty if it changed nothing.
+    /// It is what the summary's Revert action reverts.
+    void postTurnFinished(
+        std::string status, std::vector<std::string> lines, std::string txnId = {}
+    );
+
+    /// Reports the outcome of a revert, adding a line to the transcript.
+    void postRevertFinished(bool ok, std::string message);
 
     /// Clears the transcript, as when the sidecar pushes history and it is
     /// rebuilt from scratch.
@@ -84,6 +92,15 @@ public:
 
     void setSubmitHandler(geode::Function<void(std::string)> onSubmit);
     void setCancelHandler(geode::Function<void()> onCancel);
+
+    /// Handles the panel's Revert action, given the transaction id.
+    ///
+    /// Installed from `main.cpp` for the same reason as the submit and cancel
+    /// handlers: the panel knows nothing about transactions, and the wiring belongs
+    /// where the two sides meet rather than in either of them.
+    ///
+    /// The handler is expected to call `postRevertFinished` with the outcome.
+    void setRevertHandler(geode::Function<void(std::string)> onRevert);
 
     /// True when a panel is currently attached. Main thread only.
     [[nodiscard]] bool hasPanel() const {
@@ -132,6 +149,7 @@ private:
 
     geode::Function<void(std::string)> m_onSubmit;
     geode::Function<void()> m_onCancel;
+    geode::Function<void(std::string)> m_onRevert;
 };
 
 } // namespace gdai::ui

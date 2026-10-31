@@ -22,7 +22,7 @@ from test_handshake import hello_frame
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
-from gd_ai_assistant import protocol
+from gd_ai_assistant import agent, protocol
 from gd_ai_assistant.config import SidecarConfig
 from gd_ai_assistant.server import SidecarServer
 
@@ -200,6 +200,34 @@ async def test_every_frame_the_turn_sends_is_valid(tmp_path) -> None:
         assert frames, "no frames were exchanged"
         for frame in frames:
             assert protocol.validate_frame(frame) == [], frame
+
+
+async def test_a_revert_event_tells_the_next_turn_its_work_is_gone(tmp_path) -> None:
+    """SPEC.md 7.4. The note reaches the model, so it is not visible on the wire.
+
+    Read from the server's history instead, behind a barrier: frames are dispatched
+    in order, so a request sent after the event is only answered once the event has
+    been handled. Without the barrier this would race the receive loop.
+    """
+    async with running_sidecar(tmp_path) as (sidecar, url), connect(url) as websocket:
+        await do_handshake(websocket, sidecar.token)
+
+        await websocket.send(
+            json.dumps(
+                {"type": "transaction_reverted", "id": None, "payload": {"txn_id": "x-1"}}
+            )
+        )
+        await websocket.send(
+            json.dumps({"type": "not_a_request", "id": "barrier", "payload": {}})
+        )
+        while True:
+            frame = decode(await asyncio.wait_for(websocket.recv(), timeout=5))
+            if frame.get("id") == "barrier":
+                break
+
+        # Not the generic hand-edit note: the model's own transcript says the work
+        # succeeded, so "something changed" does not tell it enough.
+        assert sidecar._history.take_level_changed() == agent.REVERTED_NOTE
 
 
 # -- the setup state (A6) ------------------------------------------------

@@ -417,10 +417,12 @@ class SidecarServer:
             return
 
         if type_name == "transaction_reverted":
-            # The user undid a turn's work with Ctrl+Z. The transcript stays, but the
-            # model must not keep believing those edits are still in place.
+            # The user undid a turn with the panel's Revert action. The transcript stays,
+            # but the model must not keep believing those edits are still in place --
+            # and "something changed" is too weak a hint here, since the model's own
+            # transcript says the work succeeded. See `agent.REVERTED_NOTE`.
             log.info("transaction reverted by the mod: %r", frame["payload"].get("txn_id"))
-            self._history.mark_level_changed()
+            self._history.mark_level_changed(agent.REVERTED_NOTE)
             return
 
         if type_name == "level_changed":

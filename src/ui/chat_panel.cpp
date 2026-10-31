@@ -280,6 +280,36 @@ void ChatPanel::buildHeader() {
         collapse->setID("collapse"_spr);
         m_header->addChild(collapse, 1);
     }
+
+    // Revert (SPEC.md 8.4).
+    //
+    // In the header rather than on the turn summary, which is where the layout sketch
+    // puts it. The summary is the last thing in a scrolled transcript, so an action
+    // there is only reachable when the transcript happens to be scrolled to its exact
+    // bottom -- and a button that is invisible is not a safety net. The header is
+    // fixed chrome that no scroll or clip can hide, and it is where the panel already
+    // puts its other control.
+    //
+    // Hidden until a turn actually opened a transaction: a read-only turn has nothing
+    // to undo, and an always-present button would suggest otherwise.
+    auto revert = Button::createWithLabel("Revert", kFont, [this](Button*) {
+        if (!m_revertTxnId.empty()) {
+            requestRevert(m_revertTxnId);
+        }
+    });
+    if (revert) {
+        revert->setAnchorPoint({ 0.5f, 0.5f });
+        revert->setScale(kTextScale);
+        // The caption is tiny at this scale, so the *touch* area is widened rather
+        // than the text: a bigger label would outweigh the panel title.
+        revert->setTouchMultiplier(4.f);
+        revert->setVisible(false);
+        revert->setID("revert"_spr);
+        m_header->addChild(revert, 1);
+        m_revertButton = revert;
+    } else {
+        log::warn("panel: revert action could not be created");
+    }
 }
 
 void ChatPanel::buildMessages() {
@@ -438,6 +468,15 @@ void ChatPanel::relayout() {
     }
     if (auto collapse = m_header ? m_header->getChildByID("collapse"_spr) : nullptr) {
         collapse->setPosition({ width - kPad - 7.f, kHeaderHeight * 0.5f });
+    }
+    if (m_revertButton) {
+        // Left of the collapse arrow, on the same line. Its width is measured at the
+        // scale it is drawn at, so the two cannot overlap however the font renders.
+        auto const revertWidth = m_revertButton->getScaledContentSize().width;
+        m_revertButton->setPosition({
+            width - kPad - 20.f - revertWidth * 0.5f,
+            kHeaderHeight * 0.5f,
+        });
     }
 
     auto area = messageAreaRect();
@@ -672,6 +711,8 @@ void ChatPanel::clearMessages() {
     m_idOrder.clear();
     m_thinkingNode = nullptr;
     m_thinkingStep = 0;
+    // The action belongs to a turn that is no longer on screen.
+    dropRevertAction();
 
     if (m_emptyHint) {
         m_emptyHint->setVisible(true);
@@ -733,7 +774,8 @@ void ChatPanel::tickThinking(float dt) {
 }
 
 void ChatPanel::showTurnSummary(
-    std::string const& status, std::vector<std::string> const& lines
+    std::string const& status, std::vector<std::string> const& lines,
+    std::string const& txnId
 ) {
     setThinking(false);
 
@@ -751,7 +793,53 @@ void ChatPanel::showTurnSummary(
         text += fmt::format("\n  - {}", line);
     }
 
-    upsertMessage({}, status == "failed" ? "error" : "action-summary", text);
+    auto const role = status == "failed" ? std::string_view("error") : std::string_view("action-summary");
+    auto label = makeMessageLabel(role, text);
+    if (!label) return;
+
+    // Its predecessor's action goes away first. Not because the older transaction
+    // stopped existing, but because its inverse is only safe while nothing newer has
+    // touched the level -- and the manager already refuses in that case, so an action
+    // that would fail is worse than no action.
+    dropRevertAction();
+
+    appendMessageNode(label);
+
+    if (!txnId.empty() && m_onRevert && m_revertButton) {
+        m_revertTxnId = txnId;
+        m_revertButton->setVisible(true);
+        log::info("panel: offering revert of transaction {}", txnId);
+    }
+}
+
+void ChatPanel::requestRevert(std::string txnId) {
+    if (!m_onRevert) {
+        return;
+    }
+    // Disabled before the work happens rather than after: a second press while the
+    // first is still in flight would revert a transaction that is already gone, and
+    // the manager's answer to that is an error the user did not ask to see.
+    if (m_revertButton) {
+        m_revertButton->setEnabled(false);
+    }
+    log::info("panel: revert requested for transaction {}", txnId);
+    m_onRevert(std::move(txnId));
+}
+
+void ChatPanel::finishRevert(bool ok, std::string const& message) {
+    dropRevertAction();
+    if (!message.empty()) {
+        upsertMessage({}, ok ? "system" : "error", message);
+    }
+}
+
+void ChatPanel::dropRevertAction() {
+    m_revertTxnId.clear();
+    if (m_revertButton == nullptr) {
+        return;
+    }
+    m_revertButton->setVisible(false);
+    m_revertButton->setEnabled(true);
 }
 
 void ChatPanel::refreshLayout() {
@@ -883,6 +971,10 @@ void ChatPanel::setOnSubmit(geode::Function<void(std::string)> onSubmit) {
 
 void ChatPanel::setOnCancel(geode::Function<void()> onCancel) {
     m_onCancel = std::move(onCancel);
+}
+
+void ChatPanel::setOnRevert(geode::Function<void(std::string)> onRevert) {
+    m_onRevert = std::move(onRevert);
 }
 
 void ChatPanel::submitDraft() {

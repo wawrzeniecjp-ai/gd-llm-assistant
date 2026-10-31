@@ -374,6 +374,21 @@ void Bridge::sendLevelChanged(int delta) {
     enqueueFrame(frame.dump(0));
 }
 
+void Bridge::sendTransactionReverted(std::string const& txnId) {
+    auto payload = matjson::Value::object();
+    payload["txn_id"] = txnId;
+
+    auto frame = matjson::Value::object();
+    frame["type"] = "transaction_reverted";
+    frame["id"] = matjson::Value(nullptr);
+    frame["payload"] = std::move(payload);
+
+    // Without this the model keeps describing work that has been undone: it has no
+    // other way to learn that its edits are gone (SPEC.md 7.4).
+    log::info("transaction {} reverted by the user", txnId);
+    enqueueFrame(frame.dump(0));
+}
+
 /// Drains queued outbound frames into the socket.
 ///
 /// Called by the watchdog, which is the only thing that can observe the queue
@@ -835,8 +850,16 @@ void Bridge::handleEvent(std::string const& type, matjson::Value const& payload)
             std::scoped_lock lock(m_turnMutex);
             m_activeTurnId.clear();
         }
-        log::info("turn '{}' finished: {}", stringField(payload, "turn_id"), status);
-        host.postTurnFinished(status, std::move(lines));
+        // The transaction is what the summary's Revert action undoes, so it has to
+        // reach the panel or the action cannot be offered (SPEC.md 8.4).
+        auto const txnId = stringField(payload, "txn_id");
+        log::info(
+            "turn '{}' finished: {} (txn '{}')",
+            stringField(payload, "turn_id"),
+            status,
+            txnId
+        );
+        host.postTurnFinished(status, std::move(lines), txnId);
         return;
     }
 

@@ -95,6 +95,27 @@ class TurnResult:
         return [action.to_json() for action in self.actions]
 
 
+# What the model is told when the level changed behind its back (SPEC.md 6.1.7).
+#
+# Two notes rather than one, because the useful inference differs. A hand edit means
+# "your picture is stale". A revert means "the work you just did is gone" -- a claim
+# the model will otherwise contradict, since its own transcript says it succeeded.
+HAND_EDIT_NOTE = (
+    "[system note] The level changed outside the assistant since the last turn: "
+    "objects were added, modified or removed by hand. Do not assume anything you "
+    "were told or did earlier is still true. Re-query the editor state before "
+    "acting on it."
+)
+
+REVERTED_NOTE = (
+    "[system note] The user undid your last turn with the Revert action. Those "
+    "changes are gone: objects you created no longer exist, and anything you "
+    "modified is back to how it was. Do not describe that work as done, and do not "
+    "reuse any object ids from it. Re-query the editor state if you need to know "
+    "what is there now."
+)
+
+
 class History:
     """Conversation history for one session (SPEC.md 6.2.3).
 
@@ -119,7 +140,7 @@ class History:
     def __init__(self, token_budget: int) -> None:
         self._messages: list[Message] = []
         self._token_budget = token_budget
-        self._level_changed = False
+        self._level_changed: str | None = None
 
     def __len__(self) -> int:
         return len(self._messages)
@@ -136,21 +157,38 @@ class History:
 
     def clear(self) -> None:
         self._messages.clear()
-        self._level_changed = False
+        self._level_changed = None
 
-    def mark_level_changed(self) -> None:
-        """Record that the level changed outside the assistant."""
-        self._level_changed = True
+    def mark_level_changed(self, note: str = HAND_EDIT_NOTE) -> None:
+        """Record that the level changed outside the assistant.
 
-    def take_level_changed(self) -> bool:
-        """True once if the level changed since the last call, then reset.
+        The note is what the model will be told, and the two causes are worth
+        separating. After a hand edit the level is merely unknown. After a revert it
+        is *known to be missing this assistant's work*, and an object id it created no
+        longer exists -- which is exactly the kind of fiction that makes a follow-up
+        turn fail. Saying only "something changed" makes the model re-query and then
+        guess which of its own objects survived.
 
-        Consumed rather than sticky: the notice is about a specific edit, and
-        repeating it every turn would teach the model to ignore it.
+        A pending revert note is **not** downgraded to a hand-edit note. It would be,
+        without the check below: a revert changes the object count, so the mod's own
+        change detector reports a `level_changed` a moment after the
+        `transaction_reverted`, and "later wins" would then throw away the sharper
+        note in favour of the vaguer one.
         """
-        was_changed = self._level_changed
-        self._level_changed = False
-        return was_changed
+        if self._level_changed == REVERTED_NOTE and note == HAND_EDIT_NOTE:
+            return
+        self._level_changed = note
+
+    def take_level_changed(self) -> str | None:
+        """The note recorded since the last call, then reset.
+
+        Consumed rather than sticky: the note is about a specific change, and
+        repeating it every turn would teach the model to ignore it. The most recent
+        reason wins when several arrive in one turn -- it is the only one still true.
+        """
+        note = self._level_changed
+        self._level_changed = None
+        return note
 
     def _trim(self) -> None:
         """Drop the oldest messages until the budget is met.
@@ -246,18 +284,9 @@ class ToolLoop:
         # Only on a changed level, and only as a note: the alternative -- clearing
         # history -- would throw away a conversation the user can still see on
         # screen, which is worse. See `History`.
-        if self._history.take_level_changed():
-            messages.append(
-                Message(
-                    role="user",
-                    text=(
-                        "[system note] The level changed outside the assistant since the "
-                        "last turn: objects were added, modified or removed by hand. "
-                        "Do not assume anything you were told or did earlier is still "
-                        "true. Re-query the editor state before acting on it."
-                    ),
-                )
-            )
+        change_note = self._history.take_level_changed()
+        if change_note is not None:
+            messages.append(Message(role="user", text=change_note))
 
         messages.append(Message(role="user", text=user_text))
 

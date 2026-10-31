@@ -62,6 +62,14 @@ public:
     /// "add a platform above the spikes" is not answered against spikes that have
     /// since been deleted. Safe to call from the main thread.
     void sendLevelChanged(int delta);
+
+    /// Sends a `transaction_reverted` event (SPEC.md 7.4).
+    ///
+    /// Sent when the user undoes a turn with the panel's Revert action, so the
+    /// sidecar can tell the model its edits are gone. Ctrl+Z does **not** report
+    /// anything, because it does not undo our edits in the first place (D2).
+    /// Safe to call from the main thread.
+    void sendTransactionReverted(std::string const& txnId);
     /// True while a session is running or a reconnect is pending.
     bool isActive() const {
         return m_active.load();

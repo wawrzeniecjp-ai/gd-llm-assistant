@@ -184,7 +184,23 @@ public:
     void setThinking(bool on);
 
     /// Replaces the thinking indicator with a turn summary (SPEC.md 8.9).
-    void showTurnSummary(std::string const& status, std::vector<std::string> const& lines);
+    ///
+    /// `txnId` is the transaction the turn opened, or empty when it changed
+    /// nothing. A non-empty id reveals the header's **Revert** action, which is the
+    /// only way back from a turn's edits: they never reach the editor's undo stack,
+    /// so Ctrl+Z undoes the user's own last edit instead of ours (D2).
+    void showTurnSummary(
+        std::string const& status,
+        std::vector<std::string> const& lines,
+        std::string const& txnId = {}
+    );
+
+    /// Reports the outcome of a revert the user asked for, and drops the action.
+    ///
+    /// Always drops it, whatever the outcome: a failed revert cannot become
+    /// possible again without another turn, so leaving the button would invite
+    /// the user into the same failure twice.
+    void finishRevert(bool ok, std::string const& message);
 
     /// Enables or disables the input row. Disabled doubles as "processing", where
     /// the button becomes Stop (SPEC.md 8.5).
@@ -204,6 +220,13 @@ public:
 
     /// Callback fired when the user presses Stop mid-turn.
     void setOnCancel(geode::Function<void()> onCancel);
+
+    /// Callback fired when the user presses **Revert** on a turn summary.
+    ///
+    /// The panel does not revert anything itself -- it does not know about the
+    /// transaction manager -- so it hands over the id and waits to be told the
+    /// outcome through `finishRevert`.
+    void setOnRevert(geode::Function<void(std::string)> onRevert);
 
     // -- TextInputDelegate: Enter submits (SPEC.md 8.5) ------------------
 
@@ -243,6 +266,16 @@ private:
     void submitDraft();
     void appendMessageNode(cocos2d::CCNode* node);
     void scrollToBottom();
+
+    /// The user pressed Revert: disable the action and forward the id.
+    void requestRevert(std::string txnId);
+
+    /// Removes the Revert action, if one is on screen.
+    ///
+    /// Only the newest turn keeps its action: reverting an older one would apply
+    /// its inverse on top of changes that assume the newer turn's edits are still
+    /// present, which is what `TRANSACTION_NOT_REVERTIBLE` exists to prevent.
+    void dropRevertAction();
 
     /// Creates the label node for a message, applying role styling and, for
     /// untrusted roles, the sanitiser (SPEC.md 8.3.1).
@@ -327,6 +360,15 @@ private:
 
     geode::Function<void(std::string)> m_onSubmit;
     geode::Function<void()> m_onCancel;
+    geode::Function<void(std::string)> m_onRevert;
+
+    /// The Revert action on the header, or null. There is exactly one.
+    ///
+    /// In the header rather than on the summary bubble: see `buildHeader`.
+    geode::Button* m_revertButton = nullptr;
+
+    /// The transaction the visible Revert action would undo, or empty.
+    std::string m_revertTxnId;
 };
 
 } // namespace gdai::ui

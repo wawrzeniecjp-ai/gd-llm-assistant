@@ -47,6 +47,11 @@ ChatPanel* PanelHost::attach(LevelEditorLayer* editor) {
             m_onCancel();
         }
     });
+    panel->setOnRevert([this](std::string txnId) {
+        if (m_onRevert) {
+            m_onRevert(std::move(txnId));
+        }
+    });
 
     // Above the editor's own chrome so its controls are reachable. This is not
     // what decides input routing -- the panel's children register their own
@@ -174,12 +179,24 @@ void PanelHost::postTurnStarted() {
     });
 }
 
-void PanelHost::postTurnFinished(std::string status, std::vector<std::string> lines) {
-    onPanel([status = std::move(status), lines = std::move(lines)](ChatPanel& panel) {
-        panel.setProcessing(false);
-        panel.setThinking(false);
-        panel.setInputEnabled(true);
-        panel.showTurnSummary(status, lines);
+void PanelHost::postTurnFinished(
+    std::string status, std::vector<std::string> lines, std::string txnId
+) {
+    onPanel(
+        [status = std::move(status), lines = std::move(lines), txnId = std::move(txnId)](
+            ChatPanel& panel
+        ) {
+            panel.setProcessing(false);
+            panel.setThinking(false);
+            panel.setInputEnabled(true);
+            panel.showTurnSummary(status, lines, txnId);
+        }
+    );
+}
+
+void PanelHost::postRevertFinished(bool ok, std::string message) {
+    onPanel([ok, message = std::move(message)](ChatPanel& panel) {
+        panel.finishRevert(ok, message);
     });
 }
 
@@ -206,6 +223,10 @@ void PanelHost::setSubmitHandler(geode::Function<void(std::string)> onSubmit) {
 
 void PanelHost::setCancelHandler(geode::Function<void()> onCancel) {
     m_onCancel = std::move(onCancel);
+}
+
+void PanelHost::setRevertHandler(geode::Function<void(std::string)> onRevert) {
+    m_onRevert = std::move(onRevert);
 }
 
 } // namespace gdai::ui

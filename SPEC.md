@@ -1114,7 +1114,7 @@ Unknown keys are rejected with `UNSUPPORTED_PROPERTY`; values outside range are 
 
 ```text
 ┌─────────────────────────────────────────────┐
-│ ● LLM Assistant                      [–]    │  ← header: status dot, collapse
+│ ● LLM Assistant              Revert   [–]   │  ← header: status dot, revert, collapse
 ├─────────────────────────────────────────────┤
 │                                             │
 │   [Message scroll area]                     │
@@ -1123,12 +1123,15 @@ Unknown keys are rejected with `UNSUPPORTED_PROPERTY`; values outside range are 
 │                                             │
 │   Assistant: I'll add 5 spikes...           │
 │                                             │
-│   [icon] Finished with 2 actions   [Revert] │
+│   [icon] Finished with 2 actions            │
 │                                             │
 ├─────────────────────────────────────────────┤
 │ [ Type your message...        ] [Send/Stop] │
 └─────────────────────────────────────────────┘
 ```
+
+**Revert is in the header, not on the summary line** — see §8.4.1. An action at the end
+of a scrolled area is only reachable when the scroll happens to land on it.
 
 ## 8.3 Message Display Area
 
@@ -1160,9 +1163,42 @@ Mod-generated system messages may use colour tags.
 | User message | Right-aligned bubble | Static text |
 | Assistant message | Left-aligned bubble, Markdown | Updated in place if streaming |
 | Thinking indicator | Animated ellipsis in an assistant bubble | Replaced by the response |
-| Action summary | Left-aligned compact bubble with sprite icon | Tap to expand; includes **Revert** while revertible |
+| Action summary | Left-aligned compact bubble with sprite icon | Tap to expand; the turn's **Revert** action appears in the panel header, not here (see below) |
 | Error message | Left-aligned, red-tinted bubble | Human-readable text; code in smaller print |
 | System notification | Centered, muted | "Connected", "Disconnected", "Reconnecting…" |
+
+### 8.4.1 Revert
+
+**Revert lives in the panel header**, left of the collapse arrow, and only while the
+newest turn opened a transaction. It is the only way back from a turn's edits: they
+never reach the editor's undo stack, so Ctrl+Z undoes the user's own last edit instead
+of ours (D2).
+
+It was first built inside the summary bubble, on the same line as the summary text, and
+that placement does not work. The summary is the **last thing in a scrolled area**, so
+an action there is reachable only when the transcript is scrolled to its exact bottom —
+and a safety net that is invisible when you need it is not a safety net. The row also
+had to be a container node holding the label and the button, and a container sized from
+one label's height behaved badly: the log showed the row correctly placed at the bottom
+of a correctly scrolled transcript (`content=216 view=124`, `content y=0`, row at
+`y=22` of `h=20`, `visible=true`, world y two points above the clip floor) and the user
+still saw only a sliver of its first line. Moving the action to fixed chrome removed
+the container, and with it the fault.
+
+Behaviour:
+
+- Revealed by `turn_finished` when `txn_id` is non-empty. A read-only turn never shows it.
+- Disabled on press, before the work happens, so a second press cannot revert a
+transaction that is already gone.
+- Dropped on use, on failure, and when the next turn's summary arrives. Reverting an
+  older turn is not merely stale — its inverse would apply on top of changes that assume
+  the newer turn's edits are still present, which is what `TRANSACTION_NOT_REVERTIBLE`
+  exists to refuse.
+- Reports its outcome into the transcript: a system line on success, an error line on
+  refusal, with the protocol code stripped (the code is in the log; a player pressing a
+  button should not be shown `TRANSACTION_NOT_REVERTIBLE`).
+- On success the mod sends `transaction_reverted` (§7.4) so the model learns its work is
+  gone. **Ctrl+Z reports nothing**, because it does not undo our edits at all.
 
 ## 8.5 Input
 
@@ -1377,10 +1413,9 @@ the editor; see §0.1 for the measurements and the traps found.
 - Panel shell, message list, input with Send/Stop, sanitiser, thinking indicator, action summary with Revert, setup/connection states.
 - **Exit:** panel works end-to-end against the fake sidecar.
 
-Not yet done, and deliberately so: Markdown rendering (`MDTextArea`) and the `Revert`
-action on the summary bubble. Revert needs a transaction id from the sidecar, which the
-scripted provider does not open. The mouse wheel does not scroll the transcript; drag
-does.
+Since then: the mouse wheel scrolls the transcript, Ctrl+Shift+H hides the panel, the
+panel hides itself for playtest, and **Revert** works (§8.4.1). Still not done, and
+deliberately so: Markdown rendering (`MDTextArea`).
 
 ## Phase 4 — Sidecar
 
@@ -1402,7 +1437,14 @@ lives in memory and is lost when the sidecar restarts. The catalog is a two-entr
 by design -- an unverified id would make the model place the wrong object silently -- and
 needs a real source before it is useful (SPEC.md 15). Streaming (`assistant_message_delta`)
 is unused: the protocol supports it, the adapters do not emit it, and the mod renders
-whole messages.
+whole messages. **116 tests pass.**
+
+A revert is reported to the model as a revert, not as a generic hand edit
+(`agent.REVERTED_NOTE`). The distinction is not cosmetic: after a revert the model's own
+transcript says the work succeeded, so "something changed" invites it to defend work
+that no longer exists. One wrinkle worth knowing: a revert changes the object count, so
+the mod's change detector sends `level_changed` right after `transaction_reverted`, and
+the vaguer note must not be allowed to overwrite the sharper one.
 
 ## Phase 5 — Integration and Polish
 

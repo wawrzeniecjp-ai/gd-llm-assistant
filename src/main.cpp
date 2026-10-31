@@ -29,6 +29,20 @@ double frameBudgetMs() {
 /// True while the drain loop should keep re-arming itself.
 bool g_draining = false;
 
+/// Turns a transaction error into a sentence for the panel.
+///
+/// The manager reports `CODE: message` so the protocol layer can split it, but the
+/// code means nothing to a player who pressed Revert. Only the message is shown; the
+/// code is already in the log.
+std::string revertFailureText(std::string const& raw) {
+    auto const separator = raw.find(": ");
+    auto body = separator == std::string::npos ? raw : raw.substr(separator + 2);
+    while (!body.empty() && body.back() == '.') {
+        body.pop_back();
+    }
+    return fmt::format("Could not revert: {}.", body);
+}
+
 /// Object count as last reported to the sidecar, or -1 before the first look.
 ///
 /// Used to notice edits made **by hand**, so the assistant can be told its picture
@@ -265,6 +279,28 @@ $on_mod(Loaded) {
     });
     gdai::ui::PanelHost::get().setCancelHandler([] {
         gdai::bridge::Bridge::get().sendCancelTurn();
+    });
+
+    // The panel's Revert action (SPEC.md 8.4). Runs on the main thread, from the
+    // button, which is the same context every editor menu action runs in -- so the
+    // transaction manager's direct object manipulation is safe here, and there is no
+    // queue round trip that would let the user press it twice before the first
+    // revert finished.
+    gdai::ui::PanelHost::get().setRevertHandler([](std::string txnId) {
+        auto outcome = gdai::editor::TransactionManager::get().revert(txnId);
+        auto& host = gdai::ui::PanelHost::get();
+        if (outcome.ok()) {
+            log::info("panel: transaction {} reverted", txnId);
+            // Told about it rather than left to notice: its history says the level
+            // has our edits in it, and nothing else would correct that until the
+            // user's next message mentions it.
+            gdai::bridge::Bridge::get().sendTransactionReverted(txnId);
+            host.postRevertFinished(true, "Reverted the last turn's changes.");
+            return;
+        }
+        auto const message = outcome.unwrapErr();
+        log::warn("panel: revert of {} failed: {}", txnId, message);
+        host.postRevertFinished(false, revertFailureText(message));
     });
 
     log::info("panel: listening for the 'toggle-chat' keybind");
