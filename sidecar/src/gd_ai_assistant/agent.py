@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from . import catalog as catalog_module
-from . import tools
+from . import properties_table, tools
 from .agent_prompt import system_prompt
 from .providers.base import (
     AssistantTurn,
@@ -465,6 +465,13 @@ class ToolLoop:
             )
 
         if tool.protocol_type is None:
+            # Local tools: no editor round trip. Dispatched by name because more than one
+            # tool now lives here, and falling through to the catalog for all of them
+            # would answer a property query with a list of object ids.
+            if tool.spec.name == "search_properties":
+                return properties_table.search_properties(call.arguments), False
+            if tool.spec.name == "describe_class":
+                return properties_table.describe_class(call.arguments), False
             # Lazy, and only here. Reading the game's object table costs a handful of
             # round trips, and most turns never look an id up -- paying for it at the
             # start of every turn would slow down "delete the spikes" for nothing.

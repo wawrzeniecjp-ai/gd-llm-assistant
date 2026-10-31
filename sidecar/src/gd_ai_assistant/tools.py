@@ -204,6 +204,68 @@ def _build() -> dict[str, Tool]:
         ),
         Tool(
             spec=ToolSpec(
+                name="search_properties",
+                description=(
+                    "Look up what a save-string property means, or find the property that "
+                    "controls something. Two ways in: pass `query` with a name fragment "
+                    "('duration', 'ease', 'target') to find properties, or pass `key` "
+                    "with a save-string key number to find out what it means. "
+                    "Properties are C++ field names, so search the meaningful part "
+                    "(`duration`, not `m_duration`). This is how you learn trigger "
+                    "settings you have no named property for."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Name fragment, e.g. 'duration', 'easing', 'target'.",
+                        },
+                        "key": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Save-string key to look up, e.g. 51.",
+                        },
+                        "class": {
+                            "type": "string",
+                            "description": (
+                                "Optional class to search within, e.g. 'EffectGameObject'. "
+                                "Omit to search every class -- the mod does not report "
+                                "object classes, so you usually will not have one."
+                            ),
+                        },
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="describe_class",
+                description=(
+                    "List every save-string property a game object class has, inherited "
+                    "ones included. Use it when you need the full set of settings for a "
+                    "kind of object rather than one by name. Classes are named like "
+                    "`GameObject`, `EffectGameObject`, `RingObject`."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["class"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "class": {"type": "string", "description": "Class name."}
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+        ),
+        Tool(
+            spec=ToolSpec(
                 name="list_object_types",
                 description=(
                     "List the object TYPES already used in this level: id, count, "

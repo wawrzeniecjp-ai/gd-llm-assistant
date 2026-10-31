@@ -1,0 +1,2813 @@
+{
+ "gdVersion": "2.2091",
+ "source": "GeometryDash.bro",
+ "classes": {
+  "AdvancedFollowEditObject": {
+   "parent": "AdvancedFollowTriggerObject",
+   "props": {
+    "566": [
+     "modX",
+     "float"
+    ],
+    "567": [
+     "modXVariance",
+     "float"
+    ],
+    "568": [
+     "modY",
+     "float"
+    ],
+    "569": [
+     "modYVariance",
+     "float"
+    ],
+    "570": [
+     "redirectDirection",
+     "bool"
+    ]
+   }
+  },
+  "AdvancedFollowTriggerObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "292": [
+     "delay",
+     "float"
+    ],
+    "293": [
+     "delayVariance",
+     "float"
+    ],
+    "300": [
+     "startSpeed",
+     "float"
+    ],
+    "301": [
+     "startSpeedVariance",
+     "float"
+    ],
+    "560": [
+     "startSpeedReference",
+     "int"
+    ],
+    "563": [
+     "startDirection",
+     "float"
+    ],
+    "564": [
+     "startDirectionVariance",
+     "float"
+    ],
+    "565": [
+     "startDirectionReference",
+     "int"
+    ],
+    "298": [
+     "maxSpeed",
+     "float"
+    ],
+    "299": [
+     "maxSpeedVariance",
+     "float"
+    ],
+    "306": [
+     "xOnly",
+     "bool"
+    ],
+    "307": [
+     "yOnly",
+     "bool"
+    ],
+    "308": [
+     "maxRange",
+     "float"
+    ],
+    "309": [
+     "maxRangeVariance",
+     "float"
+    ],
+    "334": [
+     "acceleration",
+     "float"
+    ],
+    "335": [
+     "accelerationVariance",
+     "float"
+    ],
+    "316": [
+     "steerForce",
+     "float"
+    ],
+    "317": [
+     "steerForceVariance",
+     "float"
+    ],
+    "337": [
+     "steerForceLowEnabled",
+     "bool"
+    ],
+    "318": [
+     "steerForceLow",
+     "float"
+    ],
+    "319": [
+     "steerForceLowVariance",
+     "float"
+    ],
+    "338": [
+     "steerForceHighEnabled",
+     "bool"
+    ],
+    "320": [
+     "steerForceHigh",
+     "float"
+    ],
+    "321": [
+     "steerFroceHighVariance",
+     "float"
+    ],
+    "322": [
+     "speedRangeLow",
+     "float"
+    ],
+    "323": [
+     "speedRangeLowVariance",
+     "float"
+    ],
+    "324": [
+     "speedRangeHigh",
+     "float"
+    ],
+    "325": [
+     "speedRangeHighVariance",
+     "float"
+    ],
+    "326": [
+     "breakForce",
+     "float"
+    ],
+    "327": [
+     "breakForceVariance",
+     "float"
+    ],
+    "328": [
+     "breakAngle",
+     "float"
+    ],
+    "329": [
+     "breakAngleVariance",
+     "float"
+    ],
+    "330": [
+     "breakSteerForce",
+     "float"
+    ],
+    "331": [
+     "breakSteerForceVariance",
+     "float"
+    ],
+    "332": [
+     "breakSteerSpeedLimit",
+     "float"
+    ],
+    "333": [
+     "breakSteerSpeedLimitVariance",
+     "float"
+    ],
+    "305": [
+     "targetDirection",
+     "bool"
+    ],
+    "336": [
+     "ignoreDisabled",
+     "bool"
+    ],
+    "339": [
+     "rotateDirection",
+     "bool"
+    ],
+    "340": [
+     "rotationOffset",
+     "float"
+    ],
+    "357": [
+     "nearAcceleration",
+     "float"
+    ],
+    "358": [
+     "nearAccelerationVariance",
+     "float"
+    ],
+    "359": [
+     "nearDistance",
+     "float"
+    ],
+    "360": [
+     "nearDistanceVariance",
+     "float"
+    ],
+    "561": [
+     "nearFriction",
+     "float"
+    ],
+    "562": [
+     "nearFrictionVariance",
+     "float"
+    ],
+    "558": [
+     "friction",
+     "float"
+    ],
+    "559": [
+     "frictionVariance",
+     "float"
+    ],
+    "361": [
+     "easing",
+     "float"
+    ],
+    "362": [
+     "easingVariance",
+     "float"
+    ],
+    "363": [
+     "rotateEasing",
+     "float"
+    ],
+    "364": [
+     "rotateDeadZ",
+     "float"
+    ],
+    "365": [
+     "priority",
+     "int"
+    ],
+    "366": [
+     "maxRangeReference",
+     "int"
+    ],
+    "367": [
+     "followMode",
+     "int"
+    ],
+    "571": [
+     "exclusive",
+     "bool"
+    ],
+    "572": [
+     "startMode",
+     "int"
+    ]
+   }
+  },
+  "AnimatedGameObject": {
+   "parent": "EnhancedGameObject",
+   "props": {}
+  },
+  "ArtTriggerGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "533": [
+     "artIndex",
+     "int"
+    ]
+   }
+  },
+  "AudioLineGuideGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "498": [
+     "beatsPerMinute",
+     "int"
+    ],
+    "501": [
+     "beatsPerBar",
+     "int"
+    ],
+    "499": [
+     "speed",
+     "int"
+    ],
+    "500": [
+     "disabled",
+     "bool"
+    ]
+   }
+  },
+  "CameraTriggerGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "110": [
+     "exitStatic",
+     "bool"
+    ],
+    "212": [
+     "followObject",
+     "bool"
+    ],
+    "213": [
+     "followEasing",
+     "float"
+    ],
+    "164": [
+     "edgeDirection",
+     "int"
+    ],
+    "453": [
+     "smoothVelocity",
+     "bool"
+    ],
+    "454": [
+     "velocityModifier",
+     "float"
+    ],
+    "465": [
+     "exitInstant",
+     "bool"
+    ],
+    "506": [
+     "previewOpacity",
+     "float"
+    ]
+   }
+  },
+  "ChanceTriggerGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "435": [
+     "chanceObjects",
+     "raw"
+    ]
+   }
+  },
+  "CheckpointGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "448": [
+     "respawnID",
+     "int"
+    ],
+    "604": [
+     "preSpawnID",
+     "int"
+    ]
+   }
+  },
+  "CountTriggerGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "77": [
+     "pickupCount",
+     "int"
+    ],
+    "88": [
+     "pickupTriggerMode",
+     "int"
+    ],
+    "104": [
+     "multiActivate",
+     "bool"
+    ],
+    "139": [
+     "isOverride",
+     "bool"
+    ],
+    "449": [
+     "pickupTriggerMultiplier",
+     "float"
+    ]
+   }
+  },
+  "DashRingObject": {
+   "parent": "RingObject",
+   "props": {
+    "586": [
+     "dashSpeed",
+     "float"
+    ],
+    "588": [
+     "endBoost",
+     "float"
+    ],
+    "590": [
+     "maxDuration",
+     "float"
+    ],
+    "587": [
+     "allowCollide",
+     "bool"
+    ],
+    "589": [
+     "stopSlide",
+     "bool"
+    ]
+   }
+  },
+  "EffectGameObject": {
+   "parent": "EnhancedGameObject",
+   "props": {
+    "10": [
+     "duration",
+     "float"
+    ],
+    "35": [
+     "opacity",
+     "float"
+    ],
+    "51": [
+     "targetGroupID",
+     "int"
+    ],
+    "71": [
+     "centerGroupID",
+     "int"
+    ],
+    "11": [
+     "isTouchTriggered",
+     "bool"
+    ],
+    "62": [
+     "isSpawnTriggered",
+     "bool"
+    ],
+    "369": [
+     "hasCenterEffect",
+     "bool"
+    ],
+    "75": [
+     "shakeStrength",
+     "float"
+    ],
+    "84": [
+     "shakeInterval",
+     "float"
+    ],
+    "14": [
+     "tintGround",
+     "bool"
+    ],
+    "15": [
+     "usesPlayerColor1",
+     "bool"
+    ],
+    "16": [
+     "usesPlayerColor2",
+     "bool"
+    ],
+    "17": [
+     "usesBlending",
+     "bool"
+    ],
+    "28": [
+     "moveOffsetX",
+     "float"
+    ],
+    "29": [
+     "moveOffsetY",
+     "float"
+    ],
+    "30": [
+     "easingType",
+     "int"
+    ],
+    "85": [
+     "easingRate",
+     "float"
+    ],
+    "58": [
+     "lockToPlayerX",
+     "bool"
+    ],
+    "59": [
+     "lockToPlayerY",
+     "bool"
+    ],
+    "141": [
+     "lockToCameraX",
+     "bool"
+    ],
+    "142": [
+     "lockToCameraY",
+     "bool"
+    ],
+    "100": [
+     "useMoveTarget",
+     "bool"
+    ],
+    "101": [
+     "moveTargetMode",
+     "int"
+    ],
+    "143": [
+     "moveModX",
+     "float"
+    ],
+    "144": [
+     "moveModY",
+     "float"
+    ],
+    "393": [
+     "smallStep",
+     "bool"
+    ],
+    "394": [
+     "isDirectionFollowSnap360",
+     "bool"
+    ],
+    "395": [
+     "targetModCenterID",
+     "int"
+    ],
+    "396": [
+     "directionModeDistance",
+     "float"
+    ],
+    "397": [
+     "isDynamicMode",
+     "bool"
+    ],
+    "544": [
+     "isSilent",
+     "bool"
+    ],
+    "538": [
+     "specialTarget",
+     "int"
+    ],
+    "68": [
+     "rotationDegrees",
+     "float"
+    ],
+    "69": [
+     "times360",
+     "int"
+    ],
+    "70": [
+     "lockObjectRotation",
+     "bool"
+    ],
+    "401": [
+     "rotationTargetID",
+     "int"
+    ],
+    "402": [
+     "rotationOffset",
+     "float"
+    ],
+    "403": [
+     "dynamicModeEasing",
+     "int"
+    ],
+    "72": [
+     "followXMod",
+     "float"
+    ],
+    "73": [
+     "followYMod",
+     "float"
+    ],
+    "90": [
+     "followYSpeed",
+     "float"
+    ],
+    "91": [
+     "followYDelay",
+     "float"
+    ],
+    "92": [
+     "followYOffset",
+     "int"
+    ],
+    "105": [
+     "followYMaxSpeed",
+     "float"
+    ],
+    "45": [
+     "fadeInDuration",
+     "float"
+    ],
+    "46": [
+     "holdDuration",
+     "float"
+    ],
+    "47": [
+     "fadeOutDuration",
+     "float"
+    ],
+    "48": [
+     "pulseMode",
+     "int"
+    ],
+    "52": [
+     "pulseTargetType",
+     "int"
+    ],
+    "49": [
+     "hsvValue",
+     "raw"
+    ],
+    "50": [
+     "copyColorID",
+     "int"
+    ],
+    "60": [
+     "copyOpacity",
+     "bool"
+    ],
+    "65": [
+     "pulseMainOnly",
+     "bool"
+    ],
+    "66": [
+     "pulseDetailOnly",
+     "bool"
+    ],
+    "86": [
+     "pulseExclusive",
+     "bool"
+    ],
+    "210": [
+     "legacyHSV",
+     "bool"
+    ],
+    "56": [
+     "activateGroup",
+     "bool"
+    ],
+    "81": [
+     "touchHoldMode",
+     "bool"
+    ],
+    "82": [
+     "touchToggleMode",
+     "int"
+    ],
+    "198": [
+     "touchPlayerMode",
+     "int"
+    ],
+    "89": [
+     "isDualMode",
+     "bool"
+    ],
+    "76": [
+     "animationID",
+     "int"
+    ],
+    "87": [
+     "isMultiTriggered",
+     "bool"
+    ],
+    "102": [
+     "previewDisable",
+     "bool"
+    ],
+    "441": [
+     "spawnOrdered",
+     "bool"
+    ],
+    "93": [
+     "triggerOnExit",
+     "bool"
+    ],
+    "95": [
+     "itemID2",
+     "int"
+    ],
+    "534": [
+     "controlID",
+     "int"
+    ],
+    "535": [
+     "targetControlID",
+     "bool"
+    ],
+    "94": [
+     "isDynamicBlock",
+     "bool"
+    ],
+    "80": [
+     "itemID",
+     "int"
+    ],
+    "138": [
+     "targetPlayer1",
+     "bool"
+    ],
+    "200": [
+     "targetPlayer2",
+     "bool"
+    ],
+    "201": [
+     "followCPP",
+     "bool"
+    ],
+    "78": [
+     "subtractCount",
+     "bool"
+    ],
+    "381": [
+     "collectibleIsPickupItem",
+     "bool"
+    ],
+    "382": [
+     "collectibleIsToggleTrigger",
+     "bool"
+    ],
+    "440": [
+     "collectibleParticleID",
+     "int"
+    ],
+    "383": [
+     "collectiblePoints",
+     "int"
+    ],
+    "463": [
+     "hasNoAnimation",
+     "bool"
+    ],
+    "148": [
+     "gravityValue",
+     "float"
+    ],
+    "284": [
+     "isSinglePTouch",
+     "bool"
+    ],
+    "371": [
+     "zoomValue",
+     "float"
+    ],
+    "111": [
+     "cameraIsFreeMode",
+     "bool"
+    ],
+    "112": [
+     "cameraEditCameraSettings",
+     "bool"
+    ],
+    "113": [
+     "cameraEasingValue",
+     "float"
+    ],
+    "114": [
+     "cameraPaddingValue",
+     "float"
+    ],
+    "370": [
+     "cameraDisableGridSnap",
+     "bool"
+    ],
+    "118": [
+     "endReversed",
+     "bool"
+    ],
+    "120": [
+     "timeWarpTimeMod",
+     "float"
+    ],
+    "13": [
+     "shouldPreview",
+     "bool"
+    ],
+    "115": [
+     "ordValue",
+     "int"
+    ],
+    "170": [
+     "channelValue",
+     "int"
+    ],
+    "117": [
+     "isReverse",
+     "bool"
+    ],
+    "12": [
+     "secretCoinID",
+     "int"
+    ],
+    "280": [
+     "ignoreGroupParent",
+     "bool"
+    ],
+    "281": [
+     "ignoreLinkedObjects",
+     "bool"
+    ]
+   }
+  },
+  "EndPortalObject": {
+   "parent": "GameObject",
+   "props": {}
+  },
+  "EndTriggerGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "460": [
+     "noEffects",
+     "bool"
+    ],
+    "461": [
+     "noSFX",
+     "bool"
+    ],
+    "487": [
+     "instant",
+     "bool"
+    ]
+   }
+  },
+  "EnhancedGameObject": {
+   "parent": "GameObject",
+   "props": {
+    "98": [
+     "disableRotation",
+     "bool"
+    ],
+    "97": [
+     "rotationSpeed",
+     "float"
+    ],
+    "106": [
+     "animationRandomizedStart",
+     "bool"
+    ],
+    "107": [
+     "animationSpeed",
+     "float"
+    ],
+    "122": [
+     "animationShouldUseSpeed",
+     "bool"
+    ],
+    "123": [
+     "animateOnTrigger",
+     "bool"
+    ],
+    "126": [
+     "disableDelayedLoop",
+     "bool"
+    ],
+    "127": [
+     "disableAnimShine",
+     "bool"
+    ],
+    "462": [
+     "singleFrame",
+     "int"
+    ],
+    "592": [
+     "animationOffset",
+     "bool"
+    ],
+    "214": [
+     "animateOnlyWhenActive",
+     "bool"
+    ],
+    "444": [
+     "isNoMultiActivate",
+     "bool"
+    ],
+    "99": [
+     "isMultiActivate",
+     "bool"
+    ]
+   }
+  },
+  "EnhancedTriggerObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "516": [
+     "minXID",
+     "int"
+    ],
+    "517": [
+     "minYID",
+     "int"
+    ],
+    "518": [
+     "maxXID",
+     "int"
+    ],
+    "519": [
+     "maxYID",
+     "int"
+    ]
+   }
+  },
+  "EnterEffectObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "217": [
+     "enterType",
+     "int"
+    ],
+    "222": [
+     "length",
+     "int"
+    ],
+    "223": [
+     "lengthVariance",
+     "int"
+    ],
+    "220": [
+     "offset",
+     "int"
+    ],
+    "221": [
+     "offsetVariance",
+     "int"
+    ],
+    "252": [
+     "offsetY",
+     "int"
+    ],
+    "253": [
+     "offsetYVariance",
+     "int"
+    ],
+    "218": [
+     "moveDistance",
+     "int"
+    ],
+    "219": [
+     "moveDistanceVariance",
+     "int"
+    ],
+    "233": [
+     "areaScaleX",
+     "float"
+    ],
+    "234": [
+     "areaScaleXVariance",
+     "float"
+    ],
+    "235": [
+     "areaScaleY",
+     "float"
+    ],
+    "236": [
+     "areaScaleYVariance",
+     "float"
+    ],
+    "231": [
+     "moveAngle",
+     "int"
+    ],
+    "232": [
+     "moveAngleVariance",
+     "int"
+    ],
+    "287": [
+     "relative",
+     "bool"
+    ],
+    "288": [
+     "relativeFade",
+     "float"
+    ],
+    "242": [
+     "easingInType",
+     "int"
+    ],
+    "243": [
+     "easingInRate",
+     "float"
+    ],
+    "248": [
+     "easingOutType",
+     "int"
+    ],
+    "249": [
+     "easingOutRate",
+     "float"
+    ],
+    "237": [
+     "moveX",
+     "int"
+    ],
+    "238": [
+     "moveXVariance",
+     "int"
+    ],
+    "239": [
+     "moveY",
+     "int"
+    ],
+    "240": [
+     "moveYVariance",
+     "int"
+    ],
+    "260": [
+     "tintChannelID",
+     "int"
+    ],
+    "262": [
+     "directionType",
+     "int"
+    ],
+    "241": [
+     "xyMode",
+     "bool"
+    ],
+    "261": [
+     "easeOutEnabled",
+     "bool"
+    ],
+    "263": [
+     "modFront",
+     "float"
+    ],
+    "264": [
+     "modBack",
+     "float"
+    ],
+    "265": [
+     "areaTint",
+     "float"
+    ],
+    "225": [
+     "effectID",
+     "int"
+    ],
+    "270": [
+     "areaRotation",
+     "float"
+    ],
+    "271": [
+     "areaRotationVariance",
+     "float"
+    ],
+    "275": [
+     "toOpacity",
+     "float"
+    ],
+    "286": [
+     "fromOpacity",
+     "float"
+    ],
+    "276": [
+     "inbound",
+     "bool"
+    ],
+    "278": [
+     "hsvEnabled",
+     "bool"
+    ],
+    "282": [
+     "deadzone",
+     "float"
+    ],
+    "283": [
+     "twoDirections",
+     "bool"
+    ],
+    "539": [
+     "dontEditAreaParent",
+     "bool"
+    ],
+    "341": [
+     "priority",
+     "int"
+    ],
+    "344": [
+     "enterChannel",
+     "int"
+    ],
+    "355": [
+     "useEffectID",
+     "bool"
+    ]
+   }
+  },
+  "EventLinkTrigger": {
+   "parent": "EffectGameObject",
+   "props": {
+    "430": [
+     "eventIDs",
+     "raw"
+    ],
+    "431": [
+     "resetRemap",
+     "bool"
+    ],
+    "447": [
+     "extraID",
+     "int"
+    ],
+    "525": [
+     "extraID2",
+     "int"
+    ]
+   }
+  },
+  "ForceBlockGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "149": [
+     "force",
+     "float"
+    ],
+    "526": [
+     "minForce",
+     "float"
+    ],
+    "527": [
+     "maxForce",
+     "float"
+    ],
+    "528": [
+     "relativeForce",
+     "bool"
+    ],
+    "529": [
+     "forceRange",
+     "bool"
+    ],
+    "530": [
+     "forceID",
+     "int"
+    ]
+   }
+  },
+  "GameObject": {
+   "parent": null,
+   "props": {
+    "511": [
+     "hasExtendedCollision",
+     "bool"
+    ],
+    "146": [
+     "particleUseObjectColor",
+     "bool"
+    ],
+    "108": [
+     "linkedGroup",
+     "int"
+    ],
+    "372": [
+     "hasNoAudioScale",
+     "bool"
+    ],
+    "343": [
+     "enterChannel",
+     "int"
+    ],
+    "446": [
+     "objectMaterial",
+     "int"
+    ],
+    "96": [
+     "hasNoGlow",
+     "bool"
+    ],
+    "23": [
+     "targetColor",
+     "int"
+    ],
+    "1": [
+     "objectID",
+     "int"
+    ],
+    "497": [
+     "customColorType",
+     "int"
+    ],
+    "67": [
+     "isDontEnter",
+     "bool"
+    ],
+    "64": [
+     "isDontFade",
+     "bool"
+    ],
+    "116": [
+     "hasNoEffects",
+     "bool"
+    ],
+    "507": [
+     "hasNoParticles",
+     "bool"
+    ],
+    "21": [
+     "baseColor",
+     "int"
+    ],
+    "22": [
+     "detailColor",
+     "int"
+    ],
+    "24": [
+     "zLayer",
+     "int"
+    ],
+    "25": [
+     "zOrder",
+     "int"
+    ],
+    "34": [
+     "hasGroupParent",
+     "bool"
+    ],
+    "279": [
+     "hasAreaParent",
+     "bool"
+    ],
+    "128": [
+     "scaleX",
+     "float"
+    ],
+    "129": [
+     "scaleY",
+     "float"
+    ],
+    "57": [
+     "groups",
+     "raw"
+    ],
+    "20": [
+     "editorLayer",
+     "int"
+    ],
+    "61": [
+     "editorLayer2",
+     "int"
+    ],
+    "121": [
+     "isNoTouch",
+     "bool"
+    ],
+    "103": [
+     "isHighDetail",
+     "bool"
+    ],
+    "134": [
+     "isPassable",
+     "bool"
+    ],
+    "135": [
+     "isHide",
+     "bool"
+    ],
+    "136": [
+     "isNonStickX",
+     "bool"
+    ],
+    "289": [
+     "isNonStickY",
+     "bool"
+    ],
+    "137": [
+     "isIceBlock",
+     "bool"
+    ],
+    "193": [
+     "isGripSlope",
+     "bool"
+    ],
+    "356": [
+     "isScaleStick",
+     "bool"
+    ],
+    "495": [
+     "isExtraSticky",
+     "bool"
+    ],
+    "496": [
+     "isDontBoostY",
+     "bool"
+    ],
+    "509": [
+     "isDontBoostX",
+     "bool"
+    ],
+    "155": [
+     "mainColorKeyIndex",
+     "int"
+    ],
+    "156": [
+     "detailColorKeyIndex",
+     "int"
+    ],
+    "2": [
+     "m_positionX",
+     "float"
+    ],
+    "3": [
+     "m_positionY",
+     "float"
+    ]
+   }
+  },
+  "GameOptionsTrigger": {
+   "parent": "EffectGameObject",
+   "props": {
+    "159": [
+     "streakAdditive",
+     "int"
+    ],
+    "160": [
+     "unlinkDualGravity",
+     "int"
+    ],
+    "161": [
+     "hideGround",
+     "int"
+    ],
+    "162": [
+     "hideP1",
+     "int"
+    ],
+    "163": [
+     "hideP2",
+     "int"
+    ],
+    "165": [
+     "disableP1Controls",
+     "int"
+    ],
+    "199": [
+     "disableP2Controls",
+     "int"
+    ],
+    "195": [
+     "hideMG",
+     "int"
+    ],
+    "532": [
+     "hideAttempts",
+     "int"
+    ],
+    "573": [
+     "editRespawnTime",
+     "int"
+    ],
+    "574": [
+     "respawnTime",
+     "float"
+    ],
+    "575": [
+     "audioOnDeath",
+     "int"
+    ],
+    "576": [
+     "noDeathSFX",
+     "int"
+    ],
+    "593": [
+     "boostSlide",
+     "int"
+    ]
+   }
+  },
+  "GradientTriggerObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "202": [
+     "blendingLayer",
+     "int"
+    ],
+    "174": [
+     "blendingMode",
+     "int"
+    ],
+    "209": [
+     "gradientID",
+     "int"
+    ],
+    "203": [
+     "upBottomLeftID",
+     "int"
+    ],
+    "204": [
+     "downBottomRightID",
+     "int"
+    ],
+    "205": [
+     "leftTopLeftID",
+     "int"
+    ],
+    "206": [
+     "rightTopRightID",
+     "int"
+    ],
+    "207": [
+     "vertexMode",
+     "bool"
+    ],
+    "208": [
+     "disable",
+     "bool"
+    ],
+    "508": [
+     "disableAll",
+     "bool"
+    ],
+    "456": [
+     "previewOpacity",
+     "float"
+    ]
+   }
+  },
+  "ItemTriggerGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "476": [
+     "item1Mode",
+     "int"
+    ],
+    "477": [
+     "item2Mode",
+     "int"
+    ],
+    "478": [
+     "targetItemMode",
+     "int"
+    ],
+    "479": [
+     "mod1",
+     "float"
+    ],
+    "484": [
+     "mod2",
+     "float"
+    ],
+    "480": [
+     "resultType1",
+     "int"
+    ],
+    "481": [
+     "resultType2",
+     "int"
+    ],
+    "482": [
+     "resultType3",
+     "int"
+    ],
+    "483": [
+     "tolerance",
+     "float"
+    ],
+    "485": [
+     "roundType1",
+     "int"
+    ],
+    "486": [
+     "roundType2",
+     "int"
+    ],
+    "578": [
+     "signType1",
+     "int"
+    ],
+    "579": [
+     "signType2",
+     "int"
+    ],
+    "491": [
+     "persistent",
+     "bool"
+    ],
+    "492": [
+     "targetAll",
+     "bool"
+    ],
+    "493": [
+     "reset",
+     "bool"
+    ],
+    "494": [
+     "timer",
+     "bool"
+    ]
+   }
+  },
+  "KeyframeAnimTriggerObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "520": [
+     "timeMod",
+     "float"
+    ],
+    "521": [
+     "positionXMod",
+     "float"
+    ],
+    "545": [
+     "positionYMod",
+     "float"
+    ],
+    "522": [
+     "rotationMod",
+     "float"
+    ],
+    "523": [
+     "scaleXMod",
+     "float"
+    ],
+    "546": [
+     "scaleYMod",
+     "float"
+    ]
+   }
+  },
+  "KeyframeGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "373": [
+     "keyframeGroup",
+     "int"
+    ],
+    "374": [
+     "keyframeIndex",
+     "int"
+    ],
+    "375": [
+     "referenceOnly",
+     "bool"
+    ],
+    "377": [
+     "proximity",
+     "bool"
+    ],
+    "378": [
+     "curve",
+     "bool"
+    ],
+    "376": [
+     "closeLoop",
+     "bool"
+    ],
+    "379": [
+     "timeMode",
+     "int"
+    ],
+    "557": [
+     "spawnDelay",
+     "float"
+    ],
+    "380": [
+     "previewArt",
+     "bool"
+    ],
+    "459": [
+     "autoLayer",
+     "bool"
+    ],
+    "536": [
+     "direction",
+     "int"
+    ],
+    "537": [
+     "revolutions",
+     "int"
+    ],
+    "524": [
+     "lineOpacity",
+     "float"
+    ]
+   }
+  },
+  "LabelGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "391": [
+     "alignment",
+     "int"
+    ],
+    "389": [
+     "showSecondsOnly",
+     "bool"
+    ],
+    "390": [
+     "shownSpecial",
+     "int"
+    ],
+    "466": [
+     "isTimeCounter",
+     "bool"
+    ],
+    "488": [
+     "kerning",
+     "int"
+    ]
+   }
+  },
+  "ObjectControlGameObject": {
+   "parent": "EffectGameObject",
+   "props": {}
+  },
+  "ParticleGameObject": {
+   "parent": "EnhancedGameObject",
+   "props": {
+    "145": [
+     "particleData",
+     "string"
+    ],
+    "147": [
+     "hasUniformObjectColor",
+     "bool"
+    ],
+    "211": [
+     "shouldQuickStart",
+     "bool"
+    ]
+   }
+  },
+  "PlayerControlGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "540": [
+     "stopJump",
+     "bool"
+    ],
+    "541": [
+     "stopMove",
+     "bool"
+    ],
+    "542": [
+     "stopRotation",
+     "bool"
+    ],
+    "543": [
+     "stopSlide",
+     "bool"
+    ]
+   }
+  },
+  "PlayerObject": {
+   "parent": "GameObject",
+   "props": {}
+  },
+  "ProgressGameObject": {
+   "parent": "EffectGameObject",
+   "props": {}
+  },
+  "RandTriggerGameObject": {
+   "parent": "ChanceTriggerGameObject",
+   "props": {}
+  },
+  "RingObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "504": [
+     "isSpawnOnly",
+     "bool"
+    ]
+   }
+  },
+  "RotateGameplayGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "166": [
+     "moveDirection",
+     "int"
+    ],
+    "167": [
+     "groundDirection",
+     "int"
+    ],
+    "169": [
+     "editVelocity",
+     "bool"
+    ],
+    "584": [
+     "overrideVelocity",
+     "bool"
+    ],
+    "582": [
+     "velocityModX",
+     "float"
+    ],
+    "583": [
+     "velocityModY",
+     "float"
+    ],
+    "171": [
+     "changeChannel",
+     "bool"
+    ],
+    "172": [
+     "channelOnly",
+     "bool"
+    ],
+    "173": [
+     "targetChannelID",
+     "int"
+    ],
+    "368": [
+     "instantOffset",
+     "bool"
+    ],
+    "585": [
+     "dontSlide",
+     "bool"
+    ]
+   }
+  },
+  "SFXTriggerGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "392": [
+     "soundID",
+     "int"
+    ],
+    "404": [
+     "speed",
+     "int"
+    ],
+    "405": [
+     "pitchIndex",
+     "int"
+    ],
+    "406": [
+     "volume",
+     "float"
+    ],
+    "408": [
+     "start",
+     "int"
+    ],
+    "409": [
+     "fadeIn",
+     "int"
+    ],
+    "410": [
+     "end",
+     "int"
+    ],
+    "411": [
+     "fadeOut",
+     "int"
+    ],
+    "407": [
+     "reverb",
+     "bool"
+    ],
+    "412": [
+     "fastFourierTransform",
+     "bool"
+    ],
+    "413": [
+     "loop",
+     "bool"
+    ],
+    "414": [
+     "stopLoop",
+     "bool"
+    ],
+    "595": [
+     "dontReset",
+     "bool"
+    ],
+    "415": [
+     "unique",
+     "bool"
+    ],
+    "420": [
+     "override",
+     "bool"
+    ],
+    "416": [
+     "sfxUniqueID",
+     "int"
+    ],
+    "421": [
+     "volumeNear",
+     "float"
+    ],
+    "422": [
+     "volumeMedium",
+     "float"
+    ],
+    "423": [
+     "volumeFar",
+     "float"
+    ],
+    "424": [
+     "minDistNear",
+     "int"
+    ],
+    "425": [
+     "minDistMedium",
+     "int"
+    ],
+    "426": [
+     "minDistFar",
+     "int"
+    ],
+    "458": [
+     "proximityMode",
+     "int"
+    ],
+    "428": [
+     "cameraDistance",
+     "bool"
+    ],
+    "433": [
+     "preload",
+     "bool"
+    ],
+    "489": [
+     "ignoreVolumeTest",
+     "bool"
+    ],
+    "434": [
+     "minInterval",
+     "float"
+    ],
+    "455": [
+     "sfxGroup",
+     "int"
+    ],
+    "417": [
+     "stop",
+     "bool"
+    ],
+    "418": [
+     "changeSpeed",
+     "bool"
+    ],
+    "419": [
+     "changeVolume",
+     "bool"
+    ],
+    "457": [
+     "groupID",
+     "int"
+    ],
+    "502": [
+     "reverbPreset",
+     "int"
+    ],
+    "503": [
+     "reverbEnabled",
+     "bool"
+    ],
+    "490": [
+     "soundDuration",
+     "float"
+    ],
+    "596": [
+     "speedVariance",
+     "int"
+    ],
+    "597": [
+     "pitchVariance",
+     "int"
+    ],
+    "598": [
+     "volumeVariance",
+     "float"
+    ],
+    "599": [
+     "pitchSteps",
+     "bool"
+    ]
+   }
+  },
+  "SequenceTriggerGameObject": {
+   "parent": "ChanceTriggerGameObject",
+   "props": {
+    "437": [
+     "minInt",
+     "float"
+    ],
+    "436": [
+     "sequenceMode",
+     "int"
+    ],
+    "439": [
+     "resetMode",
+     "int"
+    ],
+    "438": [
+     "reset",
+     "float"
+    ],
+    "505": [
+     "uniqueRemap",
+     "bool"
+    ]
+   }
+  },
+  "ShaderGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "175": [
+     "speed",
+     "float"
+    ],
+    "176": [
+     "strength",
+     "float"
+    ],
+    "191": [
+     "outer",
+     "float"
+    ],
+    "177": [
+     "timeOff",
+     "float"
+    ],
+    "179": [
+     "waveWidth",
+     "float"
+    ],
+    "180": [
+     "targetX",
+     "float"
+    ],
+    "189": [
+     "targetY",
+     "float"
+    ],
+    "181": [
+     "fadeIn",
+     "float"
+    ],
+    "182": [
+     "fadeOut",
+     "float"
+    ],
+    "290": [
+     "screenOffsetX",
+     "float"
+    ],
+    "291": [
+     "screenOffsetY",
+     "float"
+    ],
+    "184": [
+     "invert",
+     "bool"
+    ],
+    "183": [
+     "inner",
+     "float"
+    ],
+    "512": [
+     "maxSize",
+     "float"
+    ],
+    "185": [
+     "flip",
+     "bool"
+    ],
+    "186": [
+     "rotate",
+     "bool"
+    ],
+    "187": [
+     "dual",
+     "bool"
+    ],
+    "188": [
+     "useX",
+     "bool"
+    ],
+    "190": [
+     "useY",
+     "bool"
+    ],
+    "194": [
+     "snapGrid",
+     "bool"
+    ],
+    "515": [
+     "hardEdges",
+     "bool"
+    ],
+    "192": [
+     "disableAll",
+     "bool"
+    ],
+    "196": [
+     "zLayerMin",
+     "int"
+    ],
+    "197": [
+     "zLayerMax",
+     "int"
+    ],
+    "513": [
+     "animate",
+     "bool"
+    ],
+    "514": [
+     "relative",
+     "bool"
+    ],
+    "531": [
+     "editorDisabled",
+     "bool"
+    ]
+   }
+  },
+  "SmartGameObject": {
+   "parent": "GameObject",
+   "props": {
+    "157": [
+     "referenceOnly",
+     "bool"
+    ]
+   }
+  },
+  "SongTriggerGameObject": {
+   "parent": "SFXTriggerGameObject",
+   "props": {
+    "399": [
+     "prep",
+     "bool"
+    ],
+    "400": [
+     "loadPrep",
+     "bool"
+    ],
+    "432": [
+     "songChannel",
+     "int"
+    ]
+   }
+  },
+  "SpawnParticleGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "547": [
+     "offsetX",
+     "float"
+    ],
+    "548": [
+     "offsetY",
+     "float"
+    ],
+    "549": [
+     "offsetVarianceX",
+     "float"
+    ],
+    "550": [
+     "offsetVarianceY",
+     "float"
+    ],
+    "551": [
+     "matchRotation",
+     "bool"
+    ],
+    "552": [
+     "rotation",
+     "float"
+    ],
+    "553": [
+     "rotationVariance",
+     "float"
+    ],
+    "554": [
+     "scale",
+     "float"
+    ],
+    "555": [
+     "scaleVariance",
+     "float"
+    ]
+   }
+  },
+  "SpawnTriggerGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "442": [
+     "remapObjects",
+     "raw"
+    ],
+    "63": [
+     "spawnDelay",
+     "float"
+    ],
+    "556": [
+     "delayRange",
+     "float"
+    ],
+    "581": [
+     "resetRemap",
+     "bool"
+    ]
+   }
+  },
+  "SpecialAnimGameObject": {
+   "parent": "EnhancedGameObject",
+   "props": {}
+  },
+  "StartPosObject": {
+   "parent": "EffectGameObject",
+   "props": {}
+  },
+  "TeleportPortalObject": {
+   "parent": "RingObject",
+   "props": {
+    "55": [
+     "teleportEase",
+     "bool"
+    ],
+    "345": [
+     "staticForceEnabled",
+     "bool"
+    ],
+    "346": [
+     "staticForce",
+     "float"
+    ],
+    "347": [
+     "redirectForceEnabled",
+     "bool"
+    ],
+    "350": [
+     "redirectForceMod",
+     "float"
+    ],
+    "348": [
+     "redirectForceMin",
+     "float"
+    ],
+    "349": [
+     "redirectForceMax",
+     "float"
+    ],
+    "351": [
+     "saveOffset",
+     "bool"
+    ],
+    "352": [
+     "ignoreX",
+     "bool"
+    ],
+    "353": [
+     "ignoreY",
+     "bool"
+    ],
+    "354": [
+     "gravityMode",
+     "int"
+    ],
+    "443": [
+     "staticForceAdditive",
+     "bool"
+    ],
+    "464": [
+     "instantCamera",
+     "bool"
+    ],
+    "510": [
+     "snapGround",
+     "bool"
+    ],
+    "591": [
+     "redirectDash",
+     "bool"
+    ]
+   }
+  },
+  "TextGameObject": {
+   "parent": "GameObject",
+   "props": {
+    "31": [
+     "text",
+     "string"
+    ],
+    "488": [
+     "kerning",
+     "int"
+    ]
+   }
+  },
+  "TimerTriggerGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "467": [
+     "startTime",
+     "float"
+    ],
+    "473": [
+     "targetTime",
+     "float"
+    ],
+    "474": [
+     "stopTimeEnabled",
+     "bool"
+    ],
+    "468": [
+     "dontOverride",
+     "bool"
+    ],
+    "469": [
+     "ignoreTimeWarp",
+     "bool"
+    ],
+    "470": [
+     "timeMod",
+     "float"
+    ],
+    "471": [
+     "startPaused",
+     "bool"
+    ],
+    "475": [
+     "multiActivate",
+     "bool"
+    ],
+    "472": [
+     "controlType",
+     "int"
+    ]
+   }
+  },
+  "TransformTriggerGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "150": [
+     "objectScaleX",
+     "float"
+    ],
+    "151": [
+     "objectScaleY",
+     "float"
+    ],
+    "133": [
+     "onlyMove",
+     "bool"
+    ],
+    "153": [
+     "divideX",
+     "bool"
+    ],
+    "154": [
+     "divideY",
+     "bool"
+    ],
+    "452": [
+     "relativeRotation",
+     "bool"
+    ],
+    "577": [
+     "relativeScale",
+     "bool"
+    ]
+   }
+  },
+  "TriggerControlGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "580": [
+     "customTriggerValue",
+     "int"
+    ]
+   }
+  },
+  "UISettingsGameObject": {
+   "parent": "EffectGameObject",
+   "props": {
+    "385": [
+     "xRef",
+     "int"
+    ],
+    "386": [
+     "yRef",
+     "int"
+    ],
+    "387": [
+     "xRelative",
+     "bool"
+    ],
+    "388": [
+     "yRelative",
+     "bool"
+    ]
+   }
+  }
+ },
+ "keyNames": {
+  "1": "objectID",
+  "2": "m_positionX",
+  "3": "m_positionY",
+  "10": "duration",
+  "11": "isTouchTriggered",
+  "12": "secretCoinID",
+  "13": "shouldPreview",
+  "14": "tintGround",
+  "15": "usesPlayerColor1",
+  "16": "usesPlayerColor2",
+  "17": "usesBlending",
+  "20": "editorLayer",
+  "21": "baseColor",
+  "22": "detailColor",
+  "23": "targetColor",
+  "24": "zLayer",
+  "25": "zOrder",
+  "28": "moveOffsetX",
+  "29": "moveOffsetY",
+  "30": "easingType",
+  "31": "text",
+  "34": "hasGroupParent",
+  "35": "opacity",
+  "45": "fadeInDuration",
+  "46": "holdDuration",
+  "47": "fadeOutDuration",
+  "48": "pulseMode",
+  "49": "hsvValue",
+  "50": "copyColorID",
+  "51": "targetGroupID",
+  "52": "pulseTargetType",
+  "55": "teleportEase",
+  "56": "activateGroup",
+  "57": "groups",
+  "58": "lockToPlayerX",
+  "59": "lockToPlayerY",
+  "60": "copyOpacity",
+  "61": "editorLayer2",
+  "62": "isSpawnTriggered",
+  "63": "spawnDelay",
+  "64": "isDontFade",
+  "65": "pulseMainOnly",
+  "66": "pulseDetailOnly",
+  "67": "isDontEnter",
+  "68": "rotationDegrees",
+  "69": "times360",
+  "70": "lockObjectRotation",
+  "71": "centerGroupID",
+  "72": "followXMod",
+  "73": "followYMod",
+  "75": "shakeStrength",
+  "76": "animationID",
+  "77": "pickupCount",
+  "78": "subtractCount",
+  "80": "itemID",
+  "81": "touchHoldMode",
+  "82": "touchToggleMode",
+  "84": "shakeInterval",
+  "85": "easingRate",
+  "86": "pulseExclusive",
+  "87": "isMultiTriggered",
+  "88": "pickupTriggerMode",
+  "89": "isDualMode",
+  "90": "followYSpeed",
+  "91": "followYDelay",
+  "92": "followYOffset",
+  "93": "triggerOnExit",
+  "94": "isDynamicBlock",
+  "95": "itemID2",
+  "96": "hasNoGlow",
+  "97": "rotationSpeed",
+  "98": "disableRotation",
+  "99": "isMultiActivate",
+  "100": "useMoveTarget",
+  "101": "moveTargetMode",
+  "102": "previewDisable",
+  "103": "isHighDetail",
+  "104": "multiActivate",
+  "105": "followYMaxSpeed",
+  "106": "animationRandomizedStart",
+  "107": "animationSpeed",
+  "108": "linkedGroup",
+  "110": "exitStatic",
+  "111": "cameraIsFreeMode",
+  "112": "cameraEditCameraSettings",
+  "113": "cameraEasingValue",
+  "114": "cameraPaddingValue",
+  "115": "ordValue",
+  "116": "hasNoEffects",
+  "117": "isReverse",
+  "118": "endReversed",
+  "120": "timeWarpTimeMod",
+  "121": "isNoTouch",
+  "122": "animationShouldUseSpeed",
+  "123": "animateOnTrigger",
+  "126": "disableDelayedLoop",
+  "127": "disableAnimShine",
+  "128": "scaleX",
+  "129": "scaleY",
+  "133": "onlyMove",
+  "134": "isPassable",
+  "135": "isHide",
+  "136": "isNonStickX",
+  "137": "isIceBlock",
+  "138": "targetPlayer1",
+  "139": "isOverride",
+  "141": "lockToCameraX",
+  "142": "lockToCameraY",
+  "143": "moveModX",
+  "144": "moveModY",
+  "145": "particleData",
+  "146": "particleUseObjectColor",
+  "147": "hasUniformObjectColor",
+  "148": "gravityValue",
+  "149": "force",
+  "150": "objectScaleX",
+  "151": "objectScaleY",
+  "153": "divideX",
+  "154": "divideY",
+  "155": "mainColorKeyIndex",
+  "156": "detailColorKeyIndex",
+  "157": "referenceOnly",
+  "159": "streakAdditive",
+  "160": "unlinkDualGravity",
+  "161": "hideGround",
+  "162": "hideP1",
+  "163": "hideP2",
+  "164": "edgeDirection",
+  "165": "disableP1Controls",
+  "166": "moveDirection",
+  "167": "groundDirection",
+  "169": "editVelocity",
+  "170": "channelValue",
+  "171": "changeChannel",
+  "172": "channelOnly",
+  "173": "targetChannelID",
+  "174": "blendingMode",
+  "175": "speed",
+  "176": "strength",
+  "177": "timeOff",
+  "179": "waveWidth",
+  "180": "targetX",
+  "181": "fadeIn",
+  "182": "fadeOut",
+  "183": "inner",
+  "184": "invert",
+  "185": "flip",
+  "186": "rotate",
+  "187": "dual",
+  "188": "useX",
+  "189": "targetY",
+  "190": "useY",
+  "191": "outer",
+  "192": "disableAll",
+  "193": "isGripSlope",
+  "194": "snapGrid",
+  "195": "hideMG",
+  "196": "zLayerMin",
+  "197": "zLayerMax",
+  "198": "touchPlayerMode",
+  "199": "disableP2Controls",
+  "200": "targetPlayer2",
+  "201": "followCPP",
+  "202": "blendingLayer",
+  "203": "upBottomLeftID",
+  "204": "downBottomRightID",
+  "205": "leftTopLeftID",
+  "206": "rightTopRightID",
+  "207": "vertexMode",
+  "208": "disable",
+  "209": "gradientID",
+  "210": "legacyHSV",
+  "211": "shouldQuickStart",
+  "212": "followObject",
+  "213": "followEasing",
+  "214": "animateOnlyWhenActive",
+  "217": "enterType",
+  "218": "moveDistance",
+  "219": "moveDistanceVariance",
+  "220": "offset",
+  "221": "offsetVariance",
+  "222": "length",
+  "223": "lengthVariance",
+  "225": "effectID",
+  "231": "moveAngle",
+  "232": "moveAngleVariance",
+  "233": "areaScaleX",
+  "234": "areaScaleXVariance",
+  "235": "areaScaleY",
+  "236": "areaScaleYVariance",
+  "237": "moveX",
+  "238": "moveXVariance",
+  "239": "moveY",
+  "240": "moveYVariance",
+  "241": "xyMode",
+  "242": "easingInType",
+  "243": "easingInRate",
+  "248": "easingOutType",
+  "249": "easingOutRate",
+  "252": "offsetY",
+  "253": "offsetYVariance",
+  "260": "tintChannelID",
+  "261": "easeOutEnabled",
+  "262": "directionType",
+  "263": "modFront",
+  "264": "modBack",
+  "265": "areaTint",
+  "270": "areaRotation",
+  "271": "areaRotationVariance",
+  "275": "toOpacity",
+  "276": "inbound",
+  "278": "hsvEnabled",
+  "279": "hasAreaParent",
+  "280": "ignoreGroupParent",
+  "281": "ignoreLinkedObjects",
+  "282": "deadzone",
+  "283": "twoDirections",
+  "284": "isSinglePTouch",
+  "286": "fromOpacity",
+  "287": "relative",
+  "288": "relativeFade",
+  "289": "isNonStickY",
+  "290": "screenOffsetX",
+  "291": "screenOffsetY",
+  "292": "delay",
+  "293": "delayVariance",
+  "298": "maxSpeed",
+  "299": "maxSpeedVariance",
+  "300": "startSpeed",
+  "301": "startSpeedVariance",
+  "305": "targetDirection",
+  "306": "xOnly",
+  "307": "yOnly",
+  "308": "maxRange",
+  "309": "maxRangeVariance",
+  "316": "steerForce",
+  "317": "steerForceVariance",
+  "318": "steerForceLow",
+  "319": "steerForceLowVariance",
+  "320": "steerForceHigh",
+  "321": "steerFroceHighVariance",
+  "322": "speedRangeLow",
+  "323": "speedRangeLowVariance",
+  "324": "speedRangeHigh",
+  "325": "speedRangeHighVariance",
+  "326": "breakForce",
+  "327": "breakForceVariance",
+  "328": "breakAngle",
+  "329": "breakAngleVariance",
+  "330": "breakSteerForce",
+  "331": "breakSteerForceVariance",
+  "332": "breakSteerSpeedLimit",
+  "333": "breakSteerSpeedLimitVariance",
+  "334": "acceleration",
+  "335": "accelerationVariance",
+  "336": "ignoreDisabled",
+  "337": "steerForceLowEnabled",
+  "338": "steerForceHighEnabled",
+  "339": "rotateDirection",
+  "340": "rotationOffset",
+  "341": "priority",
+  "343": "enterChannel",
+  "344": "enterChannel",
+  "345": "staticForceEnabled",
+  "346": "staticForce",
+  "347": "redirectForceEnabled",
+  "348": "redirectForceMin",
+  "349": "redirectForceMax",
+  "350": "redirectForceMod",
+  "351": "saveOffset",
+  "352": "ignoreX",
+  "353": "ignoreY",
+  "354": "gravityMode",
+  "355": "useEffectID",
+  "356": "isScaleStick",
+  "357": "nearAcceleration",
+  "358": "nearAccelerationVariance",
+  "359": "nearDistance",
+  "360": "nearDistanceVariance",
+  "361": "easing",
+  "362": "easingVariance",
+  "363": "rotateEasing",
+  "364": "rotateDeadZ",
+  "365": "priority",
+  "366": "maxRangeReference",
+  "367": "followMode",
+  "368": "instantOffset",
+  "369": "hasCenterEffect",
+  "370": "cameraDisableGridSnap",
+  "371": "zoomValue",
+  "372": "hasNoAudioScale",
+  "373": "keyframeGroup",
+  "374": "keyframeIndex",
+  "375": "referenceOnly",
+  "376": "closeLoop",
+  "377": "proximity",
+  "378": "curve",
+  "379": "timeMode",
+  "380": "previewArt",
+  "381": "collectibleIsPickupItem",
+  "382": "collectibleIsToggleTrigger",
+  "383": "collectiblePoints",
+  "385": "xRef",
+  "386": "yRef",
+  "387": "xRelative",
+  "388": "yRelative",
+  "389": "showSecondsOnly",
+  "390": "shownSpecial",
+  "391": "alignment",
+  "392": "soundID",
+  "393": "smallStep",
+  "394": "isDirectionFollowSnap360",
+  "395": "targetModCenterID",
+  "396": "directionModeDistance",
+  "397": "isDynamicMode",
+  "399": "prep",
+  "400": "loadPrep",
+  "401": "rotationTargetID",
+  "402": "rotationOffset",
+  "403": "dynamicModeEasing",
+  "404": "speed",
+  "405": "pitchIndex",
+  "406": "volume",
+  "407": "reverb",
+  "408": "start",
+  "409": "fadeIn",
+  "410": "end",
+  "411": "fadeOut",
+  "412": "fastFourierTransform",
+  "413": "loop",
+  "414": "stopLoop",
+  "415": "unique",
+  "416": "sfxUniqueID",
+  "417": "stop",
+  "418": "changeSpeed",
+  "419": "changeVolume",
+  "420": "override",
+  "421": "volumeNear",
+  "422": "volumeMedium",
+  "423": "volumeFar",
+  "424": "minDistNear",
+  "425": "minDistMedium",
+  "426": "minDistFar",
+  "428": "cameraDistance",
+  "430": "eventIDs",
+  "431": "resetRemap",
+  "432": "songChannel",
+  "433": "preload",
+  "434": "minInterval",
+  "435": "chanceObjects",
+  "436": "sequenceMode",
+  "437": "minInt",
+  "438": "reset",
+  "439": "resetMode",
+  "440": "collectibleParticleID",
+  "441": "spawnOrdered",
+  "442": "remapObjects",
+  "443": "staticForceAdditive",
+  "444": "isNoMultiActivate",
+  "446": "objectMaterial",
+  "447": "extraID",
+  "448": "respawnID",
+  "449": "pickupTriggerMultiplier",
+  "452": "relativeRotation",
+  "453": "smoothVelocity",
+  "454": "velocityModifier",
+  "455": "sfxGroup",
+  "456": "previewOpacity",
+  "457": "groupID",
+  "458": "proximityMode",
+  "459": "autoLayer",
+  "460": "noEffects",
+  "461": "noSFX",
+  "462": "singleFrame",
+  "463": "hasNoAnimation",
+  "464": "instantCamera",
+  "465": "exitInstant",
+  "466": "isTimeCounter",
+  "467": "startTime",
+  "468": "dontOverride",
+  "469": "ignoreTimeWarp",
+  "470": "timeMod",
+  "471": "startPaused",
+  "472": "controlType",
+  "473": "targetTime",
+  "474": "stopTimeEnabled",
+  "475": "multiActivate",
+  "476": "item1Mode",
+  "477": "item2Mode",
+  "478": "targetItemMode",
+  "479": "mod1",
+  "480": "resultType1",
+  "481": "resultType2",
+  "482": "resultType3",
+  "483": "tolerance",
+  "484": "mod2",
+  "485": "roundType1",
+  "486": "roundType2",
+  "487": "instant",
+  "488": "kerning",
+  "489": "ignoreVolumeTest",
+  "490": "soundDuration",
+  "491": "persistent",
+  "492": "targetAll",
+  "493": "reset",
+  "494": "timer",
+  "495": "isExtraSticky",
+  "496": "isDontBoostY",
+  "497": "customColorType",
+  "498": "beatsPerMinute",
+  "499": "speed",
+  "500": "disabled",
+  "501": "beatsPerBar",
+  "502": "reverbPreset",
+  "503": "reverbEnabled",
+  "504": "isSpawnOnly",
+  "505": "uniqueRemap",
+  "506": "previewOpacity",
+  "507": "hasNoParticles",
+  "508": "disableAll",
+  "509": "isDontBoostX",
+  "510": "snapGround",
+  "511": "hasExtendedCollision",
+  "512": "maxSize",
+  "513": "animate",
+  "514": "relative",
+  "515": "hardEdges",
+  "516": "minXID",
+  "517": "minYID",
+  "518": "maxXID",
+  "519": "maxYID",
+  "520": "timeMod",
+  "521": "positionXMod",
+  "522": "rotationMod",
+  "523": "scaleXMod",
+  "524": "lineOpacity",
+  "525": "extraID2",
+  "526": "minForce",
+  "527": "maxForce",
+  "528": "relativeForce",
+  "529": "forceRange",
+  "530": "forceID",
+  "531": "editorDisabled",
+  "532": "hideAttempts",
+  "533": "artIndex",
+  "534": "controlID",
+  "535": "targetControlID",
+  "536": "direction",
+  "537": "revolutions",
+  "538": "specialTarget",
+  "539": "dontEditAreaParent",
+  "540": "stopJump",
+  "541": "stopMove",
+  "542": "stopRotation",
+  "543": "stopSlide",
+  "544": "isSilent",
+  "545": "positionYMod",
+  "546": "scaleYMod",
+  "547": "offsetX",
+  "548": "offsetY",
+  "549": "offsetVarianceX",
+  "550": "offsetVarianceY",
+  "551": "matchRotation",
+  "552": "rotation",
+  "553": "rotationVariance",
+  "554": "scale",
+  "555": "scaleVariance",
+  "556": "delayRange",
+  "557": "spawnDelay",
+  "558": "friction",
+  "559": "frictionVariance",
+  "560": "startSpeedReference",
+  "561": "nearFriction",
+  "562": "nearFrictionVariance",
+  "563": "startDirection",
+  "564": "startDirectionVariance",
+  "565": "startDirectionReference",
+  "566": "modX",
+  "567": "modXVariance",
+  "568": "modY",
+  "569": "modYVariance",
+  "570": "redirectDirection",
+  "571": "exclusive",
+  "572": "startMode",
+  "573": "editRespawnTime",
+  "574": "respawnTime",
+  "575": "audioOnDeath",
+  "576": "noDeathSFX",
+  "577": "relativeScale",
+  "578": "signType1",
+  "579": "signType2",
+  "580": "customTriggerValue",
+  "581": "resetRemap",
+  "582": "velocityModX",
+  "583": "velocityModY",
+  "584": "overrideVelocity",
+  "585": "dontSlide",
+  "586": "dashSpeed",
+  "587": "allowCollide",
+  "588": "endBoost",
+  "589": "stopSlide",
+  "590": "maxDuration",
+  "591": "redirectDash",
+  "592": "animationOffset",
+  "593": "boostSlide",
+  "595": "dontReset",
+  "596": "speedVariance",
+  "597": "pitchVariance",
+  "598": "volumeVariance",
+  "599": "pitchSteps",
+  "604": "preSpawnID"
+ },
+ "conflicts": {},
+ "supplement": {
+  "keys": {
+   "2": [
+    "m_positionX",
+    "float"
+   ],
+   "3": [
+    "m_positionY",
+    "float"
+   ]
+  },
+  "source": "measured in-editor (every observed save string is 1,<id>,2,<x>,3,<y>)"
+ }
+}

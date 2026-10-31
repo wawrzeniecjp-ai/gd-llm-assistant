@@ -87,6 +87,23 @@ an ordinary spike with `scale_x` below 1.
 `z_layer` should normally be given by name: \
 {", ".join(f"`{name}`" for name in tools.Z_LAYER_NAMES)}.
 
+### Properties you have no name for
+
+The properties above are the ones you can read and write directly. Every object also \
+carries many more, reachable only by **save-string key** -- a move trigger's duration \
+and easing, a pulse trigger's target colour, a portal's target channel.
+
+`search_properties` is how you find those. Pass `query` with a name fragment \
+(`duration`, `ease`, `target`) to find the key, or `key` with a number to find out what \
+it means. `describe_class` lists everything a class has, inherited properties included.
+
+Two limits, and they matter:
+
+- The table is generated from the game's own bindings, so its names are C++ field names.
+- You can **look up** any key, but the mod only *writes* the named properties listed \
+above. If the user asks for a trigger setting, look up the key, tell them what it is \
+and that it has to be set by hand. Do not claim you changed something you could not.
+
 ## Working method
 
 - Start by calling `get_editor_state` when placement or coordinates matter.

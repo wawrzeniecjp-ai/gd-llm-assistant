@@ -1149,6 +1149,86 @@ So key 1 is red, 2 green, 3 blue, **6 the channel id**, 5 blending, and 4 the pl
 colour (1 or 2) an entry copies from -- which is what "custom colour 1/2" in the editor
 refers to, and is not a channel. Entries are `|`-separated, and the section ends at the
 next `,k`.
+### 7.5.3 The Save-String Property Table (generated)
+
+The mod reads and writes a fixed set of eleven named properties (§7.5). Every object
+also carries far more than that -- a move trigger's duration and easing, a pulse
+trigger's target colour, a portal's target channel -- reachable only by **save-string
+key**. Without a key-to-meaning table the model can only guess, and a guessed key
+silently edits the wrong field.
+
+**The table is generated, not written.** `sidecar/scripts/gen_properties.py` parses
+the Geode bindings, which annotate members with the key they serialise under:
+
+```cpp
+// property 51
+int m_targetGroupID;
+```
+
+```text
+python scripts/gen_properties.py \
+    ../build/_deps/bindings-src/bindings/2.2091/GeometryDash.bro
+```
+
+Output: `sidecar/src/gd_ai_assistant/data/properties.json`, committed, so the sidecar
+has no build-time dependency on the bindings. From 2.2091: **48 classes, 512
+properties, 511 distinct keys**, 45 KB.
+
+**Cross-checked against measurement.** The generated table agrees with every key
+observed directly in the editor: 24/25 = `zLayer`/`zOrder`, 57 = `groups`, 51 =
+`targetGroupID`, 128/129 = `scaleX`/`scaleY`, 155/156 = the colour indices. That
+agreement is asserted by a test, so a generator that silently stops parsing fails
+rather than producing a plausible-looking file.
+
+#### What the bindings do not annotate
+
+`x` and `y` have no annotation: the members (`m_positionX`/`m_positionY`) carry no
+`// property` comment, even though they are the two properties that matter most. They
+are added from measurement (`1,<id>,2,<x>,3,<y>` in every observed save string) and
+recorded in the file under `supplement`, with its source, so the one non-generated
+part is visible rather than hidden.
+
+Keys 4-9 are also unannotated. A colour trigger's save string shows `7,255,8,255,9,255`
+for its RGB but nothing measured here distinguishes 4, 5 and 6, so **they are left
+out**. A missing key makes the model say it does not know; a wrong key makes it
+confidently edit the wrong field.
+
+#### A multi-key pitfall, recorded because it cost real time
+
+One annotation can cover two keys:
+
+```cpp
+// property 28, property 29
+cocos2d::CCPoint m_moveOffset;
+```
+
+The first version of the generator matched `//\s*property\s+(\d+)`, which requires a
+`//` before *each* key and therefore found only 28. Every `CCPoint` member lost half
+of itself, so `x`/`y`, move offsets and scale pairs were all absent from a table that
+looked complete. Detection and extraction are now two patterns: one to recognise the
+annotation, one to pull every bare `property N` out of it.
+
+#### Lookups
+
+Two questions, answered differently, because the class hierarchy is not always known:
+
+- **By key**, globally. The save-string vocabulary is global and additive -- a key
+  means the same thing on every object that has it -- and the generator confirms it:
+  zero conflicting keys across 48 classes. This is what makes reading an object's raw
+  save string meaningful without knowing its class.
+- **By name**, optionally class-scoped. Inheritance is resolved on the fly by walking
+  the parent chain (nearest definition wins, as the game's serialiser behaves), so a
+  `RingObject` reports its 152 properties including the inherited scale and colour
+  keys. Expanding inheritance into the file would treble it and invite copies to drift.
+
+Tools: `search_properties` (`query` for a name fragment, or `key` for a number) and
+`describe_class` (everything a class has). Both are sidecar-local -- no editor round
+trip, and no engine needed.
+
+**The table describes; it does not enable writing.** Only the eleven named properties
+are writable, so the prompt tells the model to look a key up, report what it is, and
+say the setting has to be changed by hand rather than claim a change it cannot make.
+
 ## 7.6 Events (Mod → Sidecar)
 
 | type | Payload | Notes |
