@@ -5,18 +5,59 @@
 | Field | Value |
 | --- | --- |
 | Project name | GD AI Assistant |
-| Document version | 0.10.0 |
-| Status | Draft — Phases 0-4 implemented. **In-editor testing blocked by the GD 2.209 update; see 0.1.** |
+| Document version | 0.11.0 |
+| Status | Draft — Phases 0-4 implemented and **verified in-editor on GD 2.2091**. Phase 5 in progress. |
 | Target platform | Windows only (initial release) |
-| Target Geode version | v5.11.x (Geode SDK 5.11.1 verified locally; requires C++23). Geode v6 is WIP — see §15 Q3 |
-| Target GD version | 2.2081 |
+| Target Geode version | v5.11.2 nightly (loader `57415d9`, the v6 merge). Requires C++23 |
+| Target GD version | **2.2091** (was 2.2081; see 0.1) |
 
-## 0.1 Known blocker: GD 2.209 breaks the toolchain (2026-10-16)
+## 0.1 RESOLVED: GD 2.209 support (2026-10-31)
 
-**In-editor testing is blocked. The sidecar is not, and neither is development.**
+**The mod builds, loads and works in the editor on GD 2.2091.** The full stack was
+verified in-game: panel, connection, a complete tool-loop turn, transaction grouping, and
+Ctrl+Z reverting the whole turn.
 
-Steam pushed Geometry Dash 2.209 on 2026-10-16 at 00:11. The game now crashes during
-Geode's startup, before any mod loads, so nothing can be tested in the editor.
+What it took, because none of it was the obvious route:
+
+1. **Wait for the v6 merge.** Geode merged `v6` into `main` as PR #2314 (`57415d9`,
+   2026-10-30). That is the first commit with 2.209 support. There is still **no tagged
+   release** — `main`'s `VERSION` file says 5.11.2, so the label is misleading and the
+   commit is what matters.
+2. **Install the matching nightly loader** (`geode-57415d9-win.zip`). The v5.11.2
+   *release* installer is not v6 and does not support 2.2091.
+3. **Point the SDK at `main`, not the tag.** `geode sdk update` follows releases and left
+   the SDK on tag `v5.11.2`. A `git checkout main` in the SDK clone is what actually brings
+   in the v6 headers. With that, the SDK's own default becomes `GEODE_GD_VERSION 2.2091`,
+   so no override is needed in our `CMakeLists.txt` (an earlier attempt at forcing it is
+   gone).
+4. **Replace the SDK's import library.** `geode sdk install-binaries` fetches the release
+   `Geode.lib` (~1,142 KB) which lacks v6 symbols; linking failed with undefined
+   `EventCenterGlobal::addReceiver`, `matjson::Value(float)`, `matjson::ConstValueIterator`
+   and others. Copying the nightly's `Geode.lib` (~1,161 KB) into `<SDK>/bin/5.11.2/` fixes
+   it. The release lib is kept alongside as `Geode.lib.release-backup`.
+
+**The dependency had to go.** `cvolton.level-id-api` does not compile against v6: its
+`EditorIDs.hpp` is built on `GEODE_EVENT_EXPORT_*` macros and v6 reworked events. It is a
+third-party mod needing its own v6 port. Removed from `mod.json`, with the single call site
+(`EditorIDs::getID`) dropped; `Bridge::buildHello` already fell back to the level name,
+which SPEC.md 6.2.5 lists as the default session key. **Cost: the session key is the level
+name**, with the collision/rename caveat §15 already records.
+
+**Destructive developer probes are now gated by an exact string token.** On 2026-10-31 the
+probes ran on every editor open despite `debug-probe` defaulting to `false` and having no
+saved value on disk — wiping the user's undo stack and adding objects to their level. The
+`bool` setting was replaced by `probe-token`, which must equal `run-probes`; a string
+comparison cannot misfire the way that read did, and it states the consequence in the
+settings UI. The root cause of the bad read was not established, and is not worth chasing
+now that the trigger cannot fire accidentally.
+
+## 0.1a History: how GD 2.209 broke the toolchain (2026-08-16)
+
+Kept because it records several wrong turns and the reasoning that finally unblocked it.
+**Superseded by 0.1.**
+
+Steam pushed Geometry Dash 2.209 on 2026-10-16 at 00:11. The game then crashed during
+Geode's startup, before any mod loads, so nothing could be tested in the editor.
 
 Measured, from the Geode log and the crash dump:
 

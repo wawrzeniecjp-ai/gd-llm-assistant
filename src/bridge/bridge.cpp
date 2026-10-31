@@ -101,6 +101,31 @@ std::string configuredUrl() {
     return url.empty() ? std::string("ws://127.0.0.1:8765") : url;
 }
 
+/// The session key for a level (SPEC.md 6.2.5).
+///
+/// In practice this is the **level name**, because the stable editor ID is no
+/// longer available: it came from `cvolton.level-id-api`, which was dropped
+/// (SPEC.md 0.1) after Geode v6's event rework stopped its headers compiling.
+///
+/// The name is a weaker key -- it collides across levels and changes on rename --
+/// but that is the caveat SPEC.md 15 already records as open, and it was the
+/// documented default before the dependency existed. The `levelId` branch is kept
+/// so restoring the dependency later needs no change here.
+///
+/// Shared by `buildHello` and the log line that reports it, so the log cannot
+/// claim a key different from the one actually sent. It previously reported
+/// "(unnamed)" on every session, because it tested `levelId` -- which is now
+/// always 0 -- while the frame correctly carried the level name.
+std::string sessionKey(editor::Snapshot const& snapshot) {
+    if (snapshot.levelId != 0) {
+        return fmt::format("editor-{}", snapshot.levelId);
+    }
+    if (!snapshot.levelName.empty()) {
+        return snapshot.levelName;
+    }
+    return "unknown";
+}
+
 /// Builds the `hello` frame (SPEC.md 7.2).
 ///
 /// Carries only the opaque session key and client versions. The level **name**
@@ -109,8 +134,7 @@ std::string configuredUrl() {
 /// SPEC.md 12 ("nothing is sent until the user submits a message") and SPEC.md
 /// D4 (query on demand, no mirror). Both arrive via `get_editor_state` when the
 /// sidecar actually needs them.
-std::string buildHello(std::string_view token, editor::Snapshot const& snapshot) {
-    auto hello = matjson::Value::object();
+std::string buildHello(std::string_view token, editor::Snapshot const& snapshot) {    auto hello = matjson::Value::object();
     hello["type"] = "hello";
     hello["id"] = kHelloRequestId;
 
@@ -124,23 +148,13 @@ std::string buildHello(std::string_view token, editor::Snapshot const& snapshot)
     client["geode_version"] = Loader::get()->getVersion().toNonVString();
     payload["client"] = std::move(client);
 
-    // Session key: the persistent editor ID when available, else the level name
-    // (SPEC.md 6.2.5). A name is not a stable key -- it collides across levels and
-    // changes on rename -- so the ID is preferred; `cvolton.level-id-api`
-    // supplies it (mod.json dependency). The id is an opaque integer, so sending
-    // it is not level-content disclosure.
-    std::string key = "unknown";
-    if (snapshot.levelId != 0) {
-        key = fmt::format("editor-{}", snapshot.levelId);
-    } else if (!snapshot.levelName.empty()) {
-        key = snapshot.levelName;
-    }
-
+    // Session key (SPEC.md 6.2.5). See `sessionKey` for why this is the level name
+    // in practice rather than the stable editor ID.
     auto level = matjson::Value::object();
-    level["key"] = key;
+    level["key"] = sessionKey(snapshot);
     // `hello`'s schema requires name and object_count for the session record; the
     // sidecar fills them from get_editor_state instead of taking them here.
-    level["name"] = key;
+    level["name"] = level["key"];
     level["object_count"] = 0;
     payload["level"] = std::move(level);
 
@@ -489,10 +503,20 @@ arc::Future<> Bridge::session(std::shared_ptr<net::WebSocket> socket, std::strin
     // Read the level identity on the main thread, for the hello payload.
     auto snapshot = co_await async::waitForMainThread<editor::Snapshot>(
         [] {
-            // Developer probes are opt-in (and one-shot): they print object data
-            // to the local Geode log, which SPEC.md 12 treats as data exposure,
-            // so they must never run in a normal session.
-            if (Mod::get()->getSettingValue<bool>("debug-probe")) {
+            // Developer probes are opt-in and destructive, so the gate is an exact
+            // string match rather than a boolean.
+            //
+            // With a `bool` setting whose declared default was `false` and with no
+            // saved value on disk, the probes nonetheless ran on every editor open
+            // -- wiping the undo stack and adding objects to the user's level. A
+            // string that must equal `run-probes` cannot fail that way, and makes
+            // the intent legible in the settings UI as well.
+            auto const token = Mod::get()->getSettingValue<std::string>("probe-token");
+            if (token == "run-probes") {
+                log::warn(
+                    "developer probes enabled by probe-token: this will modify the "
+                    "level and clear the undo stack"
+                );
                 runDeveloperProbesOnce();
             }
             return editor::takeSnapshot();
@@ -508,11 +532,7 @@ arc::Future<> Bridge::session(std::shared_ptr<net::WebSocket> socket, std::strin
         log::error("sending hello failed: {}", sent.unwrapErr());
         co_return;
     }
-    log::info(
-        "sent hello for session {}", snapshot->levelId != 0
-            ? fmt::format("editor-{}", snapshot->levelId)
-            : std::string("(unnamed)")
-    );
+    log::info("sent hello for session '{}'", sessionKey(*snapshot));
 
     // The watchdog owns everything that has to happen *while* we are blocked in
     // the receive below: flushing queued frames, and noticing that the session
@@ -610,8 +630,9 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
             );
         }
         log::info(
-            "get_editor_state -> {} objects, layer {}, {} selected",
-            snapshot->objectCount, snapshot->editorLayer, snapshot->selectedCount
+            "get_editor_state -> {} objects, layer {}, {} selected, playtesting={}",
+            snapshot->objectCount, snapshot->editorLayer, snapshot->selectedCount,
+            snapshot->playtesting
         );
         co_return co_await sendResult(socket, requestId, editor::toJson(*snapshot));
     }

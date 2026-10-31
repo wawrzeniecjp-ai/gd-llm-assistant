@@ -6,8 +6,6 @@
 #include <Geode/binding/LevelEditorLayer.hpp>
 #include <Geode/binding/PlayLayer.hpp>
 
-#include <cvolton.level-id-api/include/EditorIDs.hpp>
-
 #include <algorithm>
 
 #include "transaction.hpp"
@@ -81,9 +79,18 @@ Snapshot takeSnapshot() {
 
     if (editor->m_level != nullptr) {
         snapshot.levelName = editor->m_level->m_levelName;
-        // autoAssign = true, so the ID is stable even for a level that has not
-        // been saved or uploaded yet. 0 means the API could not resolve one.
-        snapshot.levelId = EditorIDs::getID(editor->m_level, true);
+        // `levelId` is deliberately left 0, i.e. "unknown".
+        //
+        // It used to come from `cvolton.level-id-api`, which is now dropped: its
+        // headers are built on `GEODE_EVENT_EXPORT_*` macros, and Geode v6 reworked
+        // the event system ("V6 event cleanup"), so the header no longer compiles
+        // against the v6 SDK. That is a third-party mod needing a v6 port, not
+        // something this project can fix, and hanging the whole build on it to gain
+        // a nicer session key was the wrong trade.
+        //
+        // Nothing is lost functionally: `Bridge::buildHello` already falls back to
+        // the level name when the ID is unavailable, which SPEC.md 6.2.5 lists as the
+        // default session key. The cost is the known collision/rename caveat there.
     }
 
     if (editor->m_editorUI != nullptr) {

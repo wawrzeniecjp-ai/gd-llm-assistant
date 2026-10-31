@@ -1,7 +1,7 @@
 {
     "geode": "5.11.1",
     "gd": {
-        "win": "2.2081"
+        "win": "2.2091"
     },
     "version": "v0.1.0",
     "id": "wawrzeniecjp.gd-ai-assistant",
@@ -14,9 +14,6 @@
         "online",
         "utility"
     ],
-    "dependencies": {
-        "cvolton.level-id-api": ">=v2.0.0"
-    },
     "settings": {
         "connection-title": {
             "type": "title",
@@ -77,11 +74,11 @@
             "type": "title",
             "name": "Developer"
         },
-        "debug-probe": {
-            "type": "bool",
-            "name": "Enable developer probes",
-            "description": "Developer only. Derives save-string key mappings from the game and prints object data to the Geode log when the editor opens. Leave off unless you are working on the mod; it writes level content to a local log file.",
-            "default": false
+        "probe-token": {
+            "type": "string",
+            "name": "Developer probe token",
+            "description": "Developer only. Set to exactly 'run-probes' (and restart the game) to run the diagnostic probes and handler verification the first time the editor opens. They MUTATE THE LEVEL and CLEAR THE UNDO STACK, and they write level content to the local log. Leave empty in normal use.",
+            "default": ""
         }
     }
 }
