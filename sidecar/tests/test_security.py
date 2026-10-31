@@ -7,6 +7,8 @@ expensive mistakes.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -96,6 +98,57 @@ def test_sidecar_reports_needs_setup_without_credentials() -> None:
     """No provider means `state: needs_setup`, not a failure to start (A6)."""
     with pytest.raises(ProviderUnavailable):
         create_provider(SidecarConfig())
+
+
+def test_blank_env_values_are_treated_as_unset(tmp_path) -> None:
+    """`KEY=` in a dotenv file must mean "unset", not "".
+
+    A dotenv file has no way to express "absent" -- `KEY=` is the only way to
+    leave a value for the user to fill in -- and pydantic reads that as the empty
+    string. Without `BlankAsNone`, the `.env.example` this project ships crashes
+    the sidecar on first run with a `literal_error` on `llm_provider` and an
+    `int_parsing` error on `turn_token_budget`.
+
+    That is not hypothetical: it is what the launcher did the first time it was
+    run for real. This test is the guard.
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        "llm_provider=\n"
+        "api_key=\n"
+        "model=\n"
+        "turn_token_budget=\n"
+        "catalog_path=\n"
+        "base_url=\n",
+        encoding="utf-8",
+    )
+
+    config = SidecarConfig(_env_file=env)
+
+    assert config.llm_provider is None
+    assert config.api_key is None
+    assert config.model is None
+    assert config.turn_token_budget is None
+    assert config.catalog_path is None
+    assert config.base_url is None
+    # And it still reports needs_setup rather than pretending to be ready.
+    with pytest.raises(ProviderUnavailable):
+        create_provider(config)
+
+
+def test_the_shipped_env_example_parses(tmp_path) -> None:
+    """The file users are told to copy must actually load.
+
+    Reads the real `.env.example` rather than a copy of its shape, so it fails
+    when someone adds a setting to the example without handling blanks.
+    """
+    example = Path(__file__).resolve().parents[1] / ".env.example"
+    assert example.is_file(), "the README tells users to copy this file"
+
+    config = SidecarConfig(_env_file=example)
+
+    assert config.ws_port == 8765
+    assert config.max_tool_rounds >= 1
 
 
 def test_a_provider_is_constructible_with_key_and_model() -> None:

@@ -14,10 +14,33 @@ from __future__ import annotations
 
 import ipaddress
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import BeforeValidator, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _blank_to_none(value: Any) -> Any:
+    """Map an empty or whitespace-only string to `None`.
+
+    A dotenv file cannot express "absent" -- `KEY=` is the only way to leave a
+    value for the user to fill in -- and pydantic reads that as the empty string,
+    not as unset. Without this, the `.env.example` this project ships crashes the
+    sidecar on first run:
+
+        llm_provider=''  -> literal_error (not one of the allowed providers)
+        turn_token_budget='' -> int_parsing (not an integer)
+
+    Every optional setting goes through here so `KEY=` behaves the way a user
+    expects, which is also how every other dotenv-based tool treats it.
+    """
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+#: An optional setting where `KEY=` in `.env` means "not set".
+BlankAsNone = BeforeValidator(_blank_to_none)
 
 
 def _is_loopback(host: str) -> bool:
@@ -56,10 +79,12 @@ class SidecarConfig(BaseSettings):
     # makes the Phase 3 exit criterion -- "panel works end-to-end against the
     # fake sidecar" -- testable, and what the cancellation and error paths can be
     # exercised against in Phase 4.
-    llm_provider: Literal["anthropic", "openai", "openai_compatible", "scripted"] | None = None
-    api_key: str | None = None
-    model: str | None = None
-    base_url: str | None = None
+    llm_provider: Annotated[
+        Literal["anthropic", "openai", "openai_compatible", "scripted"] | None, BlankAsNone
+    ] = None
+    api_key: Annotated[str | None, BlankAsNone] = None
+    model: Annotated[str | None, BlankAsNone] = None
+    base_url: Annotated[str | None, BlankAsNone] = None
     max_tokens: int = 4096
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
 
@@ -85,7 +110,7 @@ class SidecarConfig(BaseSettings):
     max_tool_rounds: int = Field(default=10, ge=1, le=100)
     # Bounded by the mod's hard maximum: the mod's caps are authoritative (D10).
     max_objects_per_turn: int = Field(default=5000, ge=1, le=20000)
-    turn_token_budget: int | None = None
+    turn_token_budget: Annotated[int | None, BlankAsNone] = None
     # Fractional so that tests can set a timeout small enough to exercise the
     # timeout path without a slow test; a whole-second floor would make the
     # shortest meaningful case a one-second wait.
@@ -104,7 +129,7 @@ class SidecarConfig(BaseSettings):
 
     # Optional extra object ids to merge over the built-in catalog seed, so the
     # catalog can be extended without editing the package (SPEC.md 6.2.3).
-    catalog_path: Path | None = None
+    catalog_path: Annotated[Path | None, BlankAsNone] = None
 
     # Retries for a *retryable* provider failure, i.e. 429 and 5xx (SPEC.md 6.2.3).
     # Zero disables the retry loop entirely, which is what the tests use so that a
