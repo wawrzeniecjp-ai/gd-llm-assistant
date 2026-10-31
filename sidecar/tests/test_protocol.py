@@ -58,6 +58,11 @@ def test_registry_covers_every_message_in_the_spec() -> None:
         "end_transaction",
         "revert_transaction",
         "ping",
+        # editor requests, sidecar -> mod (read-only, no editor required)
+        "list_object_catalog",
+        # colour channels: level state, not object state
+        "get_color_channel",
+        "set_color_channel",
         # events, mod -> sidecar
         "editor_closed",
         "level_changed",

@@ -86,6 +86,23 @@ class FakeLink:
                 result={"txn_id": payload["txn_id"], "summary": {"created": 2}},
             )
 
+        if type_name == "list_object_catalog":
+            # What the mod returns from `ObjectToolbox`: real ids and the sprite each
+            # one draws. Small on purpose -- the tests care about the plumbing, not
+            # about GD's table.
+            return Response(
+                ok=True,
+                result={
+                    "entries": [
+                        {"id": 1, "frame": "square_01_001.png", "grid_size": 30.0},
+                        {"id": 8, "frame": "spike_01_001.png", "grid_size": 30.0},
+                        {"id": 9, "frame": "spike_02_001.png", "grid_size": 15.0},
+                    ],
+                    "total": 3,
+                    "next_offset": None,
+                },
+            )
+
         return Response(ok=True, result=self._results.get(type_name, {}))
 
     async def send_event(self, type_name: str, payload: dict) -> None:
@@ -271,7 +288,48 @@ async def test_the_catalog_tool_is_answered_without_touching_the_mod() -> None:
     result = await make_loop(link, provider).run(turn_id="t-1", message_id="m1", user_text="spike?")
 
     assert result.status == COMPLETED
-    assert link.requests == []
+    # The search itself is local. The one request that *is* made is the object table:
+    # searching a two-entry seed is what made "add a thin spike" impossible, so the
+    # loop reads the game's table before the model is asked anything.
+    assert link.types() == ["list_object_catalog"]
+
+
+async def test_a_thin_spike_is_found_by_size_when_no_name_matches() -> None:
+    """The reason the game's table is fetched at all.
+
+    "Thin" is a size, not a name, so no entry matches it literally. The search must
+    still return the spikes, say which word matched nothing, and carry `grid_size` so
+    the model can choose the narrow one instead of inventing an id.
+    """
+    link = FakeLink()
+    provider = ScriptedProvider(
+        [
+            AssistantTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="c1",
+                        name="search_object_catalog",
+                        arguments={"query": "thin spike"},
+                    )
+                ],
+                stop_reason="tool_use",
+                usage=Usage(1, 1),
+            ),
+            text_turn(),
+        ]
+    )
+    loop = make_loop(link, provider)
+    await loop.run(turn_id="t-1", message_id="m1", user_text="add a thin spike")
+
+    result = catalog.search_object_catalog(loop._catalog, {"query": "thin spike"})
+    assert [match["id"] for match in result["matches"]] == [8, 9]
+    assert result["unmatched_terms"] == ["thin"]
+    assert result["source"] == "game"
+    # The distinguishing fact, and the whole point of asking the game rather than a
+    # hand-written table.
+    assert [match["grid_size"] for match in result["matches"]] == [30.0, 15.0]
+    assert "grid_size" in result["note"]
+
 
 
 async def test_an_unknown_tool_is_reported_to_the_model_not_raised() -> None:
@@ -782,13 +840,33 @@ def test_the_prompt_lists_exactly_the_settable_properties() -> None:
     text = system_prompt()
     for name in tools.SETTABLE_PROPERTIES:
         assert f"`{name}`" in text, name
-    # Colour channels are in SPEC.md 7.5's prose but not in the mod's validator;
-    # offering them would guarantee an UNSUPPORTED_PROPERTY error.
-    assert "color_channel" not in text
 
 
-def test_colour_channels_are_not_offered() -> None:
+def test_colour_is_readable_but_not_writable() -> None:
+    """Colour is readable; writing it does not persist, so it is not offered.
+
+    Reading was broken for a while in a way worth remembering: the mod reported
+    `ColorAction::m_fromColor`, which is the start of a possible interpolation, while
+    `m_color` is what the level draws. Every channel therefore read as white and a
+    user's own colour edits were invisible to the model.
+
+    Writing was measured to be undone within one frame -- GD rebuilds colour state
+    each frame from the level's colour triggers -- so the tool was withdrawn rather
+    than left reporting a success the level does not keep.
+    """
+    from gd_ai_assistant.agent_prompt import system_prompt
+
     create = tools.TOOLS["create_objects"]
     objects = create.spec.parameters["properties"]["objects"]
     settable = objects["items"]["properties"]["properties"]["properties"]
-    assert "color_channel_1" not in settable
+    assert "color_channel_1" in settable
+    # Reading is offered; writing is not, because it does not persist.
+    assert "set_color_channel" not in tools.TOOLS
+    assert "get_color_channel" in tools.TOOLS
+
+    text = system_prompt()
+    assert "channel id" in text
+    # The consequence the model has to state out loud: one channel, many objects,
+    # and the user has to make the change.
+    assert "borrow" in text
+    assert "colour page" in text

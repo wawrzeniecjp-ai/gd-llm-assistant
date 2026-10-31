@@ -335,6 +335,85 @@
             "additionalProperties": false
         },
 
+        "listObjectCatalogPayload": {            "x-direction": "s2m",
+            "type": "object",
+            "description": "One page of the game's id -> sprite table. Paged because the table holds a few thousand ids.",
+            "properties": {
+                "offset": { "type": "integer", "minimum": 0 },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 1000 }
+            },
+            "additionalProperties": false
+        },
+        "listObjectCatalogResult": {
+            "x-direction": "m2s",
+            "type": "object",
+            "description": "The game's own object table, read from ObjectToolbox rather than authored by hand. `next_offset` is null on the last page.",
+            "required": ["entries", "total", "next_offset"],
+            "properties": {
+                "entries": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/ObjectCatalogEntry" }
+                },
+                "total": { "type": "integer", "minimum": 0 },
+                "next_offset": {
+                    "type": ["integer", "null"],
+                    "minimum": 0,
+                    "description": "Offset to request next, or null when this is the last page."
+                }
+            },
+            "additionalProperties": false
+        },
+        "ObjectCatalogEntry": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+                "id": { "type": "integer" },
+                "frame": {
+                    "type": "string",
+                    "description": "Sprite frame the game draws, e.g. spike_02_001.png. Absent when the type is drawn programmatically."
+                },
+                "grid_size": {
+                    "type": "number",
+                    "description": "Grid footprint in GD units, from ObjectToolbox::gridNodeSizeForKey. Absent when the game reports none."
+                }
+            },
+            "additionalProperties": false
+        },
+
+        "getColorChannelPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["channel"],
+            "properties": { "channel": { "type": "integer", "minimum": 1 } },
+            "additionalProperties": false
+        },
+        "setColorChannelPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "required": ["channel", "red", "green", "blue"],
+            "properties": {
+                "channel": { "type": "integer", "minimum": 1 },
+                "red": { "type": "integer", "minimum": 0, "maximum": 255 },
+                "green": { "type": "integer", "minimum": 0, "maximum": 255 },
+                "blue": { "type": "integer", "minimum": 0, "maximum": 255 }
+            },
+            "additionalProperties": false
+        },
+        "colorChannelResult": {
+            "x-direction": "m2s",
+            "type": "object",
+            "description": "A colour channel on the level's colour page. `exists` is false when nothing in the level uses the id.",
+            "required": ["channel", "exists", "red", "green", "blue"],
+            "properties": {
+                "channel": { "type": "integer" },
+                "exists": { "type": "boolean" },
+                "red": { "type": "integer", "minimum": 0, "maximum": 255 },
+                "green": { "type": "integer", "minimum": 0, "maximum": 255 },
+                "blue": { "type": "integer", "minimum": 0, "maximum": 255 }
+            },
+            "additionalProperties": false
+        },
+
         "pingPayload": {
             "x-direction": "s2m",
             "type": "object",

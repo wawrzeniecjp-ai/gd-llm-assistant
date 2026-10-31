@@ -240,6 +240,36 @@
                     "required": ["direction", "payload", "result"],
                     "additionalProperties": false
                 },
+                "list_object_catalog": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/listObjectCatalogPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/listObjectCatalogResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "get_color_channel": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/getColorChannelPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/colorChannelResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "set_color_channel": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/setColorChannelPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/colorChannelResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
                 "editor_closed": {
                     "type": "object",
                     "properties": {

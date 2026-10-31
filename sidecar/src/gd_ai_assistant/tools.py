@@ -38,6 +38,8 @@ SETTABLE_PROPERTIES: tuple[str, ...] = (
     "z_order",
     "editor_layer",
     "groups",
+    "color_channel_1",
+    "color_channel_2",
 )
 
 #: Properties the mod accepts in `delta` (relative change). Verified in the mod.
@@ -141,6 +143,25 @@ def _properties_schema(description: str) -> dict[str, Any]:
             "z_order": {"type": "integer"},
             "editor_layer": {"type": "integer"},
             "groups": {"type": "array", "items": {"type": "integer"}},
+            "color_channel_1": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999,
+                "description": (
+                    "Colour-channel id from the level's colour page, not a colour. "
+                    "The object points at the channel; change the channel to recolour "
+                    "everything using it."
+                ),
+            },
+            "color_channel_2": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999,
+                "description": (
+                    "Detail colour-channel id. Only object types with a detail colour "
+                    "accept this; on the rest the write is refused."
+                ),
+            },
         },
     }
 
@@ -151,10 +172,14 @@ def _build() -> dict[str, Tool]:
             spec=ToolSpec(
                 name="search_object_catalog",
                 description=(
-                    "Look up object type ids by name. The built-in catalog is a small "
-                    "seed and will often not have what you need. If it returns nothing, "
-                    "use list_object_types to find a type already in the level, or ask "
-                    "the user. Never guess an id."
+                    "Look up object type ids by name or description. Backed by the "
+                    "game's own object table, so the ids are real. Each result gives "
+                    "`id`, `name`, `category` (blocks, hazards, orbs, ...), `frame` "
+                    "(the sprite the game draws) and `grid_size` in GD units. "
+                    "Use `grid_size` and `frame` to choose between similar objects: "
+                    "a 'thin' or 'small' spike is a spike with a smaller size, and "
+                    "the response tells you which query words matched nothing. "
+                    "Never invent an id; if nothing matches, say so."
                 ),
                 parameters={
                     "type": "object",
@@ -163,7 +188,11 @@ def _build() -> dict[str, Tool]:
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "Name or keyword, e.g. 'spike', 'platform', 'orb'.",
+                            "description": (
+                                "Words describing the object, e.g. 'spike', 'slope', "
+                                "'orb', 'colour trigger'. Words that name nothing are "
+                                "reported back so you can narrow by size instead."
+                            ),
                         },
                         "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
                     },
@@ -352,6 +381,34 @@ def _build() -> dict[str, Tool]:
             protocol_type="delete_objects",
             mutates_objects=True,
             is_action=True,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="get_color_channel",
+                description=(
+                    "Read a colour channel from the level's colour page. Every object "
+                    "with the same `color_channel_1` id shows this one colour, so this "
+                    "tells you what colour a group of objects is, and which channel to "
+                    "name when the user asks for a colour change. Returns `exists: "
+                    "false` when nothing uses the id. **Read-only**: colours cannot be "
+                    "set by this build, so use this to describe and to advise."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["channel"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "channel": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Colour channel id, e.g. 3.",
+                        }
+                    },
+                },
+            ),
+            protocol_type="get_color_channel",
+            mutates_objects=False,
+            is_action=False,
         ),
         Tool(
             spec=ToolSpec(

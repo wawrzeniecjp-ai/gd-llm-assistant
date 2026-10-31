@@ -32,6 +32,28 @@ struct PropertyValue {
     static PropertyValue ofInteger(std::int64_t value);
     static PropertyValue ofIntegerList(std::vector<std::int32_t> values);
 
+    /// True for both `Number` and `Integer`.
+    ///
+    /// Every numeric property accepts either, and the distinction between the two
+    /// kinds is a **storage** detail rather than a wire requirement. It used to be
+    /// enforced, with bad results: the parser classified JSON numbers as `Number`
+    /// before trying `Integer`, so a model writing `z_order: 3` was told "expects an
+    /// integer" -- a refusal that describes the parser's own bug as the caller's
+    /// mistake. Integer-valued properties now accept either kind and round.
+    [[nodiscard]] bool isNumeric() const {
+        return kind == Kind::Number || kind == Kind::Integer;
+    }
+
+    /// The value as a double, for either numeric kind. Undefined for other kinds.
+    [[nodiscard]] double asDouble() const {
+        return kind == Kind::Integer ? static_cast<double>(integer) : number;
+    }
+
+    /// The value rounded to an integer, for either numeric kind.
+    [[nodiscard]] std::int64_t asInteger() const {
+        return kind == Kind::Integer ? integer : static_cast<std::int64_t>(std::llround(number));
+    }
+
     /// Equality by value, so a no-op write can be skipped and so prior values can
     /// be compared when deciding whether a modify actually changed anything.
     bool operator==(PropertyValue const& other) const;
@@ -41,6 +63,12 @@ struct PropertyValue {
 ///
 /// Unknown names are rejected with `UNSUPPORTED_PROPERTY` before any mutation
 /// (SPEC.md 7.5), which is why this is a closed list rather than a passthrough.
+///
+/// `color_channel_1` and `color_channel_2` are the level's colour-page ids (save
+/// keys 155 and 156, measured) -- the object points at a channel and the channel
+/// holds the colour. They are read from and written to `GJSpriteColor::m_colorID`,
+/// and a type without that slot reports `UNSUPPORTED_PROPERTY` rather than
+/// accepting a write that would go nowhere.
 bool isSupportedProperty(std::string_view name);
 
 /// True for properties `modify_objects` supports as relative deltas (SPEC.md 7.5
@@ -57,11 +85,18 @@ std::optional<PropertyValue> readProperty(GameObject* object, std::string_view n
 /// Writes a property. Main thread only.
 ///
 /// The route per property is not uniform, and that is deliberate rather than
-/// incidental: the differential probe measured that `setScaleX`/`setScale` have
-/// **no effect** on the save string while `m_scaleX` does, so scale is written
-/// through the field. Other properties use their setters where those work.
-/// Routing is declared once, in one table, so it is reviewable and so the probe
-/// can verify it.
+/// incidental. Scale is the one worth reading: the differential probe measured
+/// that `setScaleX`/`setScale` leave the save string unchanged while writing
+/// `m_scaleX` does, which was taken to mean the field is the whole story. It is
+/// not. The field is what **persists**; the setter is what the **renderer** reads.
+/// Writing only the field stores the change and redraws nothing, so an object
+/// scaled to 0.5 looked identical until the level was reloaded -- found in a live
+/// test, not by the probe, because the probe compared save strings and never
+/// looked at the object.
+///
+/// So scale writes the field *and* calls the setter. Colour channels likewise
+/// write the id and then call `updateHSVState`, for the same reason: a cached tint
+/// does not notice a field write on its own.
 geode::Result<> writeProperty(GameObject* object, std::string_view name, PropertyValue const& value);
 
 /// Applies a relative change to `x`, `y` or `rotation`. Main thread only.

@@ -18,5 +18,21 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 # Set before any test module imports `gd_ai_assistant.config`.
 os.environ["GD_AI_ASSISTANT_IGNORE_ENV_FILE"] = "1"
+
+
+@pytest.fixture(autouse=True)
+def _fresh_catalog() -> None:
+    """Give every test its own object catalog.
+
+    `load_catalog` is cached on purpose in the application -- one process-wide table,
+    read from the game once -- but a cached *mutable* singleton makes the suite
+    order-dependent: a test whose fake mod supplies a fixture table would hand it to
+    every test that runs after it.
+    """
+    from gd_ai_assistant import catalog
+
+    catalog.load_catalog.cache_clear()

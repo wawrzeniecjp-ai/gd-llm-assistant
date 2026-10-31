@@ -132,7 +132,7 @@ struct PropertySpec {
     bool deltaCapable;
 };
 
-constexpr std::array<PropertySpec, 11> kSpecs {{
+constexpr std::array<PropertySpec, 13> kSpecs {{
     { "x", true },
     { "y", true },
     { "rotation", true },
@@ -144,6 +144,8 @@ constexpr std::array<PropertySpec, 11> kSpecs {{
     { "z_order", false },
     { "editor_layer", false },
     { "groups", false },
+    { "color_channel_1", false },
+    { "color_channel_2", false },
 }};
 
 } // namespace
@@ -177,6 +179,18 @@ std::optional<PropertyValue> readProperty(GameObject* object, std::string_view n
     if (name == "z_order") return PropertyValue::ofInteger(object->m_zOrder);
     if (name == "editor_layer") return PropertyValue::ofInteger(object->m_editorLayer);
     if (name == "groups") return PropertyValue::ofIntegerList(readGroups(object));
+    if (name == "color_channel_1") {
+        if (object->m_baseColor == nullptr) {
+            return std::nullopt;
+        }
+        return PropertyValue::ofInteger(object->m_baseColor->m_colorID);
+    }
+    if (name == "color_channel_2") {
+        if (object->m_detailColor == nullptr) {
+            return std::nullopt;
+        }
+        return PropertyValue::ofInteger(object->m_detailColor->m_colorID);
+    }
 
     return std::nullopt;
 }
@@ -192,38 +206,51 @@ geode::Result<> writeProperty(GameObject* object, std::string_view name, Propert
     // Position is written as a pair: setting x and y separately would need two
     // calls, and reading one back mid-way can pick up a stale component.
     if (name == "x" || name == "y") {
-        if (value.kind != PropertyValue::Kind::Number) {
+        if (!value.isNumeric()) {
             return Err(fmt::format("INVALID_REQUEST: '{}' expects a number", name));
         }
         auto x = object->getPositionX();
         auto levelY = cocosYToLevel(object->getPositionY());
         if (name == "x") {
-            x = value.number;
+            x = value.asDouble();
         } else {
-            levelY = value.number;
+            levelY = value.asDouble();
         }
         object->setPosition({ static_cast<float>(x), static_cast<float>(levelYToCocos(levelY)) });
         return Ok();
     }
 
     if (name == "rotation") {
-        if (value.kind != PropertyValue::Kind::Number) {
+        if (!value.isNumeric()) {
             return Err("INVALID_REQUEST: 'rotation' expects a number");
         }
-        object->setRotation(static_cast<float>(value.number));
+        object->setRotation(static_cast<float>(value.asDouble()));
         return Ok();
     }
 
     if (name == "scale_x" || name == "scale_y") {
-        if (value.kind != PropertyValue::Kind::Number || value.number <= 0.0) {
+        if (!value.isNumeric() || value.asDouble() <= 0.0) {
             return Err(fmt::format("INVALID_REQUEST: '{}' expects a positive number", name));
         }
-        // Fields, not setters: measured that `setScaleX`/`setScale` leave the
-        // save string unchanged while the field write does not.
+        // Both the field and the setter, because they do different jobs.
+        //
+        // Measured, and the two halves matter equally:
+        //   - `m_scaleX = 1.5` changes the save string's key 128. `setScaleX(1.5)`
+        //     does not. So the **field** is what persists.
+        //   - Writing only the field persists the change but does not redraw the
+        //     object: it renders at its old size until the level is reloaded. The
+        //     probe measured persistence and never looked at the object, so this
+        //     went unnoticed until a live test set scale_x=0.5 and saw no
+        //     difference on screen.
+        // The setter is what the renderer reads, so both are needed: field for the
+        // save string, setter for the sprite.
+        auto const scale = static_cast<float>(value.asDouble());
         if (name == "scale_x") {
-            object->m_scaleX = static_cast<float>(value.number);
+            object->m_scaleX = scale;
+            object->setScaleX(scale);
         } else {
-            object->m_scaleY = static_cast<float>(value.number);
+            object->m_scaleY = scale;
+            object->setScaleY(scale);
         }
         return Ok();
     }
@@ -251,18 +278,18 @@ geode::Result<> writeProperty(GameObject* object, std::string_view name, Propert
     }
 
     if (name == "z_order") {
-        if (value.kind != PropertyValue::Kind::Integer) {
+        if (!value.isNumeric()) {
             return Err("INVALID_REQUEST: 'z_order' expects an integer");
         }
-        object->m_zOrder = static_cast<int>(value.integer);
+        object->m_zOrder = static_cast<int>(value.asInteger());
         return Ok();
     }
 
     if (name == "editor_layer") {
-        if (value.kind != PropertyValue::Kind::Integer) {
+        if (!value.isNumeric()) {
             return Err("INVALID_REQUEST: 'editor_layer' expects an integer");
         }
-        object->m_editorLayer = static_cast<short>(value.integer);
+        object->m_editorLayer = static_cast<short>(value.asInteger());
         return Ok();
     }
 
@@ -271,6 +298,37 @@ geode::Result<> writeProperty(GameObject* object, std::string_view name, Propert
             return Err("INVALID_REQUEST: 'groups' expects a list of integers");
         }
         writeGroups(object, value.integers);
+        return Ok();
+    }
+
+    // Colour channels are the ids the level's colour page assigns (save keys 155 and
+    // 156, measured). Writing them is what "make this block green" actually means:
+    // the object points at a channel, and the channel holds the colour.
+    //
+    // A type without a detail colour has a null `m_detailColor`, and saying so is
+    // better than silently doing nothing -- that silence is exactly what made
+    // `color_channel_2` look broken during the probe.
+    if (name == "color_channel_1" || name == "color_channel_2") {
+        if (!value.isNumeric()) {
+            return Err(fmt::format("INVALID_REQUEST: '{}' expects an integer", name));
+        }
+        auto* slot = name == "color_channel_1" ? object->m_baseColor : object->m_detailColor;
+        if (slot == nullptr) {
+            return Err(fmt::format(
+                "UNSUPPORTED_PROPERTY: this object type has no '{}' (it is not "
+                "colourable there)", name
+            ));
+        }
+        auto const channel = value.asInteger();
+        if (channel < 0 || channel > 999) {
+            return Err(fmt::format(
+                "INVALID_REQUEST: '{}' must be a colour channel id (0-999)", name
+            ));
+        }
+        slot->m_colorID = static_cast<int>(channel);
+        // The sprite caches its tint, so the object has to be told the colour
+        // changed; without this the id is stored and nothing on screen moves.
+        object->updateHSVState();
         return Ok();
     }
 
@@ -285,7 +343,7 @@ geode::Result<> applyDelta(GameObject* object, std::string_view name, double del
     if (!current.has_value()) {
         return Err(fmt::format("OBJECT_NOT_FOUND: could not read '{}'", name));
     }
-    return writeProperty(object, name, PropertyValue::ofNumber(current->number + delta));
+    return writeProperty(object, name, PropertyValue::ofNumber(current->asDouble() + delta));
 }
 
 geode::Result<std::vector<std::pair<std::string, PropertyValue>>, std::string> parseProperties(
@@ -351,12 +409,20 @@ geode::Result<std::vector<std::pair<std::string, PropertyValue>>, std::string> p
             }
         }
 
-        if (auto number = item.asDouble(); number.ok()) {
-            parsed.emplace_back(name, PropertyValue::ofNumber(number.unwrap()));
-            continue;
-        }
+        // Integer first, then double, and the order matters.
+        //
+        // `asDouble()` succeeds on `3` as well as on `3.5`, so trying it first made
+        // **every** number arrive as `Kind::Number` and every integer-valued property
+        // reject it with "expects an integer". The message blamed the caller for a
+        // classification the parser had got wrong, which is the worst kind of error
+        // to debug from the outside: the wire value was correct the whole time.
+        // Found when colour channels were first written by a real model.
         if (auto integer = item.asInt(); integer.ok()) {
             parsed.emplace_back(name, PropertyValue::ofInteger(integer.unwrap()));
+            continue;
+        }
+        if (auto number = item.asDouble(); number.ok()) {
+            parsed.emplace_back(name, PropertyValue::ofNumber(number.unwrap()));
             continue;
         }
 

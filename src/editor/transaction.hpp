@@ -4,12 +4,12 @@
 
 #include <matjson.hpp>
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-
 #include "properties.hpp"
 
 namespace gdai::editor {
@@ -83,6 +83,15 @@ public:
         std::vector<std::pair<std::string, PropertyValue>> priorValues
     );
 
+    /// Notes a colour channel's colour before this turn changed it.
+    ///
+    /// Colour is **level** state, not object state (SPEC.md 7.5.2): one channel is
+    /// shared by every object pointing at it. It therefore cannot ride in
+    /// `recordModified`, which is keyed by object id and restored per object.
+    ///
+    /// First touch wins, for the same reason as properties.
+    void recordColorChange(int channelId, int red, int green, int blue);
+
     /// True if this turn has already noted a change to the given object.
     [[nodiscard]] bool hasModified(std::int32_t uniqueId) const;
 
@@ -99,6 +108,8 @@ private:
         /// Prior values per modified object, in first-touch order.
         std::vector<std::pair<std::int32_t, std::vector<std::pair<std::string, PropertyValue>>>>
             modified;
+        /// Colour channels touched, with their colour before this turn.
+        std::vector<std::pair<int, std::array<int, 3>>> colors;
         /// `m_undoObjects->count()` when the turn ended. The user editing after
         /// this point makes the turn non-revertible.
         int undoDepthAtEnd = 0;

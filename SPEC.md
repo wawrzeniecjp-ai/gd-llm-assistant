@@ -1022,6 +1022,7 @@ All return the uniform response envelope; `result` shapes are shown.
 | `begin_transaction` | `{ label }` | `{ txn_id }` | §6.1.5. |
 | `end_transaction` | `{ txn_id }` | `{ txn_id, summary: { created, modified, deleted } }` | |
 | `revert_transaction` | `{ txn_id }` | `{ reverted: true }` | Usually triggered from the UI, not the sidecar. |
+| `list_object_catalog` | `{ offset?, limit? }` | `{ entries: [ { id, frame?, grid_size? } ], total, next_offset }` | The game's own object table, read from `ObjectToolbox` (§7.5.1). Paged; `next_offset` is null on the last page. Does not require an open editor. |
 | `ping` | `{}` | `{ pong: true }` | Health check. |
 
 **`query_objects` filters:** `id` (object type ID), `ids` (unique IDs), `editor_layer`, `z_layer`, `group`, `x_range` `[min, max]`, `y_range` `[min, max]`, `selected_only`. Defaults: `limit` 100, maximum 500; results beyond the limit set `truncated: true` and a `next_cursor`.
@@ -1051,6 +1052,93 @@ Unknown keys are rejected with `UNSUPPORTED_PROPERTY`; values outside range are 
 **Object identity (D9):** `object_id` is the object's integer unique ID, a JSON number, valid for the current editor session. The mod resolves it with `findGameObject` on the main thread for each command. Do not persist `object_id` across sessions.
 
 **Object type IDs:** the mod checks that `id` is within a sane range and treats a null return from `createObject` as `INVALID_OBJECT_ID`. A denylist of IDs known to crash on programmatic creation is maintained by the mod (populated during testing, S-bindings). The sidecar catalog is the primary guard.
+
+### 7.5.1 The Object Catalog Is Read From the Game
+
+The name-to-id table this system needs already exists inside GD, and it is not
+documentation or a community list — it is the table the game itself uses to decide
+which sprite an id draws. `ObjectToolbox` (`sharedState()`) holds it: `m_allKeys` maps
+id → sprite frame, `intKeyToFrame(id)` is the game's own lookup, and
+`gridNodeSizeForKey(id)` reports the id's grid footprint. `list_object_catalog` reads
+that, so **every entry it returns is real**, which is the only property that matters
+here: a guessed id does not fail loudly, it places the wrong object in the user's level.
+
+Consequences worth knowing:
+
+- Frames are the vocabulary. Ids have no authoritative names, but their frames do:
+  `spike_01_001.png`, `pit_03_001.png`, `sawblade_02_001.png`, `block001_slope_01_001.png`.
+  The sidecar derives a readable name and a category from the frame (leading numeric
+  runs and GD's `_001` suffix dropped), and searches against the frame text as well as
+  the derived name.
+- `grid_size` is the size signal, and it is what makes descriptions like "thin",
+  "small" or "tiny" answerable. Those words name a size, not an object, so no entry
+  matches them; the search returns the objects that matched the rest of the query and
+  reports the unmatched words, leaving the model to choose by `grid_size`.
+- Types drawn programmatically (most triggers) have no frame. They are still listed,
+  with an id and no name, because "this id exists" is worth knowing even when it
+  cannot be described.
+- Paging, not one frame. The table holds a few thousand ids, and one response would be
+  both wasteful and close to the protocol's 1 MB limit. `next_offset` is explicitly
+  null on the last page, so a mod that never reports the end is distinguishable from
+  one that has finished.
+- Fetched **lazily**, on the first `search_object_catalog` of a process, and cached for
+  the process's lifetime. Most turns never look an id up, and paying a handful of round
+  trips at the start of every turn would slow down "delete the spikes" for nothing.
+  Failure is bounded to three attempts, so a mod that does not implement the request
+  does not cost a failed round trip forever.
+
+The sidecar still merges a curated seed and an optional user catalog file *over* this
+table. The game supplies the ids; the curated entries only add presentation (a friendly
+name, aliases) for ids they name. Neither source guesses about the other.
+
+### 7.5.2 Colour Channels (measured, partial)
+
+Colour is **level** state, not object state: an object carries a channel id
+(`color_channel_1`/`_2`, save keys 155/156) and the channel holds the colour. So objects
+that share a channel always share a colour, and "recolour this object" means either
+changing the channel (affecting every object using it) or repointing the object at a
+different channel.
+
+**Reading works.** `get_color_channel` returns a channel's colour. Two things had to be
+measured to get it right, and both were wrong in the first implementation:
+
+- **`ColorAction::m_color` is the live colour; `m_fromColor` is not.** A probe of a real
+  level found a channel holding `from=(255,255,255)` while `color=(0,18,255)`, with the
+  level drawing the blue. Reporting `m_fromColor` made every channel read as white — and
+  made the user's own colour edits invisible to the model.
+- **`getColorAction(n)` is correctly id-keyed.** Each `ColorAction` carries `m_colorID`,
+  and `getColorAction(1..6)` returned six distinct actions whose `m_colorID` matched. An
+  earlier reading of pointer logs as "the lookup is off by one" was wrong: those pointers
+  straddled a level reload. The action vector holds **1102 slots** (1000 custom + ~102
+  system channels), indexed by channel id, so background / ground / ground line /
+  middleground are addressable in the same space.
+
+**Writing does not persist, and is refused.** Four implementations were tried: the raw
+`m_fromColor`/`m_toColor`/`m_color` fields; `ColorAction::updateCustomColor`; the
+`ColorActionSprite` copy that objects are actually tinted from; and each of those followed
+by `updateColorAction` and a per-object re-tint. Every one reported the new value back
+immediately, and every one was undone **within one frame**:
+
+```text
+set to (0,0,0)  ->  reads back as (0,0,0)
+next frame:     from=(255,255,255) color=(255,0,0)   <- the original
+```
+
+So `GJEffectManager`'s colour state is **derived**, rebuilt each frame from an
+authoritative store. The store is the **colour trigger objects**, which is why the
+editor's own colour popup (`ColorSelectPopup`) is constructed from both an
+`EffectGameObject` and a `ColorAction`.
+
+Doing it properly means creating or updating a colour trigger (type 899) targeting the
+channel, inside the turn's transaction so Revert removes it. That adds an object to the
+user's level, so it is a design decision rather than a bug fix — and the trigger's
+save-string keys have to be measured rather than guessed. Until then `set_color_channel`
+is withdrawn and the prompt tells the model to name the channel and send the user to the
+colour page.
+
+The failure mode this avoided is worth stating: a tool that returns success and changes
+nothing is worse than one that refuses, because the user then has to verify every claim
+the model makes.
 
 ## 7.6 Events (Mod → Sidecar)
 

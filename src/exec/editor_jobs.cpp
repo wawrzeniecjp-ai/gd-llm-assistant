@@ -457,9 +457,17 @@ private:
 /// The properties the wire schema accepts, which is what this reports
 /// (SPEC.md 7.5). `getSaveString` holds far more, including trigger-specific
 /// keys, but those are not in the schema.
-constexpr std::array<std::string_view, 11> kReportedProperties {{
+/// Properties reported for one object by `get_object_properties`.
+///
+/// A second copy of the property list, and it drifted: `color_channel_1` and
+/// `color_channel_2` were added to the mod's validator and the tool schema but not
+/// here, so the model was told a colourable object had **no colour channels at all**
+/// and concluded it had no way to set colour. The values were readable the whole
+/// time; this list was the only thing standing between them and the wire.
+constexpr std::array<std::string_view, 13> kReportedProperties {{
     "x", "y", "rotation", "scale_x", "scale_y", "flip_x", "flip_y",
     "z_layer", "z_order", "editor_layer", "groups",
+    "color_channel_1", "color_channel_2",
 }};
 
 class GetObjectPropertiesJob final : public EditorJob {

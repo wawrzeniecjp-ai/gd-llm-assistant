@@ -6,6 +6,8 @@
 
 #include <matjson.hpp>
 
+#include "color_channel.hpp"
+
 using namespace geode::prelude;
 
 namespace gdai::editor {
@@ -91,6 +93,22 @@ void TransactionManager::recordDeleted(std::string saveString, std::int32_t uniq
     m_open.deletedSaveStrings.push_back(std::move(saveString));
 }
 
+void TransactionManager::recordColorChange(int channelId, int red, int green, int blue) {
+    if (!m_hasOpen) {
+        return;
+    }
+    // First touch wins, like properties: revert must restore the colour the channel
+    // had before the turn, not before the last of several edits.
+    auto const found = std::find_if(
+        m_open.colors.begin(), m_open.colors.end(),
+        [channelId](auto const& entry) { return entry.first == channelId; }
+    );
+    if (found != m_open.colors.end()) {
+        return;
+    }
+    m_open.colors.emplace_back(channelId, std::array<int, 3> { red, green, blue });
+}
+
 bool TransactionManager::hasModified(std::int32_t uniqueId) const {
     if (!m_hasOpen) {
         return false;
@@ -141,6 +159,7 @@ geode::Result<matjson::Value, std::string> TransactionManager::end(std::string c
     summary["created"] = static_cast<int>(m_open.created.size());
     summary["modified"] = static_cast<int>(m_open.modified.size());
     summary["deleted"] = static_cast<int>(m_open.deletedSaveStrings.size());
+    summary["recoloured"] = static_cast<int>(m_open.colors.size());
 
     log::info(
         "transaction {} ended: {} created, {} modified, {} deleted (undo depth {})",
@@ -252,13 +271,26 @@ geode::Result<matjson::Value, std::string> TransactionManager::revert(std::strin
         }
     }
 
+    // Colours last, after the objects they belong to are back where they were: a
+    // recreated object picks up its colour from the channel when it is tinted, so
+    // restoring the channel first would have it re-applied twice.
+    auto revertedColors = 0;
+    for (auto it = record.colors.rbegin(); it != record.colors.rend(); ++it) {
+        auto const& [channel, rgb] = *it;
+        if (writeColorChannel(channel, rgb[0], rgb[1], rgb[2])) {
+            ++revertedColors;
+        } else {
+            log::warn("revert {}: could not restore colour channel {}", txnId, channel);
+        }
+    }
+
     record.reverted = true;
 
     log::info(
         "transaction {} reverted: {} of {} creations removed, {} of {} deletions restored, "
-        "{} properties restored",
+        "{} properties restored, {} colour channels restored",
         txnId, removed, record.created.size(), restored, record.deletedSaveStrings.size(),
-        revertedProperties
+        revertedProperties, revertedColors
     );
 
     auto result = matjson::Value::object();
@@ -266,6 +298,7 @@ geode::Result<matjson::Value, std::string> TransactionManager::revert(std::strin
     result["removed"] = removed;
     result["restored"] = restored;
     result["properties_restored"] = revertedProperties;
+    result["colors_restored"] = revertedColors;
     result["object_count_before"] = before;
     result["object_count_after"] = objectCount();
     return Ok(std::move(result));

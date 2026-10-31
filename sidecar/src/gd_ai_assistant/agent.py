@@ -48,6 +48,15 @@ CANCELLED = "cancelled"
 FAILED = "failed"
 INCOMPLETE = "incomplete"
 
+#: How many object ids to ask for per `list_object_catalog` request.
+#: Large enough that the whole table arrives in a handful of round trips, small enough
+#: that one frame stays far inside the protocol's 1 MB limit.
+_CATALOG_PAGE_SIZE = 500
+
+#: Cap on pages fetched in one go. A guard against a mod that never reports the last
+#: page, which would otherwise loop until the turn's wall-clock timeout.
+_MAX_CATALOG_PAGES = 40
+
 
 class EditorLink(Protocol):
     """What the loop needs from the connection to the mod."""
@@ -358,6 +367,62 @@ class ToolLoop:
 
         return self._result(status, self._text, txn_id=txn_id)
 
+    async def _ensure_catalog(self) -> None:
+        """Read the game's own object table, once per sidecar process.
+
+        `list_object_catalog` is answered out of `ObjectToolbox`, which is the table
+        the game itself uses to map an id to a sprite. That makes every entry real,
+        which is the only property that matters here: a guessed id does not fail
+        loudly, it places the wrong object in the user's level (SPEC.md 15).
+
+        Failure is not fatal and is not retried forever. An older mod answers with an
+        error, and a turn that cannot look up ids is still a usable turn -- what is
+        not acceptable is paying a failed round trip at the start of every turn.
+        """
+        if not self._catalog.fetch_allowed:
+            return
+
+        self._catalog.fetch_attempts += 1
+        collected: list[dict[str, Any]] = []
+        offset = 0
+
+        for _ in range(_MAX_CATALOG_PAGES):
+            response = await self._link.request(
+                "list_object_catalog", {"offset": offset, "limit": _CATALOG_PAGE_SIZE}
+            )
+            if not response.ok:
+                error = response.error or {}
+                log.warning(
+                    "catalog: the mod could not list object types (%s); keeping %d entries",
+                    error.get("message", "request failed"),
+                    self._catalog.size,
+                )
+                return
+
+            result = response.result if isinstance(response.result, dict) else {}
+            collected.extend(
+                entry for entry in (result.get("entries") or []) if isinstance(entry, dict)
+            )
+
+            next_offset = result.get("next_offset")
+            # `not isinstance(..., int)` covers both a null (last page) and a mod that
+            # omitted the field; `<= offset` stops a mod that repeats its own offset.
+            if not isinstance(next_offset, int) or next_offset <= offset:
+                break
+            offset = next_offset
+
+        if not collected:
+            log.warning("catalog: the mod reported no object types; keeping the seed")
+            return
+
+        added = self._catalog.absorb_game_table(collected)
+        log.info(
+            "catalog: %d object ids from the game (%d new, %d total)",
+            len(collected),
+            added,
+            self._catalog.size,
+        )
+
     async def _complete(self, messages: list[Message]) -> AssistantTurn:
         """Call the provider, retrying a retryable failure (SPEC.md 6.2.3)."""
         attempt = 0
@@ -400,6 +465,10 @@ class ToolLoop:
             )
 
         if tool.protocol_type is None:
+            # Lazy, and only here. Reading the game's object table costs a handful of
+            # round trips, and most turns never look an id up -- paying for it at the
+            # start of every turn would slow down "delete the spikes" for nothing.
+            await self._ensure_catalog()
             return catalog_module.search_object_catalog(self._catalog, call.arguments), False
 
         if tool.mutates_objects:

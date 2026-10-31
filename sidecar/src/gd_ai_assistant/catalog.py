@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 
@@ -44,21 +44,112 @@ class CatalogEntry:
     category: str
     aliases: tuple[str, ...] = ()
     source: str = "seed"
+    #: Sprite frame the game draws for this id, when known (from the game itself).
+    frame: str | None = None
+    #: Grid footprint in GD units, when known.
+    grid_size: float | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {"id": self.id, "name": self.name, "category": self.category}
+        """The wire shape of a search hit.
+
+        `frame` and `grid_size` are sent whenever they are known, because they are
+        the two fields that answer a question the name cannot: *which* spike is the
+        thin one. Everything here comes from the game's own table, so none of it is
+        a guess.
+        """
+        data: dict[str, object] = {
+            "id": self.id,
+            "name": self.name,
+            "category": self.category,
+        }
+        if self.frame:
+            data["frame"] = self.frame
+        if self.grid_size is not None:
+            data["grid_size"] = self.grid_size
+        return data
 
     def haystack(self) -> str:
         """Lowercased text this entry matches against."""
-        return " ".join((self.name, self.category, *self.aliases)).lower()
+        parts = [self.name, self.category, *self.aliases]
+        if self.frame:
+            parts.append(self.frame)
+        return " ".join(parts).lower()
+
+
+#: Category for an entry derived from a sprite frame, by the frame's leading word.
+#:
+#: Deliberately short and conservative: a frame that matches nothing becomes
+#: "objects" rather than being filed under a guess. This is presentation, not
+#: correctness -- the id and the frame are what the model acts on.
+_CATEGORY_BY_PREFIX: dict[str, str] = {
+    "spike": "hazards",
+    "pit": "hazards",
+    "saw": "hazards",
+    "sawblade": "hazards",
+    "thorn": "hazards",
+    "block": "blocks",
+    "pixel": "blocks",
+    "slope": "blocks",
+    "orb": "orbs",
+    "pad": "pads",
+    "portal": "portals",
+    "coin": "collectibles",
+    "ring": "boosters",
+    "booster": "boosters",
+    "grav": "boosters",
+    "text": "text",
+    "gradient": "decoration",
+    "pulse": "triggers",
+}
+
+
+def _humanise(stem: str) -> str:
+    """Turn a frame stem into readable words: `spike_02` -> `spike 2`.
+
+    Leading zeros are stripped so that `block001` and `block01` do not appear as
+    different words to a search, and the `_001` suffix GD appends to every frame is
+    dropped because it carries no meaning.
+    """
+    words: list[str] = []
+    for part in stem.split("_"):
+        if not part or part in {"color", "001", "02", "hd", "uhd"}:
+            continue
+        words.append(str(int(part)) if part.isdigit() else part)
+    return " ".join(words) or stem
+
+
+def derive_entry(object_id: int, frame: str | None, grid_size: float | None) -> CatalogEntry:
+    """Build an entry from what the game reports, inventing nothing."""
+    name = f"object {object_id}"
+    category = "objects"
+    if frame:
+        stem = frame[:-4] if frame.endswith(".png") else frame
+        if stem.endswith("_001"):
+            stem = stem[:-4]
+        name = _humanise(stem)
+        category = _CATEGORY_BY_PREFIX.get(stem.split("_")[0].rstrip("0123456789"), category)
+    return CatalogEntry(
+        id=object_id,
+        name=name,
+        category=category,
+        source="game",
+        frame=frame,
+        grid_size=grid_size,
+    )
 
 
 class Catalog:
     """A searchable set of object type ids."""
 
-    def __init__(self, entries: list[CatalogEntry], *, is_seed: bool) -> None:
+    def __init__(
+        self, entries: list[CatalogEntry], *, is_seed: bool, has_game_table: bool = False
+    ) -> None:
         self._entries = entries
         self.is_seed = is_seed
+        self.has_game_table = has_game_table
+        #: How many times the game's table has been asked for, so a mod that cannot
+        #: answer is not asked again on every turn of a long session.
+        self.fetch_attempts = 0
 
     @property
     def size(self) -> int:
@@ -68,27 +159,92 @@ class Catalog:
     def entries(self) -> list[CatalogEntry]:
         return list(self._entries)
 
+    @property
+    def needs_game_table(self) -> bool:
+        """True until the game's own table has been absorbed."""
+        return not self.has_game_table
+
+    @property
+    def fetch_allowed(self) -> bool:
+        """False once asking for the table has failed too often.
+
+        Bounded rather than unlimited: a mod that does not implement
+        `list_object_catalog` (an older build, most likely) would otherwise cost a
+        failed round trip at the start of every turn, forever.
+        """
+        return self.needs_game_table and self.fetch_attempts < 3
+
+    def absorb_game_table(self, entries: list[dict]) -> int:
+        """Merge the game's `id -> frame` table into this catalog.
+
+        The game's table is the *base*: it is authoritative about which ids exist and
+        what they look like. Curated seed and user entries override the presentation
+        (name, category, aliases) of a specific id, which is how a readable name can
+        sit on top of a real id without either source guessing about the other.
+
+        Returns how many ids the table contributed, for the log line -- the number is
+        the difference between "the mod answered" and "the mod answered nothing".
+        """
+        merged = {entry.id: entry for entry in self._entries}
+        added = 0
+        for raw in entries:
+            try:
+                object_id = int(raw["id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            frame = raw.get("frame")
+            grid_size = raw.get("grid_size")
+            frame = str(frame) if isinstance(frame, str) else None
+            grid_size = float(grid_size) if isinstance(grid_size, (int, float)) else None
+
+            existing = merged.get(object_id)
+            if existing is None:
+                merged[object_id] = derive_entry(object_id, frame, grid_size)
+                added += 1
+                continue
+
+            # A curated entry keeps its name and aliases and gains the game's facts.
+            merged[object_id] = replace(existing, frame=frame, grid_size=grid_size)
+
+        self._entries = sorted(merged.values(), key=lambda entry: entry.id)
+        self.has_game_table = True
+        self.is_seed = False
+        return added
+
     def search(self, query: str, limit: int = 10) -> list[CatalogEntry]:
         """Rank entries against `query`.
 
-        Exact name and alias matches come first, then substring matches, so
-        searching "spike" returns the spike rather than the first thing that
-        happens to contain those letters.
+        Token-AND rather than whole-string substring: a query like "thin spike" should
+        still find the spikes, because no frame is literally called "thin". Entries
+        matching more of the query's words rank first, and a word nothing matched is
+        reported back by `search_object_catalog` instead of silently narrowing the
+        result to nothing.
         """
         needle = query.strip().lower()
         if not needle:
             return []
 
-        exact: list[CatalogEntry] = []
-        partial: list[CatalogEntry] = []
-        for entry in self._entries:
-            name = entry.name.lower()
-            if needle == name or needle in (alias.lower() for alias in entry.aliases):
-                exact.append(entry)
-            elif needle in entry.haystack():
-                partial.append(entry)
+        terms = [term for term in needle.split() if term]
+        exact: list[tuple[int, CatalogEntry]] = []
+        partial: list[tuple[int, CatalogEntry]] = []
 
-        return (exact + partial)[: max(1, limit)]
+        for entry in self._entries:
+            haystack = entry.haystack()
+            hits = sum(1 for term in terms if term in haystack)
+            if hits == 0:
+                continue
+            name = entry.name.lower()
+            is_exact = needle == name or needle in (alias.lower() for alias in entry.aliases)
+            (exact if is_exact else partial).append((hits, entry))
+
+        def rank(pair: tuple[int, CatalogEntry]) -> tuple[int, int]:
+            # Most query words matched first, then lowest id: low ids are the plain
+            # basics, which is a better default than an arbitrary ordering.
+            hits, entry = pair
+            return (-hits, entry.id)
+
+        ordered = sorted(exact, key=rank) + sorted(partial, key=rank)
+        return [entry for _, entry in ordered[: max(1, limit)]]
 
 
 def _load_user_entries(path: Path) -> list[CatalogEntry]:
@@ -157,25 +313,45 @@ def load_catalog(catalog_path: str | None = None) -> Catalog:
 def search_object_catalog(catalog: Catalog, arguments: dict) -> dict:
     """Handle the `search_object_catalog` tool call.
 
-    The response deliberately carries `total_in_catalog` and `is_seed_catalog`.
-    Without them an empty result is ambiguous -- "no such object" and "the catalog
-    is nearly empty" look identical to the model -- and the ambiguity is resolved
-    by inventing an id, which is the exact failure this tool exists to prevent.
+    The response says where the catalog came from and how big it is. Without that an
+    empty result is ambiguous -- "no such object" and "the catalog is nearly empty"
+    look identical to the model -- and the ambiguity is resolved by inventing an id,
+    which is the exact failure this tool exists to prevent.
+
+    It also reports which of the query's words matched nothing. A model asking for a
+    "thin spike" is describing a *size*, and no object is named "thin"; telling it
+    that "thin" matched nothing, while returning the spikes and their grid sizes,
+    leaves it with everything it needs to choose.
     """
     query = str(arguments.get("query", ""))
     limit = int(arguments.get("limit") or 10)
 
     matches = catalog.search(query, limit)
+    terms = [term for term in query.strip().lower().split() if term]
+    matched_terms = {term for term in terms for entry in matches if term in entry.haystack()}
+    unmatched = [term for term in terms if term not in matched_terms]
+
+    if catalog.is_seed:
+        note = (
+            "This catalog is a seed and is nearly empty; an empty result does not "
+            "mean the object does not exist. Tell the user you could not look it up "
+            "rather than guessing an id."
+        )
+    elif unmatched:
+        note = (
+            f"No object is named {unmatched!r}. The results match the rest of the "
+            "query; use `grid_size` (GD units, 30 = one block) and the frame name to "
+            "choose between them."
+        )
+    else:
+        note = None
+
     return {
         "query": query,
         "matches": [entry.to_json() for entry in matches],
         "total_in_catalog": catalog.size,
         "is_seed_catalog": catalog.is_seed,
-        "note": (
-            "This catalog is a seed and is nearly empty; an empty result does not "
-            "mean the object does not exist. Tell the user you could not look it up "
-            "rather than guessing an id."
-            if catalog.is_seed and not matches
-            else None
-        ),
+        "source": "game" if catalog.has_game_table else "seed",
+        "unmatched_terms": unmatched,
+        "note": note,
     }

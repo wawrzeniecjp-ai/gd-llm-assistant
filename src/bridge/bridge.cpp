@@ -14,7 +14,9 @@
 #include <fstream>
 #include <iterator>
 
+#include "../editor/color_channel.hpp"
 #include "../editor/editor_state.hpp"
+#include "../editor/object_catalog.hpp"
 #include "../editor/transaction.hpp"
 #include "../exec/editor_jobs.hpp"
 #include "../exec/handler_verification.hpp"
@@ -546,7 +548,16 @@ arc::Future<> Bridge::session(std::shared_ptr<net::WebSocket> socket, std::strin
             // string that must equal `run-probes` cannot fail that way, and makes
             // the intent legible in the settings UI as well.
             auto const token = Mod::get()->getSettingValue<std::string>("probe-token");
-            if (token == "run-probes") {
+            // Both spellings: Geode's settings text field does not accept a hyphen, so
+            // the value a user can actually enter is `colourprobe`. Accepting the
+            // hyphenated form too costs nothing and keeps the docs consistent.
+            if (token == "colourprobe" || token == "colour-probe") {
+                // Read-only, so unlike the other probe this one is safe to run on a
+                // level the user cares about. Separate token rather than a flag on the
+                // existing one, precisely so it cannot drag the destructive probes in
+                // with it.
+                editor::runColorProbe();
+            } else if (token == "run-probes") {
                 log::warn(
                     "developer probes enabled by probe-token: this will modify the "
                     "level and clear the undo stack"
@@ -670,6 +681,80 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
         );
         // The sidecar re-reads the level here, so it is no longer stale.
         co_return co_await sendResult(socket, requestId, editor::toJson(*snapshot));
+    }
+
+    if (type == "list_object_catalog") {
+        // The game's own id -> sprite table, paged. Deliberately independent of the
+        // editor being open: it describes the game, not the level, so a handshake
+        // during a fresh editor session can still obtain it.
+        auto const offset = payload.contains("offset") ? payload["offset"].asInt().unwrapOr(0) : 0;
+        auto const limit = payload.contains("limit") ? payload["limit"].asInt().unwrapOr(200) : 200;
+
+        auto page = co_await async::waitForMainThread<editor::CatalogPage>(
+            [offset, limit] { return editor::takeCatalogPage(static_cast<int>(offset), static_cast<int>(limit)); }
+        );
+        if (!page) {
+            co_return co_await sendError(
+                socket, requestId, "THREAD_DISPATCH_FAILED",
+                "could not schedule work on the main thread"
+            );
+        }
+        log::info(
+            "list_object_catalog: offset {} -> {} entries of {}",
+            offset, page->entries.size(), page->total
+        );
+        co_return co_await sendResult(socket, requestId, editor::catalogPageToJson(*page));
+    }
+
+    if (type == "get_color_channel" || type == "set_color_channel") {
+        // Colour lives on the level's colour page, not on an object, so these are
+        // their own requests rather than object properties (SPEC.md 7.5.2). A
+        // main-thread hop like the transaction requests: they touch `GJEffectManager`
+        // and re-tint objects, and a caller awaits each response before sending the
+        // next request.
+        auto const channel = payload.contains("channel")
+            ? payload["channel"].asInt().unwrapOr(0)
+            : 0;
+
+        if (type == "get_color_channel") {
+            auto found = co_await async::waitForMainThread<editor::ColorChannel>(
+                [channel] { return editor::readColorChannel(static_cast<int>(channel)); }
+            );
+            if (!found) {
+                co_return co_await sendError(
+                    socket, requestId, "THREAD_DISPATCH_FAILED",
+                    "could not schedule work on the main thread"
+                );
+            }
+            co_return co_await sendResult(socket, requestId, editor::colorChannelToJson(*found));
+        }
+
+        auto const readByte = [&payload](char const* key) {
+            return payload.contains(key) ? payload[key].asInt().unwrapOr(0) : 0;
+        };
+        auto const red = readByte("red");
+        auto const green = readByte("green");
+        auto const blue = readByte("blue");
+
+        auto outcome = co_await async::waitForMainThread<geode::Result<editor::ColorChannel>>(
+            [channel, red, green, blue] {
+                return editor::writeColorChannel(
+                    static_cast<int>(channel), static_cast<int>(red), static_cast<int>(green),
+                    static_cast<int>(blue)
+                );
+            }
+        );
+        if (!outcome) {
+            co_return co_await sendError(
+                socket, requestId, "THREAD_DISPATCH_FAILED",
+                "could not schedule work on the main thread"
+            );
+        }
+        if (!outcome->ok()) {
+            auto const [code, message] = splitCode(outcome->unwrapErr());
+            co_return co_await sendError(socket, requestId, code, message);
+        }
+        co_return co_await sendResult(socket, requestId, editor::colorChannelToJson(outcome->unwrap()));
     }
 
     if (exec::isImplementedRequest(type)) {
