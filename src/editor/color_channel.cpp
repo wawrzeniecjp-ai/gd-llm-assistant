@@ -8,6 +8,7 @@
 #include <Geode/binding/LevelSettingsObject.hpp>
 
 #include <algorithm>
+#include <charconv>
 
 #include "transaction.hpp"
 
@@ -49,6 +50,38 @@ ColorChannel describe(ColorAction* action, int channelId) {
     return channel;
 }
 
+/// The stored `kS38` entry for one channel, or empty when the level has none.
+///
+/// Reads the level's own save string rather than any object's state. Measured:
+/// writing through the setup format changed the entry here while `ColorAction`
+/// still reported the old colour, so this is the store and that is derived.
+std::string savedEntryFor(int channelId) {
+    auto* editor = LevelEditorLayer::get();
+    auto* settings = editor == nullptr ? nullptr : editor->m_levelSettings;
+    if (settings == nullptr) {
+        return {};
+    }
+    auto const setup = settings->getSaveString();
+    auto const at = setup.find("kS38,");
+    if (at == std::string::npos) {
+        return {};
+    }
+    auto const body = setup.substr(at + 5);
+    auto const stop = body.find(",k");
+    auto const colours = stop == std::string::npos ? body : body.substr(0, stop);
+    auto const needle = fmt::format("_6_{}_", channelId);
+    auto const pos = colours.find(needle);
+    if (pos == std::string::npos) {
+        return {};
+    }
+    auto const startAt = colours.rfind('|', pos);
+    auto const begin = startAt == std::string::npos ? 0 : startAt + 1;
+    auto const endAt = colours.find('|', pos);
+    return colours.substr(
+        begin, endAt == std::string::npos ? std::string::npos : endAt - begin
+    );
+}
+
 } // namespace
 
 ColorChannel readColorChannel(int channelId) {
@@ -73,52 +106,189 @@ ColorChannel readColorChannel(int channelId) {
     return channel;
 }
 
+namespace {
+
+/// Reads a `k_v` value out of one `kS38` entry, or -1 when absent.
+///
+/// The entry format is the level's own, measured from
+/// `LevelSettingsObject::getSaveString()`:
+///
+///     1_<r>_2_<g>_3_<b>_11_<..>_12_<..>_13_<..>_4_<player>_6_<channel>_5_<blend>_...
+///
+/// So key 1 is red, 2 green, 3 blue and **6 is the channel id**. System channels are
+/// not a separate namespace: BG is 1000, ground 1001, ground line 1002, middleground
+/// 1004+, alongside the custom channels 1..999.
+int valueForKey(std::string_view entry, int key) {
+    auto const prefix = fmt::format("{}_{{", key);
+    auto at = entry.find(prefix);
+    // Anchored at either the start or just after a separator, so searching for
+    // key `6` cannot match the tail of `16`.
+    while (at != std::string_view::npos) {
+        if (at == 0 || entry[at - 1] == '_') {
+            break;
+        }
+        at = entry.find(prefix, at + 1);
+    }
+    if (at == std::string_view::npos) {
+        return -1;
+    }
+    auto const digitsAt = at + prefix.size();
+    auto const endAt = entry.find('_', digitsAt);
+    auto const digits = entry.substr(
+        digitsAt,
+        endAt == std::string_view::npos ? std::string_view::npos : endAt - digitsAt
+    );
+    auto parsed = 0;
+    auto const [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), parsed);
+    if (ec != std::errc() || ptr != digits.data() + digits.size()) {
+        return -1;
+    }
+    return parsed;
+}
+
+/// Replaces a `k_v` value inside one entry, appending the pair when absent.
+std::string withValue(std::string const& entry, int key, int value) {
+    auto const prefix = fmt::format("{}_{{", key);
+    auto at = entry.find(prefix);
+    while (at != std::string::npos && at != 0 && entry[at - 1] != '_') {
+        at = entry.find(prefix, at + 1);
+    }
+    auto const replacement = fmt::format("{}_{}_", key, value);
+    if (at == std::string::npos) {
+        // Appended rather than ignored: the game's parser tolerates unknown keys and
+        // our absence of one must not silently drop the edit.
+        return entry + replacement;
+    }
+    auto const digitsAt = at + prefix.size();
+    auto const endAt = entry.find('_', digitsAt);
+    auto const after = endAt == std::string::npos ? std::string() : entry.substr(endAt + 1);
+    return entry.substr(0, at) + replacement + after;
+}
+
+} // namespace
+
 geode::Result<ColorChannel> writeColorChannel(int channelId, int red, int green, int blue) {
     auto* manager = effectManager();
     if (manager == nullptr) {
         return Err("EDITOR_NOT_OPEN: no editor layer is active");
     }
+    if (channelId <= 0) {
+        return Err("INVALID_REQUEST: colour channel ids start at 1");
+    }
 
-    // Refused, because writing here does not persist -- measured, not assumed.
+    // Two managers, and this is the distinction that took four attempts to find.
     //
-    // Writing `GJEffectManager`'s colour state was tried four ways: the raw
-    // `m_fromColor`/`m_toColor`/`m_color` fields, `ColorAction::updateCustomColor`,
-    // the `ColorActionSprite` copy that objects are actually tinted from, and each of
-    // those followed by `updateColorAction` and a per-object re-tint. Every one
-    // reported the new value back immediately and every one was undone **within one
-    // frame**:
+    // `LevelEditorLayer::m_effectManager` is the **live** one: it drives rendering and is
+    // rebuilt from elsewhere each frame, which is why every write into it was undone
+    // within a frame. `LevelSettingsObject::m_effectManager` is the level's own copy, and
+    // it is what `LevelSettingsObject::getSaveString()` serialises into the `kS38`
+    // section. The existence of `LevelEditorLayer::transferDefaultColors(src, dest)`
+    // confirms there are two: colours are copied between them on a load.
     //
-    //     set to (0,0,0)  ->  reads back as (0,0,0)
-    //     next frame:     from=(255,255,255) color=(255,0,0)   <- the original
-    //
-    // So `GJEffectManager` is derived state, rebuilt each frame from an authoritative
-    // store, and nothing written into it survives. That store is the **colour trigger
-    // objects** -- visible in the editor's own design, where `ColorSelectPopup` is
-    // constructed from both an `EffectGameObject` and a `ColorAction`.
-    //
-    // Implementing it properly means creating or updating a colour trigger object
-    // (type 899) whose target channel is this one, inside the turn's transaction so
-    // Revert removes it. That is a real feature with a real design cost -- it adds an
-    // object to the level -- and it is not something to bolt on by guessing at the
-    // trigger's save-string keys.
-    //
-    // Refused rather than left returning success: a tool that reports a change the
-    // level does not keep is the failure that wastes the most of a user's time, because
-    // they have to verify every claim it makes. Reading works and is left available, so
-    // the model can still describe colours and name the channel to change.
-    auto const current = describe(manager->getColorAction(channelId), channelId);
-    log::warn(
-        "colour channel {}: write refused; current=({},{},{}) requested=({},{},{})",
-        channelId, current.red, current.green, current.blue,
-        clampedByte(red), clampedByte(green), clampedByte(blue)
+    // Logged proof: writing through the live manager left the stored entry byte-identical
+    // before and after the call, so the write never reached the store at all.
+    auto* editor = LevelEditorLayer::get();
+    auto* settings = editor == nullptr ? nullptr : editor->m_levelSettings;
+    auto* store = settings == nullptr ? nullptr : settings->m_effectManager;
+
+    auto* action = manager->getColorAction(channelId);
+    if (action == nullptr) {
+        return Err(fmt::format("OBJECT_NOT_FOUND: colour channel {}", channelId));
+    }
+    auto* stored = store == nullptr ? nullptr : store->getColorAction(channelId);
+    log::debug(
+        "colour channel {}: live action={} stored action={} distinct={}",
+        channelId, static_cast<void*>(action), static_cast<void*>(stored),
+        action != stored
     );
-    return Err(fmt::format(
-        "UNSUPPORTED_PROPERTY: this build cannot set colours. The level rebuilds its "
-        "colour state every frame from its colour triggers, so nothing written here "
-        "survives. Channel {} is currently ({}, {}, {}). Tell the user to change it on "
-        "the level's colour page.",
-        channelId, current.red, current.green, current.blue
-    ));
+
+    // Build the channel's setup entry from the shape the level itself uses, with our
+    // three values substituted. `setupFromString` is the game's own parser for this
+    // format, so the result cannot disagree with the game about which key is which.
+    //
+    // The alternative -- writing `m_color` -- cannot work for a structural reason:
+    // `ColorAction` is an **animation** (`step(dt)`, `m_deltaTime`, `m_duration`,
+    // `m_fromColor` -> `m_toColor`), so `m_color` is an interpolated frame result that
+    // `step` recomputes. Writing the output of an animation is why four attempts each
+    // read back correctly and were gone one frame later.
+    auto entry = fmt::format("1_{}_2_{}_3_{}_6_{}_5_0_7_1_15_1_18_0_8_1",
+        clampedByte(red), clampedByte(green), clampedByte(blue), channelId);
+
+    auto const before = describe(action, channelId);
+    TransactionManager::get().recordColorChange(channelId, before.red, before.green, before.blue);
+
+    // The stored entry as it stands *before* the write, for comparison with the one
+    // logged after it. Two readings a request apart looked like a delayed write;
+    // logging both sides of one request says whether the value landed now or at all.
+    auto const entryBefore = savedEntryFor(channelId);
+
+    // The store first -- it is the one whose contents survive and get serialised.
+    if (stored != nullptr) {
+        stored->setupFromString(entry);
+    } else {
+        log::warn("colour channel {}: no stored action; writing live only", channelId);
+    }
+    action->setupFromString(entry);
+
+    // Push the store into the live manager, which is the game's own path for exactly
+    // this (`transferDefaultColors` is what a level load uses). Doing it this way means
+    // the live colour comes from the store rather than being assembed here by hand.
+    if (store != nullptr && editor != nullptr) {
+        editor->transferDefaultColors(store, manager);
+    }
+
+    // Writing the store is only half of it, and the probe proved the two halves are
+    // separate: the `kS38` entry did change (`1_255_2_0_3_0` -> `1_0_2_0_3_0`), while
+    // the next `getColorAction` still reported the old colour. So the durable data
+    // accepts the write and the *live* colour state is built from something else.
+    //
+    // These two calls are the game's own recalculation path -- `calculateBaseActiveColors`
+    // rebuilds the active colours from the stored actions, `processColors` applies them.
+    // Calling them here rather than writing `m_color` is the difference between
+    // refreshing derived state and corrupting it: the value comes from the store either
+    // way, it is just no longer stale.
+    manager->calculateBaseActiveColors();
+    manager->processColors();
+    manager->updateColorAction(action);
+
+    // Re-tint only the objects that use the channel. Not `updateObjectColors`: that
+    // takes a required `CCArray*` and crashes on null.
+    if (auto* editor = LevelEditorLayer::get()) {
+        if (auto* objects = editor->getAllObjects()) {
+            auto const total = static_cast<int>(objects->count());
+            auto retinted = 0;
+            for (int i = 0; i < total; ++i) {
+                auto* object = static_cast<GameObject*>(objects->objectAtIndex(i));
+                if (object == nullptr) {
+                    continue;
+                }
+                auto const usesChannel = [channelId](GJSpriteColor* slot) {
+                    return slot != nullptr && slot->m_colorID == channelId;
+                };
+                if (!usesChannel(object->m_baseColor) && !usesChannel(object->m_detailColor)) {
+                    continue;
+                }
+                editor->manualUpdateObjectColors(object);
+                ++retinted;
+            }
+            log::info("colour channel {}: {} object(s) re-tinted", channelId, retinted);
+        }
+        // Whether the write reached the store, which is the only claim that matters:
+        // the live manager accepted four earlier versions of this and lost them all.
+        auto const entryAfter = savedEntryFor(channelId);
+        log::info(
+            "colour channel {} stored: '{}' -> '{}'",
+            channelId, entryBefore, entryAfter
+        );
+    }
+
+    auto const written = describe(manager->getColorAction(channelId), channelId);
+    log::info(
+        "colour channel {} set to ({}, {}, {}); reads back as ({}, {}, {})",
+        channelId, clampedByte(red), clampedByte(green), clampedByte(blue),
+        written.red, written.green, written.blue
+    );
+    return Ok(written);
 }
 
 matjson::Value colorChannelToJson(ColorChannel const& channel) {
@@ -244,6 +414,31 @@ void runColorProbe() {
             static_cast<void*>(editor->m_groundLayer2)
         );
         (void) background;
+    }
+
+    // 5. The authoritative store: the colour setup string.
+    //
+    // This is the decisive one. `ColorAction` is an *animation* -- it has `step(dt)`,
+    // `m_deltaTime`, `m_duration` and `m_fromColor` -> `m_toColor`, so `m_color` is an
+    // interpolated frame result rather than a stored value. Something must own the
+    // real colour, and `GJEffectManager` has both `getSaveString()` and
+    // `setupFromString()`, which is the shape of a serialised store: parse in, write
+    // out. A level's colours travel in the level string's colour section, so if this
+    // string holds the channel colours, the round trip is the way to write them --
+    // using the game's own parser instead of guessing which field it reads.
+    //
+    // Read-only: it is dumped, not modified.
+    if (auto* manager = effectManager()) {
+        auto const setup = manager->getSaveString();
+        log::info("COLOUR-PROBE | manager getSaveString len={}", setup.size());
+        log::info("COLOUR-PROBE | manager setup='{}'", setup);
+    }
+    if (auto* settings = editor->m_levelSettings) {
+        auto const levelSettings = settings->getSaveString();
+        log::info(
+            "COLOUR-PROBE | levelSettings getSaveString len={}", levelSettings.size()
+        );
+        log::info("COLOUR-PROBE | levelSettings setup='{}'", levelSettings);
     }
 
     log::info("COLOUR-PROBE ===== end =====");

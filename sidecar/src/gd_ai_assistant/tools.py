@@ -390,8 +390,7 @@ def _build() -> dict[str, Tool]:
                     "with the same `color_channel_1` id shows this one colour, so this "
                     "tells you what colour a group of objects is, and which channel to "
                     "name when the user asks for a colour change. Returns `exists: "
-                    "false` when nothing uses the id. **Read-only**: colours cannot be "
-                    "set by this build, so use this to describe and to advise."
+                    "false` when nothing uses the id."
                 ),
                 parameters={
                     "type": "object",
@@ -409,6 +408,34 @@ def _build() -> dict[str, Tool]:
             protocol_type="get_color_channel",
             mutates_objects=False,
             is_action=False,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="set_color_channel",
+                description=(
+                    "Set a colour channel's colour, which is how you recolour things: "
+                    "objects borrow a channel's colour, so changing the channel "
+                    "recolours **every** object using it -- say so when the user meant "
+                    "one object. Channels 1-999 are custom; 1000+ are the system "
+                    "channels (BG, ground, ground line, middleground). Read with "
+                    "get_color_channel first if you need to know what you are "
+                    "overwriting. RGB is 0-255."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["channel", "red", "green", "blue"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "channel": {"type": "integer", "minimum": 1},
+                        "red": {"type": "integer", "minimum": 0, "maximum": 255},
+                        "green": {"type": "integer", "minimum": 0, "maximum": 255},
+                        "blue": {"type": "integer", "minimum": 0, "maximum": 255},
+                    },
+                },
+            ),
+            protocol_type="set_color_channel",
+            mutates_objects=True,
+            is_action=True,
         ),
         Tool(
             spec=ToolSpec(

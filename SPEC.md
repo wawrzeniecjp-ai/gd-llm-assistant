@@ -1091,55 +1091,64 @@ The sidecar still merges a curated seed and an optional user catalog file *over*
 table. The game supplies the ids; the curated entries only add presentation (a friendly
 name, aliases) for ids they name. Neither source guesses about the other.
 
-### 7.5.2 Colour Channels (measured, partial)
+### 7.5.2 Colour Channels (measured, working)
 
 Colour is **level** state, not object state: an object carries a channel id
-(`color_channel_1`/`_2`, save keys 155/156) and the channel holds the colour. So objects
-that share a channel always share a colour, and "recolour this object" means either
+(`color_channel_1`/`_2`, save keys 155/156) and the channel holds the colour. Objects
+sharing a channel always share a colour, so "recolour this object" means either
 changing the channel (affecting every object using it) or repointing the object at a
-different channel.
+different channel. `get_color_channel` and `set_color_channel` do the former.
 
-**Reading works.** `get_color_channel` returns a channel's colour. Two things had to be
-measured to get it right, and both were wrong in the first implementation:
+**System channels are not a separate namespace.** The custom channels are 1-999 and the
+system ones are 1000 and up -- BG 1000, ground 1001, ground line 1002, middleground
+1004+ -- all in the same id space, all settable the same way.
 
-- **`ColorAction::m_color` is the live colour; `m_fromColor` is not.** A probe of a real
-  level found a channel holding `from=(255,255,255)` while `color=(0,18,255)`, with the
-  level drawing the blue. Reporting `m_fromColor` made every channel read as white — and
-  made the user's own colour edits invisible to the model.
-- **`getColorAction(n)` is correctly id-keyed.** Each `ColorAction` carries `m_colorID`,
-  and `getColorAction(1..6)` returned six distinct actions whose `m_colorID` matched. An
-  earlier reading of pointer logs as "the lookup is off by one" was wrong: those pointers
-  straddled a level reload. The action vector holds **1102 slots** (1000 custom + ~102
-  system channels), indexed by channel id, so background / ground / ground line /
-  middleground are addressable in the same space.
+#### Two effect managers, and only one of them is storage
 
-**Writing does not persist, and is refused.** Four implementations were tried: the raw
-`m_fromColor`/`m_toColor`/`m_color` fields; `ColorAction::updateCustomColor`; the
-`ColorActionSprite` copy that objects are actually tinted from; and each of those followed
-by `updateColorAction` and a per-object re-tint. Every one reported the new value back
-immediately, and every one was undone **within one frame**:
+`LevelEditorLayer::m_effectManager` is the **live** one: it drives rendering and is
+rebuilt from the level's own copy every frame. `LevelSettingsObject::m_effectManager` is
+that copy, and it is what `LevelSettingsObject::getSaveString()` serialises into the
+`kS38` section. `LevelEditorLayer::transferDefaultColors(src, dest)` exists precisely
+because there are two: a level load copies between them.
+
+Writing to the live manager therefore cannot work, and four implementations failed the
+same way before this was understood -- each reported the new colour back from the object
+it had just written, and each was undone **within one frame**:
 
 ```text
 set to (0,0,0)  ->  reads back as (0,0,0)
 next frame:     from=(255,255,255) color=(255,0,0)   <- the original
 ```
 
-So `GJEffectManager`'s colour state is **derived**, rebuilt each frame from an
-authoritative store. The store is the **colour trigger objects**, which is why the
-editor's own colour popup (`ColorSelectPopup`) is constructed from both an
-`EffectGameObject` and a `ColorAction`.
+The write path is: build the channel's `kS38` entry, `setupFromString` it into the
+**stored** action, `transferDefaultColors(store, live)` to push it into the live manager,
+then re-tint the objects that use the channel. Re-tinting is per object via
+`manualUpdateObjectColors`; `updateObjectColors` takes a required `CCArray*` and crashes
+on null.
 
-Doing it properly means creating or updating a colour trigger (type 899) targeting the
-channel, inside the turn's transaction so Revert removes it. That adds an object to the
-user's level, so it is a design decision rather than a bug fix — and the trigger's
-save-string keys have to be measured rather than guessed. Until then `set_color_channel`
-is withdrawn and the prompt tells the model to name the channel and send the user to the
-colour page.
+#### `ColorAction` is an animation, not a colour
 
-The failure mode this avoided is worth stating: a tool that returns success and changes
-nothing is worse than one that refuses, because the user then has to verify every claim
-the model makes.
+Its API is the giveaway: `step(float dt)`, `m_deltaTime`, `m_duration`, `m_stepFinished`,
+`m_fromColor` -> `m_toColor`, and `m_paused`. `m_color` is the interpolated **frame
+output**, which `step` recomputes -- which is why writing it was never going to persist,
+and why a `ColorAction` pointer differs between requests: these are transient.
 
+`m_fromColor` is the animation's *start* colour, not the stored one. Reporting it made
+every channel read as white and made the user's own colour edits invisible to the model;
+`m_color` is the field to read.
+
+#### The `kS38` entry format
+
+Measured from `LevelSettingsObject::getSaveString()`:
+
+```text
+kS38,1_<r>_2_<g>_3_<b>_11_<..>_12_<..>_13_<..>_4_<player>_6_<channel>_5_<blend>_7_...|...
+```
+
+So key 1 is red, 2 green, 3 blue, **6 the channel id**, 5 blending, and 4 the player
+colour (1 or 2) an entry copies from -- which is what "custom colour 1/2" in the editor
+refers to, and is not a channel. Entries are `|`-separated, and the section ends at the
+next `,k`.
 ## 7.6 Events (Mod → Sidecar)
 
 | type | Payload | Notes |

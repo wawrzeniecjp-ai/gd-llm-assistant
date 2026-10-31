@@ -842,17 +842,19 @@ def test_the_prompt_lists_exactly_the_settable_properties() -> None:
         assert f"`{name}`" in text, name
 
 
-def test_colour_is_readable_but_not_writable() -> None:
-    """Colour is readable; writing it does not persist, so it is not offered.
+def test_colour_is_read_and_written_through_a_channel() -> None:
+    """Colour is a channel id, and both directions go through the channel.
 
-    Reading was broken for a while in a way worth remembering: the mod reported
-    `ColorAction::m_fromColor`, which is the start of a possible interpolation, while
-    `m_color` is what the level draws. Every channel therefore read as white and a
-    user's own colour edits were invisible to the model.
+    Two things here were wrong in earlier versions and both are worth remembering.
+    Reading reported `ColorAction::m_fromColor`, which is an animation's *start*
+    colour rather than the stored one, so every channel read as white and a user's
+    own colour edits were invisible to the model.
 
-    Writing was measured to be undone within one frame -- GD rebuilds colour state
-    each frame from the level's colour triggers -- so the tool was withdrawn rather
-    than left reporting a success the level does not keep.
+    Writing targeted `GJEffectManager`'s colour state, which is derived: `ColorAction`
+    is an animation (`step(dt)`, `m_duration`, `m_fromColor` -> `m_toColor`), so a
+    written `m_color` is recomputed a frame later. The durable store is the level's
+    `kS38` colour section, which is why the write goes through the game's own setup
+    string format rather than through that state.
     """
     from gd_ai_assistant.agent_prompt import system_prompt
 
@@ -860,13 +862,13 @@ def test_colour_is_readable_but_not_writable() -> None:
     objects = create.spec.parameters["properties"]["objects"]
     settable = objects["items"]["properties"]["properties"]["properties"]
     assert "color_channel_1" in settable
-    # Reading is offered; writing is not, because it does not persist.
-    assert "set_color_channel" not in tools.TOOLS
+    # Both directions of the channel are offered.
+    assert "set_color_channel" in tools.TOOLS
     assert "get_color_channel" in tools.TOOLS
 
     text = system_prompt()
     assert "channel id" in text
-    # The consequence the model has to state out loud: one channel, many objects,
-    # and the user has to make the change.
+    # The two facts the model has to state out loud: one channel drives many
+    # objects, and the system channels share the same id space.
     assert "borrow" in text
-    assert "colour page" in text
+    assert "1000" in text

@@ -66,22 +66,18 @@ Unknown property names are rejected with an error and change nothing. Relative \
 changes (`delta`) are supported for {", ".join(f"`{name}`" for name in tools.DELTA_PROPERTIES)} \
 only; everything else must be set absolutely.
 
-**Colour is indirect, and you cannot change it in this build.** `color_channel_1` and \
+**Colour is indirect: objects borrow a channel's colour.** `color_channel_1` and \
 `color_channel_2` are *channel ids* from the level's colour page, not colours: an object \
 points at a channel and the channel holds the colour, so every object using a channel \
-shows the same colour. The level has 1000 custom channels plus system channels \
-(background, ground, ground line, middleground), and patterns are separate from colours.
+shows the same colour. Channels 1-999 are custom; **1000 and above are the system \
+channels** (background, ground, ground line, middleground) -- patterns are a separate \
+setting you cannot change.
 
-- `get_color_channel` reads a channel, and the object's `color_channel_1` tells you which \
-channel it borrows. Together that is enough to **describe** the level's colours and to \
-name the exact channel a user has to change.
-- There is no working way for you to set a colour. Do not try variations and do not \
-claim success: GD rebuilds its colour state each frame from the level's colour \
-triggers, so the value cannot be written by pointing objects at it.
-- So when asked to recolour: say which channel is involved, that colours live on the \
-level's colour page, and that the change has to be made there. Pointing an object at a \
-*different existing* channel with `modify_objects` is the one exception, and it only \
-works if a suitable channel already has the colour the user wants.
+- `get_color_channel` reads a channel; the object's `color_channel_1` says which channel \
+it borrows. Together, that is how you describe the level's colours.
+- `set_color_channel` sets a channel's colour with `red`/`green`/`blue` (0-255). It \
+changes **every** object using that channel, so say so when the user meant one object. \
+The alternative is pointing the object at a different channel with `modify_objects`.
 - `color_channel_2` is the detail colour and only exists on some object types.
 
 **Scaling.** `scale_x`/`scale_y` resize an object and are the way to make something \
