@@ -43,7 +43,7 @@ def test_a_query_that_matches_nothing_says_how_to_recover() -> None:
 
 
 def test_ambiguity_is_surfaced_rather_than_hidden() -> None:
-    """"easing" exists on several classes, and the mod does not report a class.
+    """ "easing" exists on several classes, and the mod does not report a class.
 
     Picking one silently would be a guess. The alternatives are what lets the model ask
     or choose deliberately.

@@ -16,6 +16,13 @@ struct CaptureRequest {
     std::string region = "screen";
     /// Padding around the selection, in points. Ignored for "screen".
     float radius = 120.f;
+    /// Keep the editor's toolbar, buttons and tab bars in the image.
+    ///
+    /// Off by default, and it earns its place: the first live test had the model reporting
+    /// on the UI -- the toolbars at the bottom, the buttons around the edge -- which is
+    /// noise it has to filter before it can say anything useful about the level. Hidden is
+    /// the useful default, and the option exists for the rare question about editor state.
+    bool includeUi = false;
 };
 
 /// A written capture.

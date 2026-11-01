@@ -16,34 +16,57 @@ using namespace geode::prelude;
 namespace gdai::editor {
 namespace {
 
-/// Restores the chat panel's visibility however the capture ends.
+/// Hides the interface for the duration of a render, however the capture ends.
 ///
-/// The panel is hidden for the render because a screenshot the model uses to judge the
-/// level must not have the assistant's own window across it. A guard rather than a pair of
-/// calls: the render has several early returns, and leaving the panel hidden would be a
-/// confusing bug to diagnose from a screenshot that never appears.
-class PanelHider {
+/// Two things are removed, and for the same reason: a screenshot the model uses to judge
+/// the level must show the level.
+///
+///  - The chat panel, always. It is the assistant's own window and it sits over the view.
+///  - The editor's chrome -- toolbars, buttons, tab bars -- unless the caller asks for it.
+///    Measured from the first live test: the model could see the UI and reported on it,
+///    which is noise it has to filter before it can say anything about the level. Hiding
+///    the whole `EditorUI` is exact, unlike cropping to a guessed inset, and the panel is
+///    its child so one flag covers both.
+///
+/// A guard rather than a pair of calls: the render has several early returns, and leaving
+/// the interface hidden would be a confusing bug to diagnose from a screenshot that never
+/// appears.
+class SceneCleaner {
 public:
-    PanelHider() {
+    explicit SceneCleaner(bool hideEditorUi) {
         if (auto* panel = ui::ChatPanel::attached()) {
             m_panel = panel;
-            m_wasVisible = panel->isVisible();
+            m_panelWasVisible = panel->isVisible();
             panel->setVisible(false);
         }
-    }
 
-    ~PanelHider() {
-        if (m_panel != nullptr) {
-            m_panel->setVisible(m_wasVisible);
+        if (hideEditorUi) {
+            auto* editor = LevelEditorLayer::get();
+            if (editor != nullptr && editor->m_editorUI != nullptr) {
+                m_ui = editor->m_editorUI;
+                m_uiWasVisible = m_ui->isVisible();
+                m_ui->setVisible(false);
+            }
         }
     }
 
-    PanelHider(PanelHider const&) = delete;
-    PanelHider& operator=(PanelHider const&) = delete;
+    ~SceneCleaner() {
+        if (m_ui != nullptr) {
+            m_ui->setVisible(m_uiWasVisible);
+        }
+        if (m_panel != nullptr) {
+            m_panel->setVisible(m_panelWasVisible);
+        }
+    }
+
+    SceneCleaner(SceneCleaner const&) = delete;
+    SceneCleaner& operator=(SceneCleaner const&) = delete;
 
 private:
     ui::ChatPanel* m_panel = nullptr;
-    bool m_wasVisible = true;
+    bool m_panelWasVisible = true;
+    cocos2d::CCNode* m_ui = nullptr;
+    bool m_uiWasVisible = true;
 };
 
 } // namespace
@@ -161,8 +184,9 @@ geode::Result<Capture> captureEditor(CaptureRequest const& request) {
     auto const width = std::max(8, static_cast<int>(region.size.width));
     auto const height = std::max(8, static_cast<int>(region.size.height));
 
-    PanelHider hidePanel;
-
+    // The interface goes away for the render; `includeUi` puts it back when a caller
+    // genuinely wants to see the editor's own state rather than the level.
+    SceneCleaner clean(request.includeUi);
     // 1. The whole view, at window size.
     auto* full = cocos2d::CCRenderTexture::create(
         static_cast<int>(winSize.width), static_cast<int>(winSize.height)

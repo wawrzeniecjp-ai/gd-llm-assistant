@@ -273,6 +273,9 @@ def _build() -> dict[str, Tool]:
                     "`radius` points. `selection` is the one to use for detail: it is a "
                     "smaller crop, so it arrives at higher effective resolution. The chat "
                     "panel is hidden for the capture, so you see the level, not yourself. "
+                    "The editor's own toolbars and buttons are hidden too, so what you get "
+                    "is the level and nothing else; pass `include_ui: true` only if the "
+                    "question is specifically about the editor's interface. "
                     "Use it when a question is visual: 'does this look right', 'is anything "
                     "floating', 'is there a gap'."
                 ),
@@ -295,14 +298,75 @@ def _build() -> dict[str, Tool]:
                             "maximum": 2000,
                             "default": 120,
                             "description": (
-                                "Padding around the selection, in points. Ignored for "
-                                "'screen'."
+                                "Padding around the selection, in points. Ignored for 'screen'."
+                            ),
+                        },
+                        "include_ui": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Also capture the editor's toolbars and buttons. Off by "
+                                "default, because they take up a large part of the frame "
+                                "and invite you to describe them instead of the level."
                             ),
                         },
                     },
                 },
             ),
             protocol_type="capture_screenshot",
+            mutates_objects=False,
+            is_action=True,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="get_camera",
+                description=(
+                    "Where the editor is currently looking: `x` and `y` are level "
+                    "coordinates of the centre of the view, `zoom` is the magnification. "
+                    "Worth calling before a screenshot when you want to know which part of "
+                    "the level you are about to be shown."
+                ),
+                parameters={"type": "object", "additionalProperties": False, "properties": {}},
+            ),
+            protocol_type="get_camera",
+            mutates_objects=False,
+            is_action=False,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="set_camera",
+                description=(
+                    "Move or zoom the editor view. `x`/`y` are the level coordinates to "
+                    "centre on -- the same coordinates objects have, so the ground is "
+                    "around y=0 and most building happens between y=-30 and y=300. `zoom` "
+                    "magnifies (1 is normal, 2 is twice as close); it is clamped to "
+                    "0.05..4 rather than refused. Pass only the parts you are changing. "
+                    "This moves the user's screen: say where you are moving it before or "
+                    "while you do, and put it back when you are done looking. Pair it with "
+                    "`capture_screenshot` -- pan somewhere, then look at it."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "minProperties": 1,
+                    "properties": {
+                        "x": {
+                            "type": "number",
+                            "description": "Level x to centre on.",
+                        },
+                        "y": {
+                            "type": "number",
+                            "description": "Level y to centre on.",
+                        },
+                        "zoom": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "description": "Magnification; 1 is the default view.",
+                        },
+                    },
+                },
+            ),
+            protocol_type="set_camera",
             mutates_objects=False,
             is_action=True,
         ),

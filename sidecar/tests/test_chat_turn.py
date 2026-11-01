@@ -213,13 +213,9 @@ async def test_a_revert_event_tells_the_next_turn_its_work_is_gone(tmp_path) -> 
         await do_handshake(websocket, sidecar.token)
 
         await websocket.send(
-            json.dumps(
-                {"type": "transaction_reverted", "id": None, "payload": {"txn_id": "x-1"}}
-            )
+            json.dumps({"type": "transaction_reverted", "id": None, "payload": {"txn_id": "x-1"}})
         )
-        await websocket.send(
-            json.dumps({"type": "not_a_request", "id": "barrier", "payload": {}})
-        )
+        await websocket.send(json.dumps({"type": "not_a_request", "id": "barrier", "payload": {}}))
         while True:
             frame = decode(await asyncio.wait_for(websocket.recv(), timeout=5))
             if frame.get("id") == "barrier":

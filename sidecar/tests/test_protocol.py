@@ -72,6 +72,9 @@ def test_registry_covers_every_message_in_the_spec() -> None:
         "set_level_settings",
         # a rendered view of the editor, written to a file for the sidecar to read
         "capture_screenshot",
+        # where the editor is looking, and how to move it
+        "get_camera",
+        "set_camera",
         # events, mod -> sidecar
         "editor_closed",
         "level_changed",

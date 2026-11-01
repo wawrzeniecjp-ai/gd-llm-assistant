@@ -150,9 +150,7 @@ class ScriptedProvider(Provider):
         # `ground_y` from the `get_editor_state` result, which does not exist yet
         # when the plan is first consulted. Precomputing the whole plan silently
         # used the fallback ground height and buried the row under the ground.
-        turn = default_turn(
-            _last_user_text(messages), self._phase, _ground_y_from(messages)
-        )
+        turn = default_turn(_last_user_text(messages), self._phase, _ground_y_from(messages))
         if turn is None:
             self._phase_done = True
             return self._final_turn(
@@ -175,9 +173,7 @@ class ScriptedProvider(Provider):
         )
 
 
-def default_turn(
-    user_text: str, phase: int, ground_y: float | None = None
-) -> AssistantTurn | None:
+def default_turn(user_text: str, phase: int, ground_y: float | None = None) -> AssistantTurn | None:
     """The demo turn for `phase`, or None when the turn is over.
 
     Phases rather than a precomputed list because the create step depends on what

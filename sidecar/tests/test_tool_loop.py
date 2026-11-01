@@ -331,7 +331,6 @@ async def test_a_thin_spike_is_found_by_size_when_no_name_matches() -> None:
     assert "grid_size" in result["note"]
 
 
-
 async def test_an_unknown_tool_is_reported_to_the_model_not_raised() -> None:
     """A hallucinated tool name is recoverable; killing the turn is not."""
     link = FakeLink()

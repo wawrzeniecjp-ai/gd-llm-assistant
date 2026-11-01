@@ -45,8 +45,7 @@ def test_the_table_agrees_with_keys_measured_in_the_editor() -> None:
     }
     for key, expected in measured.items():
         assert table.name_for_key(key) == expected, (
-            f"key {key} should mean {expected!r} but the table says "
-            f"{table.name_for_key(key)!r}"
+            f"key {key} should mean {expected!r} but the table says {table.name_for_key(key)!r}"
         )
 
 

@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iterator>
 
+#include "../editor/camera.hpp"
 #include "../editor/color_channel.hpp"
 #include "../editor/editor_state.hpp"
 #include "../editor/level_settings.hpp"
@@ -775,6 +776,11 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
         if (payload.contains("radius")) {
             request.radius = static_cast<float>(payload["radius"].asDouble().unwrapOr(120.0));
         }
+        // Opt-in, so the interface is hidden unless a caller asks for it: the first live
+        // test had the model reporting on the toolbars and buttons instead of the level.
+        if (payload.contains("include_ui")) {
+            request.includeUi = payload["include_ui"].asBool().unwrapOr(false);
+        }
 
         auto captured = co_await async::waitForMainThread<geode::Result<editor::Capture>>(
             [request] { return editor::captureEditor(request); }
@@ -844,6 +850,72 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
         // Said plainly: settings are not object edits, so the turn's Revert will not undo
         // them. A user who assumes otherwise would be surprised later.
         result["revertible"] = false;
+        co_return co_await sendResult(socket, requestId, std::move(result));
+    }
+
+    if (type == "get_camera" || type == "set_camera") {
+        // The editor camera, so the model can look somewhere other than whatever happens
+        // to be on screen. A main-thread hop: both paths touch the scene graph, and
+        // moving the camera is renderer state.
+        if (type == "get_camera") {
+            auto current = co_await async::waitForMainThread<geode::Result<editor::Camera>>(
+                [] { return editor::readCamera(); }
+            );
+            if (!current) {
+                co_return co_await sendError(
+                    socket, requestId, "THREAD_DISPATCH_FAILED",
+                    "could not schedule work on the main thread"
+                );
+            }
+            if (!current->ok()) {
+                auto const [code, message] = splitCode(current->unwrapErr());
+                co_return co_await sendError(socket, requestId, code, message);
+            }
+            auto result = matjson::Value::object();
+            result["camera"] = editor::cameraToJson(current->unwrap());
+            co_return co_await sendResult(socket, requestId, std::move(result));
+        }
+
+        auto const readOptional = [&payload](char const* key) -> std::optional<double> {
+            if (!payload.contains(key)) {
+                return std::nullopt;
+            }
+            auto value = payload[key].asDouble();
+            if (!value.ok()) {
+                return std::nullopt;
+            }
+            return value.unwrap();
+        };
+
+        auto const x = readOptional("x");
+        auto const y = readOptional("y");
+        auto const zoomValue = readOptional("zoom");
+        auto const zoom = zoomValue.has_value()
+            ? std::optional<float>(static_cast<float>(*zoomValue))
+            : std::nullopt;
+
+        if (!x.has_value() && !y.has_value() && !zoom.has_value()) {
+            co_return co_await sendError(
+                socket, requestId, "INVALID_REQUEST",
+                "give at least one of 'x', 'y' or 'zoom'"
+            );
+        }
+
+        auto moved = co_await async::waitForMainThread<geode::Result<editor::Camera>>(
+            [x, y, zoom] { return editor::writeCamera(x, y, zoom); }
+        );
+        if (!moved) {
+            co_return co_await sendError(
+                socket, requestId, "THREAD_DISPATCH_FAILED",
+                "could not schedule work on the main thread"
+            );
+        }
+        if (!moved->ok()) {
+            auto const [code, message] = splitCode(moved->unwrapErr());
+            co_return co_await sendError(socket, requestId, code, message);
+        }
+        auto result = matjson::Value::object();
+        result["camera"] = editor::cameraToJson(moved->unwrap());
         co_return co_await sendResult(socket, requestId, std::move(result));
     }
 

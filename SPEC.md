@@ -1352,6 +1352,7 @@ capture costs a vision-capable call, and no turn needs a picture by default.
 | --- | --- |
 | `region: "screen"` | The whole editor view. |
 | `region: "selection"` | A box around the selected objects, padded by `radius` points (default 120). |
+| `include_ui: true` | Also capture the editor's chrome. Off by default. |
 
 The region is what makes this useful rather than merely possible: a 512x320 view of a
 detailed level is mostly noise at any resolution a model can take in, while a box around
@@ -1388,7 +1389,53 @@ outcome this feature exists to prevent. So the tool result says "you have NOT se
 level", and `capture.py` refuses files that are missing, oversized (a request error, not
 a detailed level) or implausibly small (a blank PNG) rather than sending anything at all.
 
+#### The chrome is hidden, not cropped
+
+The chat panel is always hidden for a capture, and from 0.14.0 so is `EditorUI` itself
+unless `include_ui` is set. Hiding a node and rendering the scene is exact; cropping a
+guessed inset is not, and the first live test had the model reporting on toolbars instead
+of the level. `EditorUI` is the parent of the panel, so one flag hides the whole
+interface -- there is no separate panel flag to keep in sync.
+
+### 7.5.7 Looking Around (`get_camera`, `set_camera`)
+
+A capture shows whatever the view happens to show, which is not necessarily what the
+model needs to see. Two requests move it:
+
+| Request | Payload | Result |
+| --- | --- | --- |
+| `get_camera` | `{}` | `{ camera: { x, y, zoom } }` |
+| `set_camera` | any of `x`, `y`, `zoom` | `{ camera: { x, y, zoom } }` |
+
+`x`/`y` are **level** coordinates of the centre of the view, the same space objects live
+in, so they can be taken straight from `query_objects` results. `zoom` is clamped to
+0.05..4 rather than refused: it is a view setting with an obvious "as far as it goes"
+reading, the opposite of a property write, where clamping would silently do something
+other than what was asked.
+
+#### Reading position off the layer's transform
+
+There is no `getCameraPosition`. The editor scrolls by moving `LevelEditorLayer`'s object
+layer, so converting the screen centre into that layer's node space answers "which level
+point is the middle of my screen showing" directly -- and stays correct at any zoom,
+whereas the obvious "negate the position and add half a window" only holds at 1x, because
+zoom scales the layer as well as moving it.
+
+#### Panning uses the editor's own primitive
+
+`EditorUI::centerCameraOnPoint` is the natural call and is **uncallable**: the bindings
+mark it `TodoReturn` (an incomplete return type with a private destructor), because the
+real signature is `void` and PIE had nothing to infer from. `moveGamelayer(CCPoint)`,
+`constrainGameLayerPosition()` and `updateZoom(float, CCPoint)` are all bound as `void`
+and are what the editor's own drag and zoom handlers use, so panning is a world-space
+delta to `moveGamelayer` -- measured in screen points, since at 4x the level travels four
+times as far per point -- followed by a constrain to the level bounds.
+
+The result is **measured again after the write**, not echoed: a clamped zoom or a pan
+stopped by the level edge then shows up in what the caller sees.
+
 ## 7.6 Events (Mod → Sidecar)
+
 
 | type | Payload | Notes |
 | --- | --- | --- |

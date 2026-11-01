@@ -38,6 +38,18 @@
             "additionalProperties": false
         },
 
+        "Camera": {
+            "type": "object",
+            "description": "Where the editor is looking. x and y are level coordinates of the centre of the view, not screen coordinates.",
+            "required": ["x", "y", "zoom"],
+            "properties": {
+                "x": { "type": "number" },
+                "y": { "type": "number" },
+                "zoom": { "type": "number", "exclusiveMinimum": 0 }
+            },
+            "additionalProperties": false
+        },
+
         "MissingIds": {
             "type": "array",
             "description": "Unique IDs that no longer resolve. Reported, not fatal, unless none were found (then OBJECT_NOT_FOUND).",
@@ -394,6 +406,11 @@
                     "minimum": 0,
                     "maximum": 2000,
                     "description": "Padding around the selection, in points. Ignored for 'screen'."
+                },
+                "include_ui": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Show the editor's chrome (toolbars, buttons, grid controls) in the capture. Off by default: the first live test had the model describing toolbars instead of the level, and the chat panel is always hidden either way."
                 }
             },
             "additionalProperties": false
@@ -422,6 +439,48 @@
                     },
                     "additionalProperties": false
                 }
+            },
+            "additionalProperties": false
+        },
+        "getCameraPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "maxProperties": 0,
+            "additionalProperties": false
+        },
+        "setCameraPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "description": "Where the editor view should look. Every field is optional; the ones given are applied together. This moves the user's screen, not the level.",
+            "minProperties": 1,
+            "properties": {
+                "x": {
+                    "type": "number",
+                    "minimum": -200000,
+                    "maximum": 200000,
+                    "description": "Level x of the point to centre on."
+                },
+                "y": {
+                    "type": "number",
+                    "minimum": -200000,
+                    "maximum": 200000,
+                    "description": "Level y of the point to centre on. The ground is around 0 and most building happens between -30 and 300."
+                },
+                "zoom": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "description": "Magnification; 1 is the default view. Clamped to 0.05..4 rather than refused - zoom is a view setting with an obvious 'as far as it goes' reading."
+                }
+            },
+            "additionalProperties": false
+        },
+        "cameraResult": {
+            "x-direction": "m2s",
+            "type": "object",
+            "description": "The view as it stands after the operation, measured rather than echoed, so a clamped zoom or a pan stopped by the level edge shows up here.",
+            "required": ["camera"],
+            "properties": {
+                "camera": { "$ref": "#/$defs/Camera" }
             },
             "additionalProperties": false
         },

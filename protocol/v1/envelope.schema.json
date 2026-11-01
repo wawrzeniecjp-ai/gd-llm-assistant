@@ -269,6 +269,26 @@
                     "required": ["direction", "payload", "result"],
                     "additionalProperties": false
                 },
+                "get_camera": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/getCameraPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/cameraResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "set_camera": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/setCameraPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/cameraResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
                 "get_level_settings": {
                     "type": "object",
                     "properties": {
