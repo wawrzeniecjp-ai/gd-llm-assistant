@@ -67,6 +67,9 @@ def test_registry_covers_every_message_in_the_spec() -> None:
         # save-string properties: the escape hatch for everything the mod has no name for
         "get_save_properties",
         "set_save_property",
+        # level-wide settings: patterns, gamemode, flags
+        "get_level_settings",
+        "set_level_settings",
         # events, mod -> sidecar
         "editor_closed",
         "level_changed",

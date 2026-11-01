@@ -380,6 +380,73 @@
             "additionalProperties": false
         },
 
+        "getLevelSettingsPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "maxProperties": 0,
+            "additionalProperties": false
+        },
+        "setLevelSettingsPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "description": "Level-wide settings. Every field is optional; the ones given are applied together, and unknown keys are refused rather than ignored.",
+            "minProperties": 1,
+            "properties": {
+                "background": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "ground": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "ground_line": { "type": "integer", "minimum": 0, "maximum": 50 },
+                "middle_ground": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "start_mode": { "type": "integer", "minimum": 0, "maximum": 12 },
+                "start_mini": { "type": "boolean" },
+                "start_dual": { "type": "boolean" },
+                "two_player": { "type": "boolean" },
+                "platformer": { "type": "boolean" },
+                "reverse": { "type": "boolean" },
+                "rotate_gameplay": { "type": "boolean" },
+                "mirror": { "type": "boolean" },
+                "song_offset": { "type": "number" },
+                "audio_track": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000,
+                    "description": "Index into the normal song catalogue. Refused when the level uses a custom catalogue."
+                }
+            },
+            "additionalProperties": false
+        },
+        "levelSettingsResult": {
+            "x-direction": "m2s",
+            "type": "object",
+            "description": "The settings as they stand after the operation.",
+            "required": ["settings"],
+            "properties": {
+                "settings": { "$ref": "#/$defs/LevelSettings" },
+                "revertible": {
+                    "type": "boolean",
+                    "description": "False for a write: settings are level state, not object edits, so a turn Revert does not undo them."
+                }
+            },
+            "additionalProperties": false
+        },
+        "LevelSettings": {
+            "type": "object",
+            "properties": {
+                "background": { "type": "integer" },
+                "ground": { "type": "integer" },
+                "ground_line": { "type": "integer" },
+                "middle_ground": { "type": "integer" },
+                "start_mode": { "type": "integer" },
+                "start_mini": { "type": "boolean" },
+                "start_dual": { "type": "boolean" },
+                "two_player": { "type": "boolean" },
+                "platformer": { "type": "boolean" },
+                "reverse": { "type": "boolean" },
+                "rotate_gameplay": { "type": "boolean" },
+                "mirror": { "type": "boolean" },
+                "song_offset": { "type": "number" }
+            },
+            "additionalProperties": false
+        },
         "getSavePropertiesPayload": {
             "x-direction": "s2m",
             "type": "object",

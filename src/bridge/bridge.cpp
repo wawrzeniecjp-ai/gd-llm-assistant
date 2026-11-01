@@ -16,6 +16,7 @@
 
 #include "../editor/color_channel.hpp"
 #include "../editor/editor_state.hpp"
+#include "../editor/level_settings.hpp"
 #include "../editor/object_catalog.hpp"
 #include "../editor/transaction.hpp"
 #include "../exec/editor_jobs.hpp"
@@ -755,6 +756,61 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
             co_return co_await sendError(socket, requestId, code, message);
         }
         co_return co_await sendResult(socket, requestId, editor::colorChannelToJson(outcome->unwrap()));
+    }
+
+    if (type == "get_level_settings" || type == "set_level_settings") {
+        // Level settings live on one object and the game applies them together, so they are
+        // a single request rather than one per field (SPEC.md 7.5.5). A main-thread hop
+        // like the colour requests: `levelSettingsUpdated` recreates the background and
+        // ground layers, which is renderer state.
+        // Parsing happens only for a write. A read has an empty payload by definition, and
+        // parsing it first made `get_level_settings` fail with "no settings given" -- the
+        // parser's own rule, applied to a request that never had any settings to give.
+        if (type == "get_level_settings") {
+            auto current = co_await async::waitForMainThread<geode::Result<editor::LevelSettings>>(
+                [] { return editor::readLevelSettings(); }
+            );
+            if (!current) {
+                co_return co_await sendError(
+                    socket, requestId, "THREAD_DISPATCH_FAILED",
+                    "could not schedule work on the main thread"
+                );
+            }
+            if (!current->ok()) {
+                auto const [code, message] = splitCode(current->unwrapErr());
+                co_return co_await sendError(socket, requestId, code, message);
+            }
+            auto result = matjson::Value::object();
+            result["settings"] = editor::levelSettingsToJson(current->unwrap());
+            co_return co_await sendResult(socket, requestId, std::move(result));
+        }
+
+        auto parsed = editor::parseLevelSettings(payload);
+        if (!parsed) {
+            auto const [code, message] = splitCode(parsed.unwrapErr());
+            co_return co_await sendError(socket, requestId, code, message);
+        }
+
+        auto const wanted = parsed.unwrap();
+        auto applied = co_await async::waitForMainThread<geode::Result<editor::LevelSettings>>(
+            [wanted] { return editor::writeLevelSettings(wanted); }
+        );
+        if (!applied) {
+            co_return co_await sendError(
+                socket, requestId, "THREAD_DISPATCH_FAILED",
+                "could not schedule work on the main thread"
+            );
+        }
+        if (!applied->ok()) {
+            auto const [code, message] = splitCode(applied->unwrapErr());
+            co_return co_await sendError(socket, requestId, code, message);
+        }
+        auto result = matjson::Value::object();
+        result["settings"] = editor::levelSettingsToJson(applied->unwrap());
+        // Said plainly: settings are not object edits, so the turn's Revert will not undo
+        // them. A user who assumes otherwise would be surprised later.
+        result["revertible"] = false;
+        co_return co_await sendResult(socket, requestId, std::move(result));
     }
 
     if (exec::isImplementedRequest(type)) {

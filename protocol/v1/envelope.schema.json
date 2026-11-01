@@ -259,6 +259,26 @@
                     "required": ["direction", "payload", "result"],
                     "additionalProperties": false
                 },
+                "get_level_settings": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/getLevelSettingsPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/levelSettingsResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "set_level_settings": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/setLevelSettingsPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/levelSettingsResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
                 "get_save_properties": {
                     "type": "object",
                     "properties": {

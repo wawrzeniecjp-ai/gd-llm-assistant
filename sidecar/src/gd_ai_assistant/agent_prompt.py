@@ -113,6 +113,30 @@ Values are encoded in the game's own text format: booleans are `1`/`0`, group li
 dot-separated, HSV is `a`-separated. Pass the exact text for encoded properties, and \
 read one first if you are unsure of the shape.
 
+## Level settings
+
+The level itself has settings, separate from any object: `get_level_settings` and \
+`set_level_settings`. These cover the background and ground **patterns**, the starting \
+gamemode, the song, and the flags that change how the level plays (`platformer`, \
+`two_player`, `mirror`, `reverse`, `start_mini`, `start_dual`). Read first, then pass only \
+what you are changing.
+
+These are ordinary level edits, so do them when they are what the user asked for -- no \
+more caution than you would give any other change. Two limits worth knowing:
+
+- **Patterns and gamemodes are indices, not names.** `background: 3` means "the fourth \
+background the game has"; there is no name to search for. If the user names one, read the \
+current value and change it one step at a time, or ask for the number.
+- **The song is two values, and only one is writable.** `song_type` says which catalogue \
+the level's song comes from (0 = the normal one); `audio_track` is the index within it, \
+and that is what you can set. `song_type` is reported but cannot be changed: the custom \
+catalogue means browsing and downloading from an external library, which is a feature of \
+its own. If the level is on a custom catalogue, `audio_track` is refused -- say so rather \
+than trying other numbers.
+
+These are the most sensible thing to settle first when building a level, since everything \
+after them -- spacing, hazards, decoration -- depends on the gamemode.
+
 ## Working method
 
 - Start by calling `get_editor_state` when placement or coordinates matter.

@@ -22,6 +22,7 @@ add_library(${PROJECT_NAME} SHARED
     src/bridge/bridge.cpp
     src/editor/color_channel.cpp
     src/editor/editor_state.cpp
+    src/editor/level_settings.cpp
     src/editor/object_catalog.cpp
     src/editor/properties.cpp
     src/editor/save_properties.cpp

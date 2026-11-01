@@ -264,6 +264,69 @@ def _build() -> dict[str, Tool]:
         ),
         Tool(
             spec=ToolSpec(
+                name="get_level_settings",
+                description=(
+                    "Read the level's own settings: background/ground/middleground "
+                    "patterns, starting gamemode, the song, and the flags that change how "
+                    "the level plays. Call this before changing any of them, so you know "
+                    "what you are overwriting."
+                ),
+                parameters={"type": "object", "additionalProperties": False, "properties": {}},
+            ),
+            protocol_type="get_level_settings",
+            mutates_objects=False,
+            is_action=False,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="set_level_settings",
+                description=(
+                    "Change the level's own settings. Pass only the fields you are "
+                    "changing; the rest keep their values. Covers bg/ground patterns, "
+                    "`start_mode` (0=cube, 1=ship, 2=ball, 3=ufo, 4=wave, 5=robot, "
+                    "6=spider, 7=swing, 8=jetpack), `audio_track` (index into the "
+                    "normal song catalogue), `song_offset`, and `platformer`, "
+                    "`two_player`, `mirror`, `reverse`, `start_mini`, `start_dual`. "
+                    "The song catalogue itself cannot be changed."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "minProperties": 1,
+                    "properties": {
+                        "background": {"type": "integer", "minimum": 0, "maximum": 100},
+                        "ground": {"type": "integer", "minimum": 0, "maximum": 100},
+                        "ground_line": {"type": "integer", "minimum": 0, "maximum": 50},
+                        "middle_ground": {"type": "integer", "minimum": 0, "maximum": 100},
+                        "start_mode": {"type": "integer", "minimum": 0, "maximum": 12},
+                        "start_mini": {"type": "boolean"},
+                        "start_dual": {"type": "boolean"},
+                        "two_player": {"type": "boolean"},
+                        "platformer": {"type": "boolean"},
+                        "reverse": {"type": "boolean"},
+                        "rotate_gameplay": {"type": "boolean"},
+                        "mirror": {"type": "boolean"},
+                        "song_offset": {
+                            "type": "number",
+                            "description": "Seconds between the level start and the song.",
+                        },
+                        "audio_track": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": (
+                                "Index into the normal song catalogue. Refused if the "
+                                "level uses a custom catalogue."
+                            ),
+                        },
+                    },
+                },
+            ),
+            protocol_type="set_level_settings",
+            mutates_objects=False,
+            is_action=True,
+        ),
+        Tool(
+            spec=ToolSpec(
                 name="get_save_properties",
                 description=(
                     "Read **every** property of one object, named where the game's "

@@ -1230,6 +1230,61 @@ trip, and no engine needed.
 are writable, so the prompt tells the model to look a key up, report what it is, and
 say the setting has to be changed by hand rather than claim a change it cannot make.
 
+### 7.5.5 Level Settings (one request)
+
+Level-wide settings live on one `LevelSettingsObject`, the game applies them together,
+and nobody changes them often -- so they are **one request with every field optional**
+rather than one request per field. `get_level_settings` and `set_level_settings`.
+
+| Field | Notes |
+| --- | --- |
+| `background`, `ground`, `ground_line`, `middle_ground` | Pattern indices, not names. |
+| `start_mode` | Gamemode the level starts in. |
+| `start_mini`, `start_dual`, `two_player` | |
+| `platformer`, `reverse`, `rotate_gameplay`, `mirror` | |
+| `song_offset` | Seconds between the level start and the song. |
+| `song_type` | **Read-only.** Which catalogue the song comes from. |
+| `audio_track` | Writable only on the normal catalogue. |
+| `song_name` | Read-only, when the game can resolve it. |
+
+#### Applying a change is the game's job
+
+`LevelEditorLayer` implements `LevelSettingsDelegate`, and `levelSettingsUpdated()` is
+what the editor's own settings popup calls when it closes. Writing the fields and then
+calling that one virtual re-creates the background, ground, ground line and middleground
+and re-applies the colours. Recreating them here instead would mean reproducing node
+positions, scales and draw order the game already gets right -- which is the same
+lesson as the colour work: prefer the game's own path over poking its state.
+
+#### The song is two values, and the names mislead
+
+`GJGameLevel::m_songID` is **not** a Newgrounds id. It is the catalogue, matching
+`SongSelectType` (`Default = 0`, `Custom = 1`, `Default2 = 2`), and `m_audioTrack` is
+the index into that catalogue. The first implementation assumed a Newgrounds id from the
+field name and was wrong about both. Neither field carries a `// property` annotation,
+so the generated table could not settle it either -- it was measured live.
+
+The custom catalogue means browsing, searching and downloading from an external library.
+That is a feature of its own, and it fails silently on a bad id, so `song_type` is
+**refused** on write and `audio_track` is refused when the level is on a custom
+catalogue -- an index into a catalogue with no fixed ordering would appear to succeed
+and change nothing audible.
+
+#### Two rules worth keeping
+
+- **Validate before writing.** A request with one bad field changes nothing at all,
+  rather than half-applying and reporting failure.
+- **Refuse unknown keys.** Ignoring one reports success for work not done, which is the
+  failure mode this project keeps having to design against. `song_type` gets a named
+  refusal rather than a generic one, because it appears in the *result* and assuming it
+  is therefore writable is a natural mistake.
+
+Settings are level state, not object state, so a write is not recorded in the turn's
+transaction and Revert does not undo it. The result says `revertible: false`, and the
+prompt tells the model to mention it -- briefly. An earlier version warned about it at
+every opportunity, which made the model refuse to change settings the user had asked
+for; settings are ordinary edits and deserve no more caution than the rest.
+
 ## 7.6 Events (Mod → Sidecar)
 
 | type | Payload | Notes |
