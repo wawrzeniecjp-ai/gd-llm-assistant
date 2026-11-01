@@ -27,8 +27,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from . import capture, properties_table, save_properties, tools
 from . import catalog as catalog_module
-from . import properties_table, save_properties, tools
 from .agent_prompt import system_prompt
 from .providers.base import (
     AssistantTurn,
@@ -262,6 +262,10 @@ class ToolLoop:
         # only follows one that was reported.
         self._renamed_ids: dict[int, int] = {}
 
+        # Images produced by captures during this turn. Attached to the next model call and
+        # then dropped -- see `_with_pending_images` for why they are drained, not kept.
+        self._pending_images: list[str] = []
+
     # -- public entry point ---------------------------------------------
 
     async def run(self, *, turn_id: str, message_id: str, user_text: str) -> TurnResult:
@@ -437,7 +441,9 @@ class ToolLoop:
         while True:
             try:
                 return await self._provider.complete(
-                    system=system_prompt(), messages=messages, tools=tools.tool_specs()
+                    system=system_prompt(),
+                    messages=self._with_pending_images(messages),
+                    tools=tools.tool_specs(),
                 )
             except ProviderError as exc:
                 attempt += 1
@@ -459,6 +465,40 @@ class ToolLoop:
 
     # -- tool execution --------------------------------------------------
 
+    async def _attach_capture(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Queue a captured screenshot as an image on the next model call.
+
+        The image cannot ride in the tool result. Providers accept images in **user**
+        messages and reject them in system/assistant ones, and a tool result has a role of
+        its own that the documentation does not cover -- so the picture is appended as its
+        own user message instead, with a line saying what it shows. That keeps the request
+        inside the documented contract rather than depending on how a tool role happens to
+        be treated.
+
+        `pending` is drained by `_complete`, so every image produced during a turn is
+        attached to the next call and then dropped. Dropping matters: history keeps only
+        user and assistant *text*, and a stale screenshot would be a picture of a level
+        state that no longer exists -- the same trap as a stale tool result.
+        """
+        described = capture.describe_capture(result)
+        path = result.get("path")
+        url, extra = capture.load_capture(path if isinstance(path, str) else "")
+        described.update(extra)
+
+        if url is None:
+            # Said, not swallowed: a model that is not told the capture failed will describe
+            # a level it never saw.
+            log.warning("capture failed: %s", described.get("error"))
+            described["note"] = (
+                "The capture failed, so you have NOT seen the level. Do not describe it. "
+                "Tell the user the screenshot did not work."
+            )
+            return described
+
+        self._pending_images.append(url)
+        described["note"] = "The image is attached to your next message."
+        return described
+
     async def _report_progress(self, tool_name: str) -> None:
         """Best-effort: a missing progress event must never break a turn.
 
@@ -470,6 +510,35 @@ class ToolLoop:
             await self._link.send_event("tool_call", {"turn_id": self._turn_id, "tool": tool_name})
         except Exception as exc:  # noqa: BLE001 -- deliberately broad, see above
             log.debug("could not report progress for %s: %s", tool_name, exc)
+
+    def _with_pending_images(self, messages: list[Message]) -> list[Message]:
+        """Return `messages` with any captured images attached as a user message.
+
+        Drained, not kept: the picture is about the level *now*, and the next turn's history
+        holds only text. A retained screenshot would be a picture of a state the user has
+        since changed -- the same reason tool results are dropped once a turn ends.
+        """
+        if not self._pending_images:
+            return messages
+
+        images = self._pending_images
+        self._pending_images = []
+        log.info("attaching %d captured image(s) to the next model call", len(images))
+
+        # Appended rather than merged into the last user message: that message is already
+        # part of the conversation the provider has seen, and rewriting it would change
+        # history retroactively.
+        return [
+            *messages,
+            Message(
+                role="user",
+                text=(
+                    "Here is the capture you asked for. Judge only what is visible; if "
+                    "something is unclear or cut off, say so rather than guessing."
+                ),
+                images=images,
+            ),
+        ]
 
     async def _execute(self, call: ToolCall) -> tuple[dict[str, Any], bool]:
         # Tell the panel what is happening before doing it, not after.
@@ -567,6 +636,8 @@ class ToolLoop:
         result = response.result if isinstance(response.result, dict) else {}
         if tool.spec.name == "get_save_properties":
             result = save_properties.describe_save_properties(result)
+        if tool.spec.name == "capture_screenshot":
+            result = await self._attach_capture(result)
         if tool.mutates_objects:
             self._objects_used += tool.object_count(call.arguments)
         if tool.is_action:
@@ -753,6 +824,7 @@ class ToolLoop:
         self._objects_used = 0
         self._text = ""
         self._renamed_ids = {}
+        self._pending_images = []
 
     def _result(self, status: str, text: str, *, txn_id: str | None = None) -> TurnResult:
         return TurnResult(

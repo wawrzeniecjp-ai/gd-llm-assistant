@@ -259,6 +259,16 @@
                     "required": ["direction", "payload", "result"],
                     "additionalProperties": false
                 },
+                "capture_screenshot": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/captureScreenshotPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/captureScreenshotResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
                 "get_level_settings": {
                     "type": "object",
                     "properties": {

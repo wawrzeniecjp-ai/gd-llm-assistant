@@ -18,6 +18,7 @@
 #include "../editor/editor_state.hpp"
 #include "../editor/level_settings.hpp"
 #include "../editor/object_catalog.hpp"
+#include "../editor/screenshot.hpp"
 #include "../editor/transaction.hpp"
 #include "../exec/editor_jobs.hpp"
 #include "../exec/handler_verification.hpp"
@@ -756,6 +757,39 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
             co_return co_await sendError(socket, requestId, code, message);
         }
         co_return co_await sendResult(socket, requestId, editor::colorChannelToJson(outcome->unwrap()));
+    }
+
+    if (type == "capture_screenshot") {
+        // A main-thread hop: rendering into a texture touches the renderer, and the
+        // panel has to be hidden for the frame that gets captured.
+        editor::CaptureRequest request;
+        if (payload.contains("region")) {
+            request.region = payload["region"].asString().unwrapOr(std::string("screen"));
+        }
+        if (request.region != "screen" && request.region != "selection") {
+            co_return co_await sendError(
+                socket, requestId, "INVALID_REQUEST",
+                "'region' must be 'screen' or 'selection'"
+            );
+        }
+        if (payload.contains("radius")) {
+            request.radius = static_cast<float>(payload["radius"].asDouble().unwrapOr(120.0));
+        }
+
+        auto captured = co_await async::waitForMainThread<geode::Result<editor::Capture>>(
+            [request] { return editor::captureEditor(request); }
+        );
+        if (!captured) {
+            co_return co_await sendError(
+                socket, requestId, "THREAD_DISPATCH_FAILED",
+                "could not schedule work on the main thread"
+            );
+        }
+        if (!captured->ok()) {
+            auto const [code, message] = splitCode(captured->unwrapErr());
+            co_return co_await sendError(socket, requestId, code, message);
+        }
+        co_return co_await sendResult(socket, requestId, editor::captureToJson(captured->unwrap()));
     }
 
     if (type == "get_level_settings" || type == "set_level_settings") {

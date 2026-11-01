@@ -41,7 +41,17 @@ def _to_openai_messages(system: str, messages: list[Message]) -> list[dict[str, 
 
     for message in messages:
         if message.role == "user":
-            out.append({"role": "user", "content": message.text})
+            if message.images:
+                # A content array rather than a plain string is what carries images. Text
+                # first, then each picture: the model reads the instruction before the
+                # image it refers to, which matters when a turn produces several.
+                blocks: list[dict[str, Any]] = [{"type": "text", "text": message.text}]
+                blocks.extend(
+                    {"type": "image_url", "image_url": {"url": url}} for url in message.images
+                )
+                out.append({"role": "user", "content": blocks})
+            else:
+                out.append({"role": "user", "content": message.text})
 
         elif message.role == "assistant":
             entry: dict[str, Any] = {"role": "assistant", "content": message.text or None}

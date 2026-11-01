@@ -380,6 +380,51 @@
             "additionalProperties": false
         },
 
+        "captureScreenshotPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "properties": {
+                "region": {
+                    "type": "string",
+                    "enum": ["screen", "selection"],
+                    "description": "'screen' for the whole editor view, 'selection' for a padded box around the selected objects."
+                },
+                "radius": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 2000,
+                    "description": "Padding around the selection, in points. Ignored for 'screen'."
+                }
+            },
+            "additionalProperties": false
+        },
+        "captureScreenshotResult": {
+            "x-direction": "m2s",
+            "type": "object",
+            "description": "A written PNG. The path is returned rather than the bytes: a frame limit of 1 MB, no base64 encoder in the mod, and both processes on the same machine make a file the natural medium.",
+            "required": ["path", "width", "height", "targets"],
+            "properties": {
+                "path": { "type": "string", "maxLength": 512 },
+                "width": { "type": "integer", "minimum": 1 },
+                "height": { "type": "integer", "minimum": 1 },
+                "targets": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Objects the region was computed from; 0 for a whole-screen capture."
+                },
+                "region": {
+                    "type": "object",
+                    "properties": {
+                        "x": { "type": "number" },
+                        "y": { "type": "number" },
+                        "width": { "type": "number" },
+                        "height": { "type": "number" }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            "additionalProperties": false
+        },
         "getLevelSettingsPayload": {
             "x-direction": "s2m",
             "type": "object",

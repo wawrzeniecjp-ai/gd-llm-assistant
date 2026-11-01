@@ -70,6 +70,8 @@ def test_registry_covers_every_message_in_the_spec() -> None:
         # level-wide settings: patterns, gamemode, flags
         "get_level_settings",
         "set_level_settings",
+        # a rendered view of the editor, written to a file for the sidecar to read
+        "capture_screenshot",
         # events, mod -> sidecar
         "editor_closed",
         "level_changed",

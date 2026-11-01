@@ -64,6 +64,16 @@ class Message:
     tool_call_id: str | None = None
     """Set for `role == "tool"`: which call this is the result of."""
 
+    images: list[str] = field(default_factory=list)
+    """`data:` URLs attached to a **user** message.
+
+    User messages specifically, not tool results: the providers document that images are
+    accepted in `user` messages and rejected in `system`/`assistant` ones, and a tool result
+    has a role of its own that the documentation does not cover. Appending a user message
+    when a tool produces a picture keeps this inside the documented contract rather than
+    depending on how a tool role happens to be treated.
+    """
+
     is_error: bool = False
     """Set for `role == "tool"`: the tool failed, and the text says how.
 

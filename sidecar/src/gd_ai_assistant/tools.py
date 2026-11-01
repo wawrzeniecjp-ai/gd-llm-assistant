@@ -264,6 +264,50 @@ def _build() -> dict[str, Tool]:
         ),
         Tool(
             spec=ToolSpec(
+                name="capture_screenshot",
+                description=(
+                    "Look at the level. Renders the editor view and shows it to you as an "
+                    "image. Two choices of region: `screen` for the whole view -- good for "
+                    "overall composition, whether things line up, whether a section reads "
+                    "clearly -- or `selection`, a box around the selected objects, padded by "
+                    "`radius` points. `selection` is the one to use for detail: it is a "
+                    "smaller crop, so it arrives at higher effective resolution. The chat "
+                    "panel is hidden for the capture, so you see the level, not yourself. "
+                    "Use it when a question is visual: 'does this look right', 'is anything "
+                    "floating', 'is there a gap'."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "region": {
+                            "type": "string",
+                            "enum": ["screen", "selection"],
+                            "default": "screen",
+                            "description": (
+                                "'screen' for the whole view, 'selection' around the "
+                                "selected objects."
+                            ),
+                        },
+                        "radius": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 2000,
+                            "default": 120,
+                            "description": (
+                                "Padding around the selection, in points. Ignored for "
+                                "'screen'."
+                            ),
+                        },
+                    },
+                },
+            ),
+            protocol_type="capture_screenshot",
+            mutates_objects=False,
+            is_action=True,
+        ),
+        Tool(
+            spec=ToolSpec(
                 name="get_level_settings",
                 description=(
                     "Read the level's own settings: background/ground/middleground "
