@@ -30,6 +30,37 @@ cocos2d::CCPoint viewCentre() {
     return cocos2d::CCDirector::sharedDirector()->getWinSize() * 0.5f;
 }
 
+/// Magnification, measured from the *same* transform as the position so the two cannot
+/// disagree: how much level fits across the window decides the ratio.
+///
+/// Not `m_editorZoom`, which is what the first version reported: it said 1.0 for every
+/// zoom in the live test while the view really did zoom, so either that field is not what
+/// `updateZoom` writes or the editor keeps the value somewhere else. The layer's transform
+/// cannot lie about it, since it is the thing doing the scaling -- and it already answers
+/// for x and y, so there is one source of truth rather than two.
+float measureZoom(EditorUI* ui, LevelEditorLayer* editor) {
+    auto const fallback = ui->m_editorZoom > 0.f ? ui->m_editorZoom : 1.f;
+    if (editor->m_objectLayer == nullptr) {
+        return fallback;
+    }
+    auto const width = cocos2d::CCDirector::sharedDirector()->getWinSize().width;
+    if (width <= 0.f) {
+        return fallback;
+    }
+    // A full window's width, converted into the layer's own space. At 2x zoom only half as
+    // much level fits on screen, so the span halves and the ratio doubles. Which node in
+    // the chain carries the scale does not matter: `convertToNodeSpace` walks the whole
+    // parent chain, so a scaled ancestor counts exactly like a scaled layer.
+    auto const left = editor->m_objectLayer->convertToNodeSpace(cocos2d::CCPoint { 0.f, 0.f });
+    auto const right =
+        editor->m_objectLayer->convertToNodeSpace(cocos2d::CCPoint { width, 0.f });
+    auto const span = std::abs(right.x - left.x);
+    if (span <= 0.0001f) {
+        return fallback;
+    }
+    return width / span;
+}
+
 /// The centre of the view in level coordinates.
 ///
 /// Asked of the object layer's own transform rather than read off its position: objects
@@ -46,7 +77,7 @@ cocos2d::CCPoint viewCentre() {
 Camera measureCamera(EditorUI* ui, LevelEditorLayer* editor) {
     Camera camera;
 
-    camera.zoom = ui->m_editorZoom > 0.f ? ui->m_editorZoom : 1.f;
+    camera.zoom = measureZoom(ui, editor);
 
     if (editor->m_objectLayer != nullptr) {
         auto const centre = editor->m_objectLayer->convertToNodeSpace(viewCentre());
@@ -106,6 +137,10 @@ geode::Result<Camera> writeCamera(
         // The two-argument overload zooms around a given point; the single-argument one
         // uses wherever the editor last zoomed around, which would drift the view.
         ui->updateZoom(clamped, viewCentre());
+        // Logged next to the measured value on purpose: the field said 1.0 through a whole
+        // live test in which the view visibly zoomed, so it is worth knowing whether it ever
+        // tracks anything before anyone reads it again.
+        log::info("camera: zoom field {} measured {}", ui->m_editorZoom, measureZoom(ui, editor));
     }
 
     auto const after = measureCamera(ui, editor);

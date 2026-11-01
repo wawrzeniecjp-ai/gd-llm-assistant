@@ -1421,6 +1421,15 @@ point is the middle of my screen showing" directly -- and stays correct at any z
 whereas the obvious "negate the position and add half a window" only holds at 1x, because
 zoom scales the layer as well as moving it.
 
+**Zoom is measured the same way, from the same transform.** The first version reported
+`EditorUI::m_editorZoom` and reported `1.0` for every zoom in the live test while the view
+visibly zoomed -- the field is either not what `updateZoom` writes or not the zoom. Feeding
+a full window's width through `convertToNodeSpace` and taking `width / span` cannot lie,
+since the transform is the thing doing the scaling, and taking both readings from one
+transform means position and zoom can never disagree. It also does not matter which node
+in the chain carries the scale: `convertToNodeSpace` walks the parent chain, so a scaled
+ancestor counts exactly like a scaled layer.
+
 #### Panning uses the editor's own primitive
 
 `EditorUI::centerCameraOnPoint` is the natural call and is **uncallable**: the bindings
@@ -1432,7 +1441,9 @@ delta to `moveGamelayer` -- measured in screen points, since at 4x the level tra
 times as far per point -- followed by a constrain to the level bounds.
 
 The result is **measured again after the write**, not echoed: a clamped zoom or a pan
-stopped by the level edge then shows up in what the caller sees.
+stopped by the level edge then shows up in what the caller sees. Because zoom is measured
+rather than echoed, `zoom: 2` coming back as `1.9` is the editor's own limit, not a
+miscalculation.
 
 ## 7.6 Events (Mod → Sidecar)
 
