@@ -1150,6 +1150,7 @@ So key 1 is red, 2 green, 3 blue, **6 the channel id**, 5 blending, and 4 the pl
 colour (1 or 2) an entry copies from -- which is what "custom colour 1/2" in the editor
 refers to, and is not a channel. Entries are `|`-separated, and the section ends at the
 next `,k`.
+
 ### 7.5.3 The Save-String Property Table (generated)
 
 The mod reads and writes a fixed set of eleven named properties (§7.5). Every object
@@ -1230,6 +1231,63 @@ trip, and no engine needed.
 are writable, so the prompt tells the model to look a key up, report what it is, and
 say the setting has to be changed by hand rather than claim a change it cannot make.
 
+### 7.5.4 Writing Any Property (`get_save_properties`, `set_save_property`)
+
+§7.5 names eleven writable properties. Every object also carries dozens more -- a
+spike's "no touch" flag, a move trigger's duration and easing, a pulse trigger's target
+colour -- reachable only by **save-string key**. `set_save_property` writes them: read
+the object's save string, change one key, and let the game rebuild the object from it.
+
+**The object is replaced, and its unique id changes.** That is not an implementation
+shortcut. The save string is the only interface that reaches those fields, and the game
+can only turn a save string into an object by creating one. Because it is unavoidable
+it is also made unmissable: the result carries `ids_changed: true` and a `replacements`
+list of `{old_id, new_id}`, the turn keeps that mapping, and any later call using a
+stale id is **remapped automatically**. A model that kept using the old id would get
+`OBJECT_NOT_FOUND` for an object it can see in its own earlier results -- a dead end it
+cannot diagnose. The remap only ever follows a reported id; it never invents one.
+
+Keys 1, 2 and 3 (type, x, y) are refused **on the sidecar side**, before the round trip,
+and the refusal names `modify_objects`. Position especially: the save string stores
+level Y while every other interface uses Cocos Y, so a write here would silently move
+the object 90 units.
+
+#### Resolving a name to a key
+
+The member names are not guessable. The flag a user calls "no touch" is
+`m_isNoTouch`, and neither "no touch" nor "nontouch" is a substring of it. Resolution:
+
+1. lowercase and strip every non-alphanumeric -- `no touch` and `no-touch` both become
+   `notouch`, which *is* a suffix of `isnotouch`;
+2. one spelling variant, `non` -> `no`, so `nontouch` reaches the same place;
+3. rank matches: exact, then prefix **or** suffix (equally -- the game spells flags
+   `isX` and qualifiers `xType`, so preferring one breaks the other), then substring,
+   tie-broken by the name that adds fewest characters to the query.
+
+Ambiguous names report their alternatives rather than picking one, because the mod does
+not report object classes and guessing would be silent.
+
+#### Values are text
+
+Save strings have their own encodings: booleans are `0`/`1`, group lists are
+dot-separated, HSV is `a`-separated, text is base64. The sidecar encodes what it can
+(a boolean becomes `1`/`0`, because `true` reads back as zero -- a wrong value rather
+than an error) and passes anything else through as literal text. The mod does not
+re-encode: it stores the string and lets the game's parser interpret it.
+
+#### Revert works
+
+The rewrite is recorded in the open transaction as a delete of the original plus a
+creation of the replacement, which is what happened, so the turn's Revert restores the
+original object with its original properties. Prior property values recorded for the
+old id are dropped at the same time (`forgetModified`), or the restore would log a
+spurious "not found" for an object it is about to recreate.
+
+`get_save_properties` reads an object's whole set, named from the table in §7.5.3. A key
+the table does not know is reported with `name: null` rather than omitted -- "this
+object has a property I cannot name" is useful, and dropping it would make the object
+look simpler than it is.
+
 ### 7.5.5 Level Settings (one request)
 
 Level-wide settings live on one `LevelSettingsObject`, the game applies them together,
@@ -1284,6 +1342,51 @@ transaction and Revert does not undo it. The result says `revertible: false`, an
 prompt tells the model to mention it -- briefly. An earlier version warned about it at
 every opportunity, which made the model refuse to change settings the user had asked
 for; settings are ordinary edits and deserve no more caution than the rest.
+
+### 7.5.6 Seeing the Level (`capture_screenshot`)
+
+Renders the editor view to a PNG so the model can look at it. **On demand only**: a
+capture costs a vision-capable call, and no turn needs a picture by default.
+
+| Payload | Meaning |
+| --- | --- |
+| `region: "screen"` | The whole editor view. |
+| `region: "selection"` | A box around the selected objects, padded by `radius` points (default 120). |
+
+The region is what makes this useful rather than merely possible: a 512x320 view of a
+detailed level is mostly noise at any resolution a model can take in, while a box around
+the objects just edited is legible.
+
+#### A file path, not base64 through the protocol
+
+A 512x320 PNG is often 100-200 KB and base64 inflates it by a third, against a 1 MB
+frame limit -- workable today and fragile the moment anything changes. Both processes run
+on one machine by construction, so the file is the natural shared medium, and it needs no
+base64 encoder or PNG plumbing in the mod: `CCImage::saveToFile` is the game's own
+writer. One fixed name under the mod's save directory, rewritten each capture, so nothing
+accumulates.
+
+Rendering uses `CCRenderTexture`, cropped by drawing through a sprite with a texture
+rect. The running scene is deliberately **not** shifted to fake a camera move: that is a
+one-frame lie about the scene's position, and a crash in between would leave it shifted.
+
+#### Images ride on a user message
+
+They cannot ride in the tool result. Providers document images in **user** messages and
+reject them in system and assistant ones, and a tool result has a role of its own the
+documentation does not cover. So a capture is queued and attached to the next model call
+as its own user message, with a line saying what it shows.
+
+The queue is **drained**, not kept: history holds only user and assistant text, and a
+retained screenshot would be a picture of a level state that has since changed -- the
+same reason tool results are dropped when a turn ends.
+
+#### A failed capture says so
+
+A model handed nothing will still describe the level from memory, which is the exact
+outcome this feature exists to prevent. So the tool result says "you have NOT seen the
+level", and `capture.py` refuses files that are missing, oversized (a request error, not
+a detailed level) or implausibly small (a blank PNG) rather than sending anything at all.
 
 ## 7.6 Events (Mod → Sidecar)
 
