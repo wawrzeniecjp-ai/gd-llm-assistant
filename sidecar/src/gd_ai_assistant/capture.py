@@ -71,6 +71,7 @@ def describe_capture(result: dict) -> dict:
     height = result.get("height")
     targets = result.get("targets") or 0
     region = result.get("region") or {}
+    viewport = result.get("viewport") or {}
 
     description = {
         "width": width,
@@ -84,4 +85,14 @@ def describe_capture(result: dict) -> dict:
         )
     else:
         description["region_note"] = "the whole editor view"
+
+    # Which part of the level is in the picture, in the same coordinates objects use. Worth
+    # spending a line on: it lets the model say "the object at x=940 is off to the right
+    # edge" instead of describing pixels, and it is the only way to connect an image to a
+    # query result without guessing.
+    if viewport:
+        description["shows_level_area"] = (
+            f"x {viewport.get('x1', 0):.0f} to {viewport.get('x2', 0):.0f}, "
+            f"y {viewport.get('y1', 0):.0f} to {viewport.get('y2', 0):.0f}"
+        )
     return description

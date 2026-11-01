@@ -113,6 +113,14 @@ Snapshot takeSnapshot() {
         }
     }
 
+    // Where the view is looking, read here because this is already the main-thread hop.
+    // Read after the selection so the object count and camera describe the same instant as
+    // closely as one snapshot can.
+    if (auto camera = readCamera(); camera) {
+        snapshot.camera = camera.unwrap();
+        snapshot.hasCamera = true;
+    }
+
     return snapshot;
 }
 
@@ -143,6 +151,12 @@ matjson::Value toJson(Snapshot const& snapshot) {
     }
     selected["by_type"] = std::move(byType);
     result["selected"] = std::move(selected);
+
+    // Omitted rather than zero-filled when it could not be read: a camera at (0, 0) zoom 1
+    // is a plausible-looking lie, and a caller would plan around it.
+    if (snapshot.hasCamera) {
+        result["camera"] = cameraToJson(snapshot.camera);
+    }
 
     return result;
 }

@@ -6,6 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include "camera.hpp"
+
 namespace gdai::editor {
 
 /// A snapshot of editor state, for the `get_editor_state` request (SPEC.md 7.5).
@@ -28,6 +30,13 @@ struct Snapshot {
     /// on rename. Resolved on the main thread so no pointer escapes this struct
     /// (SPEC.md 6.1.3 rule 5).
     int levelId = 0;
+    /// Where the view is looking, including the rectangle of the level on screen.
+    ///
+    /// Read here rather than on demand because this is already the one main-thread hop a
+    /// caller makes before deciding what to do, and "which objects can I actually see" is
+    /// part of deciding that. `readCamera` may refuse, so it is paired with a flag.
+    Camera camera;
+    bool hasCamera = false;
 };
 
 /// Reads the current editor state.
@@ -38,12 +47,17 @@ Snapshot takeSnapshot();
 
 /// Converts a snapshot to the protocol result object (SPEC.md 7.5).
 ///
-/// `ground_y` and `camera` are both omitted, and for the same reason: neither can be
-/// read reliably from the APIs that look like they provide them. The ground layer's
-/// position tracks the camera rather than describing the level (see `cocosYToLevel`'s
-/// notes in the implementation), so reporting it would be worse than reporting
-/// nothing. Ground placement is instead guided by `lowest_y` from
+/// `ground_y` is omitted: it cannot be read reliably from the APIs that look like they
+/// provide it. The ground layer's position tracks the camera rather than describing the
+/// level (see `cocosYToLevel`'s notes in the implementation), so reporting it would be
+/// worse than reporting nothing. Ground placement is instead guided by `lowest_y` from
 /// `list_object_types`, which is a real observed object position.
+///
+/// **`camera` is now reported**, which it was not: an earlier version omitted it for the
+/// same reason as `ground_y`, because the only obvious source -- the ground layer -- tracked
+/// the camera instead of describing the level. It is read from the object layer's transform
+/// instead (SPEC.md 7.5.7), which is what actually maps level space to the screen, so the
+/// position, the zoom and the visible rectangle are all answers rather than guesses.
 matjson::Value toJson(Snapshot const& snapshot);
 
 /// TEMPORARY (spike): logs `getSaveString` for a few objects of distinct types,

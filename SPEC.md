@@ -1354,6 +1354,11 @@ capture costs a vision-capable call, and no turn needs a picture by default.
 | `region: "selection"` | A box around the selected objects, padded by `radius` points (default 120). |
 | `include_ui: true` | Also capture the editor's chrome. Off by default. |
 
+The result reports the captured area twice, because the two are different numbers:
+`region` is the crop in **screen points** (what the renderer needed), and `viewport` is
+the same area in **level coordinates** (what a caller comparing the image against object
+positions needs).
+
 The region is what makes this useful rather than merely possible: a 512x320 view of a
 detailed level is mostly noise at any resolution a model can take in, while a box around
 the objects just edited is legible.
@@ -1404,14 +1409,34 @@ model needs to see. Two requests move it:
 
 | Request | Payload | Result |
 | --- | --- | --- |
-| `get_camera` | `{}` | `{ camera: { x, y, zoom } }` |
-| `set_camera` | any of `x`, `y`, `zoom` | `{ camera: { x, y, zoom } }` |
+| `get_camera` | `{}` | `{ camera: { x, y, zoom, visible } }` |
+| `set_camera` | any of `x`, `y`, `zoom` | `{ camera: { x, y, zoom, visible } }` |
 
 `x`/`y` are **level** coordinates of the centre of the view, the same space objects live
 in, so they can be taken straight from `query_objects` results. `zoom` is clamped to
 0.05..4 rather than refused: it is a view setting with an obvious "as far as it goes"
 reading, the opposite of a property write, where clamping would silently do something
 other than what was asked.
+
+#### `visible`: which part of the level is on screen
+
+`visible` is the rectangle of the level currently in view, as `x1, y1, x2, y2` in level
+coordinates. The centre and the zoom *imply* it, but only to a caller that already knows
+the window size and the height of the visible band, which it has no way to learn -- so it
+is reported rather than left to be reconstructed. This is the field that makes a picture
+usable: it turns "there is a gap near the right edge" into "there is a gap near x=1200",
+and lets a caller check whether something is on screen *before* spending a capture.
+
+`get_editor_state` carries the same camera object, and `capture_screenshot` carries the
+rectangle as `viewport`. One shape, three messages: the schema `$ref`s a single `Camera`
+definition rather than repeating the fields.
+
+The `camera` block in `get_editor_state` was declared in the schema from early on and
+**never emitted** -- an earlier note recorded it as unreadable for the same reason
+`ground_y` is, since the only obvious source was the ground layer, which tracks the camera
+rather than describing the level. The transform-based reading above is what made the field
+honest. It is omitted, not zero-filled, when it cannot be read: a camera at `(0, 0)` zoom
+`1` is a plausible-looking lie that a caller would plan around.
 
 #### Reading position off the layer's transform
 

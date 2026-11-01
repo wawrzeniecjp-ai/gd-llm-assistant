@@ -8,6 +8,8 @@
 
 #include <string>
 
+#include "camera.hpp"
+
 namespace gdai::editor {
 
 /// What a capture covers (SPEC.md 7.5.6).
@@ -37,6 +39,12 @@ struct Capture {
     float y = 0.f;
     float regionWidth = 0.f;
     float regionHeight = 0.f;
+    /// The same region in **level** coordinates, so the image can be tied to objects.
+    ///
+    /// Screen points are no use to a caller comparing a picture against `query_objects`
+    /// output, and the conversion depends on the camera, so it is done here where the
+    /// camera is at hand rather than left for the caller to get wrong.
+    LevelRect viewport;
     /// Objects the region was computed from; 0 for a whole-screen capture.
     int targets = 0;
 };

@@ -41,11 +41,15 @@
         "Camera": {
             "type": "object",
             "description": "Where the editor is looking. x and y are level coordinates of the centre of the view, not screen coordinates.",
-            "required": ["x", "y", "zoom"],
+            "required": ["x", "y", "zoom", "visible"],
             "properties": {
                 "x": { "type": "number" },
                 "y": { "type": "number" },
-                "zoom": { "type": "number", "exclusiveMinimum": 0 }
+                "zoom": { "type": "number", "exclusiveMinimum": 0 },
+                "visible": {
+                    "$ref": "#/$defs/Bounds",
+                    "description": "The rectangle of the level on screen, in level coordinates. The same space objects use, so it can be compared with query results directly."
+                }
             },
             "additionalProperties": false
         },
@@ -79,14 +83,8 @@
                 },
                 "editor_layer": { "type": "integer", "minimum": 0 },
                 "camera": {
-                    "type": "object",
-                    "properties": {
-                        "x": { "type": "number" },
-                        "y": { "type": "number" },
-                        "zoom": { "type": "number", "exclusiveMinimum": 0 },
-                        "visible_rect": { "$ref": "#/$defs/Bounds" }
-                    },
-                    "additionalProperties": false
+                    "$ref": "#/$defs/Camera",
+                    "description": "Where the view is looking. Omitted when the editor could not report it, rather than filled with zeros: a camera at (0, 0) zoom 1 is a plausible-looking lie."
                 },
                 "ground_y": { "type": "number", "description": "Ground height; required for sensible placements." },
                 "grid_size": { "const": 30, "description": "GD units per grid block." },
@@ -438,6 +436,10 @@
                         "height": { "type": "number" }
                     },
                     "additionalProperties": false
+                },
+                "viewport": {
+                    "$ref": "#/$defs/Bounds",
+                    "description": "The same area in level coordinates -- what the image actually covers, so it can be compared against object positions. `region` is the crop in screen points and is not usable for that."
                 }
             },
             "additionalProperties": false

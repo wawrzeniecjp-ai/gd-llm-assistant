@@ -82,3 +82,23 @@ def test_a_selection_capture_says_it_is_a_detail_view() -> None:
 def test_a_whole_screen_capture_says_so() -> None:
     described = capture.describe_capture({"width": 512, "height": 320, "targets": 0})
     assert "whole editor view" in described["region_note"]
+
+
+def test_the_capture_says_which_part_of_the_level_it_covers() -> None:
+    """An image is only usable against object coordinates if the model knows where in the
+    level it was taken, and the crop rectangle is in screen points, which says nothing."""
+    described = capture.describe_capture(
+        {
+            "width": 512,
+            "height": 320,
+            "targets": 0,
+            "viewport": {"x1": 400.0, "y1": -30.0, "x2": 912.0, "y2": 290.0},
+        }
+    )
+    assert described["shows_level_area"] == "x 400 to 912, y -30 to 290"
+
+
+def test_a_capture_without_a_viewport_omits_the_line() -> None:
+    """Rather than filling in zeros, which would read as "this shows the origin"."""
+    described = capture.describe_capture({"width": 512, "height": 320, "targets": 0})
+    assert "shows_level_area" not in described

@@ -83,11 +83,32 @@ Camera measureCamera(EditorUI* ui, LevelEditorLayer* editor) {
         auto const centre = editor->m_objectLayer->convertToNodeSpace(viewCentre());
         camera.x = centre.x;
         camera.y = centre.y;
+
+        auto const winSize = cocos2d::CCDirector::sharedDirector()->getWinSize();
+        camera.visible = screenRectToLevel({ 0.f, 0.f, winSize.width, winSize.height });
     }
     return camera;
 }
 
 } // namespace
+
+LevelRect screenRectToLevel(cocos2d::CCRect const& rect) {
+    LevelRect level;
+    auto* editor = LevelEditorLayer::get();
+    if (editor == nullptr || editor->m_objectLayer == nullptr) {
+        return level;
+    }
+    // Opposite corners, converted through the layer, then sorted: a rect built from min/max
+    // rather than from the corners in order, because the transform decides which way the
+    // screen's y runs.
+    auto const a = editor->m_objectLayer->convertToNodeSpace({ rect.getMinX(), rect.getMinY() });
+    auto const b = editor->m_objectLayer->convertToNodeSpace({ rect.getMaxX(), rect.getMaxY() });
+    level.x1 = std::min(a.x, b.x);
+    level.y1 = std::min(a.y, b.y);
+    level.x2 = std::max(a.x, b.x);
+    level.y2 = std::max(a.y, b.y);
+    return level;
+}
 
 geode::Result<Camera> readCamera() {
     auto* ui = editorUi();
@@ -156,6 +177,13 @@ matjson::Value cameraToJson(Camera const& camera) {
     result["x"] = camera.x;
     result["y"] = camera.y;
     result["zoom"] = static_cast<double>(camera.zoom);
+
+    auto visible = matjson::Value::object();
+    visible["x1"] = camera.visible.x1;
+    visible["y1"] = camera.visible.y1;
+    visible["x2"] = camera.visible.x2;
+    visible["y2"] = camera.visible.y2;
+    result["visible"] = std::move(visible);
     return result;
 }
 

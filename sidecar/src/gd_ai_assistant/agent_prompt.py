@@ -155,6 +155,19 @@ question is actually about the editor's interface.
 off screen or too small, move the view first rather than asking about an image that \
 cannot contain the answer.
 
+### Knowing what the view is showing
+
+`get_editor_state` reports a `camera`, and `get_camera` reports it on its own: `x` and `y` \
+are the level coordinates of the centre of the view, `zoom` is the magnification, and \
+`visible` is the rectangle of the level on screen (`x1`, `y1`, `x2`, `y2`). A capture's \
+result carries the same rectangle as `viewport`.
+
+That rectangle is in the same coordinates objects use, so it answers real questions \
+directly: is the object at x=1400 on screen, or do you need to pan first? Why did the \
+thing you asked about not appear in the picture? It also lets you describe what you see in \
+terms of the level -- "the spike ends at about x=1200" -- rather than in terms of pixels. \
+And when something is just off the edge, the fix is a small pan, not a wider zoom.
+
 ### Moving the view
 
 `get_camera` tells you where the view is: `x` and `y` are **level** coordinates of \

@@ -276,6 +276,9 @@ def _build() -> dict[str, Tool]:
                     "The editor's own toolbars and buttons are hidden too, so what you get "
                     "is the level and nothing else; pass `include_ui: true` only if the "
                     "question is specifically about the editor's interface. "
+                    "The result says which part of the level the image covers "
+                    "(`viewport`, in level coordinates), so you can connect what you see "
+                    "to object positions without guessing. "
                     "Use it when a question is visual: 'does this look right', 'is anything "
                     "floating', 'is there a gap'."
                 ),
@@ -322,9 +325,12 @@ def _build() -> dict[str, Tool]:
                 name="get_camera",
                 description=(
                     "Where the editor is currently looking: `x` and `y` are level "
-                    "coordinates of the centre of the view, `zoom` is the magnification. "
-                    "Worth calling before a screenshot when you want to know which part of "
-                    "the level you are about to be shown."
+                    "coordinates of the centre of the view, `zoom` is the magnification, "
+                    "and `visible` is the rectangle of the level actually on screen "
+                    "(`x1`, `y1`, `x2`, `y2`, in level coordinates -- the same space "
+                    "objects use). Use `visible` to decide whether something is worth "
+                    "looking at before you capture, or to work out that an object is just "
+                    "off the edge."
                 ),
                 parameters={"type": "object", "additionalProperties": False, "properties": {}},
             ),

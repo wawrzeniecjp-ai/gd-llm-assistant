@@ -259,6 +259,7 @@ geode::Result<Capture> captureEditor(CaptureRequest const& request) {
     capture.y = region.origin.y;
     capture.regionWidth = region.size.width;
     capture.regionHeight = region.size.height;
+    capture.viewport = screenRectToLevel(region);
     capture.targets = targets;
 
     log::info(
@@ -281,6 +282,16 @@ matjson::Value captureToJson(Capture const& capture) {
     region["width"] = static_cast<double>(capture.regionWidth);
     region["height"] = static_cast<double>(capture.regionHeight);
     result["region"] = std::move(region);
+
+    // What the image covers in level coordinates. The screen-space `region` above is the
+    // crop, which is what the renderer needed; this is what a caller comparing the picture
+    // against object positions needs, and they are not the same numbers.
+    auto viewport = matjson::Value::object();
+    viewport["x1"] = capture.viewport.x1;
+    viewport["y1"] = capture.viewport.y1;
+    viewport["x2"] = capture.viewport.x2;
+    viewport["y2"] = capture.viewport.y2;
+    result["viewport"] = std::move(viewport);
     return result;
 }
 
