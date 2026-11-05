@@ -126,6 +126,7 @@ window for the sidecar.
 | `sidecar/` | The Python sidecar: provider adapters, tool loop, catalog |
 | `protocol/v1/` | JSON Schemas — the contract both sides validate against |
 | `SPEC.md` | The specification, decision log and measured findings |
+| `docs/LEVEL-DESIGN-SPEC.md` | The level design layer: GridText, simulator, music, plan, patterns, decoration, effects, critique, evals |
 
 The protocol is the test seam: the mod cannot run headless, so both sides are
 validated against the schemas in `protocol/v1/` instead.
