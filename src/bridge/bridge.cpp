@@ -72,6 +72,12 @@ void runDeveloperProbesOnce() {
 /// this is a separate task (see `net::WebSocket`).
 constexpr auto kWachdogInterval = asp::time::Duration::fromMillis(150);
 
+/// Every this many watchdog ticks (about 3 s), send a ping to check the sidecar
+/// is still there. A dead peer does not always wake the pending receive on
+/// Windows, but a send to it fails, and that is what ends the session so the
+/// reconnect loop can run (see `net::WebSocket::sendPing`).
+constexpr int kLivenessPingTicks = 20;
+
 /// Correlation id of the `hello` request. The mod issues exactly one request, so
 /// the only `response` it should ever receive carries this id.
 constexpr char const* kHelloRequestId = "m-1";
@@ -421,6 +427,7 @@ arc::Future<> Bridge::flushOutbound(net::WebSocket& socket) {
 arc::Future<> Bridge::watchSession(
     std::shared_ptr<net::WebSocket> socket, std::shared_ptr<SessionState> state
 ) {
+    int ticks = 0;
     while (state->running) {
         co_await arc::sleep(kWachdogInterval);
         if (!state->running) {
@@ -428,6 +435,14 @@ arc::Future<> Bridge::watchSession(
         }
 
         co_await flushOutbound(*socket);
+
+        if (++ticks % kLivenessPingTicks == 0) {
+            if (auto pinged = co_await socket->sendPing(); !pinged) {
+                log::info("watchdog: the sidecar is gone ({}); ending the session",
+                          pinged.unwrapErr());
+                break;
+            }
+        }
 
         if (m_stopRequested) {
             log::info("watchdog: stop requested; ending the session");

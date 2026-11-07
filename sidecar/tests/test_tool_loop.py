@@ -756,7 +756,7 @@ def test_the_scripted_ground_fallback_is_used_when_the_level_reports_none() -> N
 
     plan = default_plan("add a row of spikes", ground_y=None)
     objects = plan[1].tool_calls[0].arguments["objects"]
-    assert all(obj["y"] == 105.0 for obj in objects)
+    assert all(obj["y"] == 15.0 for obj in objects)
 
 
 def test_the_scripted_provider_places_on_the_levels_real_ground() -> None:

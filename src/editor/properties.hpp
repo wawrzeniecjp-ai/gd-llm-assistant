@@ -131,13 +131,18 @@ matjson::Value propertiesToJson(
 inline constexpr double kMeasuredLevelYOffset = 90.0;
 
 /// Level Y (wire, save-string) -> cocos Y (`createObject`, `setPosition`).
+///
+/// `cocos = save + 90` (docs/save-string-keys.md). These two had the sign the
+/// wrong way round until M0's foundations check measured protocol `y` minus
+/// save key `3` on 28 objects and got +180 for every one: every y on the wire
+/// was 180 units (six blocks) above the level coordinate it claimed to be.
 inline double levelYToCocos(double levelY) {
-    return levelY - kMeasuredLevelYOffset;
+    return levelY + kMeasuredLevelYOffset;
 }
 
 /// Cocos Y (`getPositionY`) -> level Y (wire, save-string).
 inline double cocosYToLevel(double cocosY) {
-    return cocosY + kMeasuredLevelYOffset;
+    return cocosY - kMeasuredLevelYOffset;
 }
 
 } // namespace gdai::editor

@@ -66,6 +66,15 @@ public:
     /// reassembling fragmented frames. See the class comment: never cancel this.
     arc::Future<Result<std::string>> receiveText();
 
+    /// Sends a ping frame; the peer's pong is consumed by `receiveText`.
+    ///
+    /// Exists for liveness, not latency: on Windows a pending receive is not
+    /// always woken when the peer's process dies (seen with a force-killed
+    /// sidecar: the socket was gone from netstat, the receive never returned).
+    /// A *send* on such a socket fails at once, so the watchdog pings
+    /// periodically and ends the session when that fails.
+    arc::Future<Result<>> sendPing();
+
     /// Sends a close frame. Does not wait for the peer's close, so it is
     /// safe to call from a cleanup path.
     arc::Future<Result<>> close(std::uint16_t code = 1000, std::string_view reason = {});

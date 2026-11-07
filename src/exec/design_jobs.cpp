@@ -265,6 +265,13 @@ public:
             return false;
         }
 
+        // `createWithKey` only builds the sprite. The per-id setup -- the gameplay
+        // type, the hitbox size, the radius -- happens in `customSetup`, which the
+        // editor and the level loader call after creating an object. Without it a
+        // spike reads as type 0 (solid) with a full 30x30 box, as the M0
+        // foundations check showed.
+        object->customSetup();
+        // After setup, so the rect is recomputed from the real hitbox size.
         object->setPosition({ 0.f, 0.f });
         auto const position = object->getPosition();
         auto const& rect = object->getObjectRect();

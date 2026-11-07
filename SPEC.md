@@ -276,8 +276,11 @@ crash.
 
 ## 0.2a Level design layer, M0 (2026-11-07)
 
-Foundations for docs/LEVEL-DESIGN-SPEC.md, built and unit-tested. **The in-game checks
-(S-L2, S-L10, coordinates) have not been run yet.** See docs/M0-in-game-checks.md.
+Foundations for docs/LEVEL-DESIGN-SPEC.md, built and unit-tested. The first in-game check
+(`check_foundations.py`) ran on 2026-11-07 and found three bugs, fixed below. The
+confirmation run (`check_m0_fixes.py`, same day) passed every check and measured S-L1.
+The full role dump ran the same day. Still to do: a snapshot timing on a large level.
+See docs/M0-in-game-checks.md.
 
 - **Protocol (additive to v1):** `get_level_objects`, `describe_object_types`, `revision` on
   `get_editor_state` and `level_changed`, and error codes `UNSUPPORTED_REQUEST` and
@@ -293,8 +296,43 @@ Foundations for docs/LEVEL-DESIGN-SPEC.md, built and unit-tested. **The in-game 
   directions, used by the new agent-level tests.
 - **Tool hiding:** a request answered with `UNSUPPORTED_REQUEST` withdraws every tool that
   depends on it for the rest of the connection.
-- **Open finding:** the y-offset sign in `docs/save-string-keys.md` and in
-  `properties.hpp` disagree (LEVEL-DESIGN-SPEC §4.1). `check_foundations.py` settles it.
+- **Y coordinates were off by +180 (bug, fixed).** Protocol `y` minus save key `3` measured
+  +180 on all 28 objects: `cocosYToLevel`/`levelYToCocos` had the 90-unit offset with the
+  wrong sign. Every `y` the model read or wrote was six blocks above the level coordinate;
+  relative placement worked, which is why it went unnoticed. Protocol `y` is now the
+  save-string `y`. The camera (`get/set_camera`, capture viewports) reported raw cocos y
+  and now uses level y too (LEVEL-DESIGN-SPEC §4.1).
+- **`describe_object_types` skipped object setup (bug, fixed).** `createWithKey` only builds
+  the sprite; type, hitbox size and radius are set by `customSetup`, which the job now
+  calls. Before, a spike (id 8) reported type 0 with a 30x30 box.
+- **Edit Object was invisible to the revision (S-L10, fixed).** A colour change touches
+  neither the object count nor the undo lists. The fingerprint now also hashes the selected
+  objects' save strings (capped at 64, every 8 frames); selecting or deselecting only
+  re-baselines it. All other S-L10 edit paths (place, move, rotate, duplicate, delete,
+  undo, redo, the assistant's own edits) moved the revision, and pan/zoom did not.
+- **Dead sidecar not noticed (bug, fixed).** On Windows a force-killed sidecar did not wake
+  the mod's pending receive, so the mod never reconnected. The watchdog now pings every
+  ~3 s; the failed send ends the session and the reconnect loop takes over. The dev-script
+  harness also now fails fast when the port is taken instead of waiting forever.
+- **S-L1: the ground top is y = 0** (measured). A default block resting on the ground reads
+  y = 15 in both the protocol and save key `3`. Recorded in `physics_constants.json`; the
+  scripted demo's fallback row moved from 105 to 15. One level so far.
+- **Confirmed after the fixes:** a spike describes as Hazard with a 6x12 hitbox, the saw as
+  Hazard with radius 32.3, orbs, pads and portals with their own types; protocol y minus
+  save y is 0; Edit Object moves the revision; the camera reports level y. A
+  deselect/reselect step also moved it, but the log shows a block was placed and removed
+  in that step (a click on empty space in the Build tab), so that was a real edit.
+- **S-L2: off-scene description is safe for every id.** `dump_roles.py` described all
+  4093 catalog ids with no crash and no refusal; `data/roles.json` is committed. By role:
+  deco 3257, solid 336, collectible 147, trigger 129, hazard 99, slope 74, orb 12, special
+  10, portal_mode 8, portal_other 6, pad 5, portal_speed 5, portal_gravity 3, portal_size 2.
+  The game types speed portals (200-203, 1334) and the camera/BPM guides (2016, 3642) as
+  the generic `Modifier`, so `roles.py` tells them apart by id, only while the game still
+  reports `Modifier` for that id. The remaining specials (breakable block, the
+  collision-changing and force blocks, the collision block, the checkpoint) are correctly
+  things the simulator must not judge yet.
+- **Snapshot timing: not yet meaningful.** 28 objects in 17 ms is one round trip, not a
+  rate; the 3 s / 10k target needs a level with thousands of objects.
 
 ## 0.2 Changes from 0.8.0
 

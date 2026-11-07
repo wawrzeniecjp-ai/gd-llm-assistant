@@ -167,7 +167,7 @@ one transaction (`SPEC.md` §6.1.5). The user can always take back exactly one u
 | --- | --- | --- |
 | LD1 | All design logic is a new Python package `gd_ai_assistant.design`, independent of the agent loop and of the transport. Tools in `tools.py` are thin adapters onto it. | LOCKED |
 | LD2 | The design layer reads the level through a **per-turn Level Model snapshot** (§4.3), invalidated by any mutation or `level_changed`. Nothing about level content persists across turns. This keeps `SPEC.md` D4 (no mirror) intact. | LOCKED |
-| LD3 | Object semantics (solid, hazard, orb, portal...) come from a **role table dumped from the game** (`GameObject::m_objectType` + hitbox), not from frame-name heuristics. Heuristics are a fallback only, and flagged. | LOCKED (pending S-L2) |
+| LD3 | Object semantics (solid, hazard, orb, portal...) come from a **role table dumped from the game** (`GameObject::m_objectType` + hitbox), not from frame-name heuristics. Heuristics are a fallback only, and flagged. | LOCKED (S-L2 passed, 2026-11-07) |
 | LD4 | The model's working representation for gameplay is **GridText** (§5): one character per 30-unit cell, with a fixed built-in legend and a per-call custom legend. | LOCKED |
 | LD5 | Gameplay is verified by a **deterministic Python simulator** at the game's tick rate, with constants from calibration. In-game replay is ground truth for calibration and optional final checks, never the inner loop. | LOCKED |
 | LD6 | Collision is **axis-aligned rectangles and circles**, with hitboxes rotated only in multiples of 90°. Anything else is `unverifiable` (P4). | LOCKED for v1 |
@@ -249,15 +249,20 @@ Dependencies added: `Pillow` (renderer), nothing else required. Optional extra
   y = 105) and the old demo constant matches it, but SPEC §0.1b also records a level where
   that constant placed objects under the ground. S-L1 must resolve this before GridText
   ships.
-- **Found during M0 (unverified):** `docs/save-string-keys.md` measured
-  `cocos y = save y + 90` (e.g. save −105, cocos −15), while `src/editor/properties.hpp`
-  converts `level y = cocos y + 90`. Both cannot be true. If the table is right, protocol
-  `y` is save-string `y` **+ 180**, and a ground-row block reads as y ≈ 195 in
-  `query_objects`. That would also explain §0.1b: y = 105 in protocol coordinates is
-  cocos 15, below a ground at cocos 90. `scripts/check_foundations.py` measures the
-  difference directly. Until it has, `ground_top_y` is `null` in the constants file,
-  `coords.Grid.from_constants` refuses to run, and the design layer never decodes positions
-  from save strings: `get_level_objects` reports them as `query_objects` does (§4.3.2).
+- **Found and fixed during M0 (measured 2026-11-07).** `docs/save-string-keys.md` measured
+  `cocos y = save y + 90`, while `src/editor/properties.hpp` converted
+  `level y = cocos y + 90`. `scripts/check_foundations.py` measured protocol `y` minus
+  save key `3` over 28 objects: **+180 for every one**. The table was right and the mod's
+  conversion had its sign flipped, so every `y` on the wire was six blocks above the level
+  coordinate. That also explains §0.1b: protocol y = 105 was cocos 15, under the ground.
+  Fixed in the mod (`cocosYToLevel = cocos − 90`); the camera (`get/set_camera`, capture
+  viewports), which reported raw cocos y, now uses the same level y. Protocol `y` is now
+  the save-string `y`, confirmed by `scripts/check_m0_fixes.py` (difference 0). That run
+  also measured S-L1: a default block resting on the ground reads y = 15, so
+  **`ground_top_y` = 0**, recorded as measured. It was one level; the three-level procedure
+  below (including a raised start position) is still owed before M1 relies on it as a
+  constant. `get_level_objects` keeps reporting positions as `query_objects` does
+  (§4.3.2).
 
 **Resolution procedure (S-L1).** In replay (§7), a cube standing still at the level start is
 on the ground; its `y` minus half its hitbox height is the ground top. Measure it on three
@@ -281,13 +286,16 @@ Every component needs to know what an object *is* in gameplay terms: the GridTex
 must know a spike from a block, the simulator needs hitboxes, decorators must know what is
 deco. The catalog's frame names are a vocabulary, not semantics.
 
-### 4.2.2 Source (LOCKED, pending S-L2)
+### 4.2.2 Source (LOCKED)
 
 A new mod request `describe_object_types { offset, limit }` iterates the ids in
 `ObjectToolbox`'s table (the same source as `list_object_catalog`), and for each id:
 
 1. Creates an instance **off-scene** with `GameObject::createWithKey(id)` — never added to
-   the editor, never touching the level or undo stack.
+   the editor, never touching the level or undo stack — then calls `customSetup()`.
+   `createWithKey` only builds the sprite; the type, hitbox size and radius are set by
+   `customSetup`, which the editor and level loader call after creating an object. Without
+   it every object describes as a solid 30x30 block (found in M0).
 2. Reads `m_objectType` (the game's `GameObjectType` enum), the hitbox (`getObjectRect()`
    at the origin, plus `m_objectRadius` for circular hazards), whether it has a detail
    colour, and the default z-layer.
@@ -300,7 +308,15 @@ regenerated, and so the mod can be asked about a single id the file does not kno
 
 S-L2 must confirm that off-scene creation is safe for every id. Ids that crash or return
 null are recorded in a denylist in the dump, which the mod's existing creation denylist also
-uses.
+uses. **Result (2026-11-07):** all 4093 catalog ids described with no crash and no refusal;
+the denylist is empty. Spike 6x12, small spike 6x5.6, saw radius 32.3, orb 36x36, pad 25x4
+and portals 34x86 match known values. The cross-check against the editor's hitbox view on
+ten sampled ids has not been done.
+
+The game types speed portals and the editor's camera/BPM guides as the generic `Modifier`,
+so `roles.py` maps those few by id (`_MODIFIER_IDS`): speed portals to `portal_speed` with
+their speed as the variant, guides to `deco`. Each override applies only while the game
+still reports `Modifier` for that id.
 
 ### 4.2.3 Role model
 

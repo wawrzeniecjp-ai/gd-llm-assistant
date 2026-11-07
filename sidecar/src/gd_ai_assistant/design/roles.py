@@ -171,6 +171,28 @@ class RoleEntry:
         return self.source == "heuristic"
 
 
+#: Modifiers the type enum cannot tell apart, by object id (S-L2 dump, 2026-11-07).
+#:
+#: The game gives speed portals and the editor's guide objects the generic `Modifier`
+#: type, which on its own maps to SPECIAL: something the simulator refuses to judge.
+#: Speed portals are exactly what it must judge, and the guides are editor-only and
+#: should not block it. Applied only when the game still reports `Modifier` for the
+#: id, so a renumbering in a future version falls back to SPECIAL rather than
+#: mislabelling an object.
+_MODIFIER_IDS: dict[int, tuple[Role, str | None, str | None]] = {
+    200: (Role.PORTAL_SPEED, "speed", "0.5x"),  # boost_01
+    201: (Role.PORTAL_SPEED, "speed", "1x"),    # boost_02
+    202: (Role.PORTAL_SPEED, "speed", "2x"),    # boost_03
+    203: (Role.PORTAL_SPEED, "speed", "3x"),    # boost_04
+    1334: (Role.PORTAL_SPEED, "speed", "4x"),   # boost_05
+    2016: (Role.DECO, "editor_guide", "camera"),
+    3642: (Role.DECO, "editor_guide", "bpm"),
+}
+
+#: `GameObjectType.Modifier`.
+_MODIFIER = 20
+
+
 def role_from_description(
     description: dict[str, Any], *, frame: str | None = None
 ) -> RoleEntry:
@@ -187,6 +209,8 @@ def role_from_description(
 
     if description.get("is_trigger"):
         role, subrole, variant = Role.TRIGGER, "trigger", None
+    elif object_type == _MODIFIER and object_id in _MODIFIER_IDS:
+        role, subrole, variant = _MODIFIER_IDS[object_id]
     elif description.get("is_decoration") and role is Role.SOLID:
         # The type enum's default is Solid (0), so a decoration that never set its
         # type would otherwise read as a collidable block.

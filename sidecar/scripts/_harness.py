@@ -56,7 +56,17 @@ async def _main(routine: Routine) -> Any:
         file=sys.stderr,
     )
     try:
-        return await done
+        # If the server dies first (typically: the port is taken by another sidecar),
+        # say so instead of waiting forever for a connection that cannot come.
+        await asyncio.wait({done, serving}, return_when=asyncio.FIRST_COMPLETED)
+        if not done.done():
+            exc = serving.exception() if not serving.cancelled() else None
+            raise SystemExit(
+                f"The sidecar server stopped before the game connected: {exc!r}\n"
+                f"Is another sidecar (start-sidecar.bat) still running on port "
+                f"{config.ws_port}? Close it and try again."
+            )
+        return done.result()
     finally:
         serving.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):

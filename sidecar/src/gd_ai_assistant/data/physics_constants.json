@@ -5,9 +5,9 @@
     "note": "LEVEL-DESIGN-SPEC.md 6.3. Every leaf is {value, source, confidence}. confidence is measured | derived | guess. A null value means 'not known yet', and code that needs it must refuse rather than assume. Replaced by scripts/calibrate.py (M2).",
     "tick_rate": { "value": 240, "source": "initial-guess: GD 2.2 physics rate, to be confirmed by S-L3", "confidence": "guess" },
     "ground_top_y": {
-        "value": null,
-        "source": "S-L1 not yet run. Protocol y and save-string y may differ (see docs/save-string-keys.md vs src/editor/properties.hpp), so no value is guessed here.",
-        "confidence": "guess"
+        "value": 0.0,
+        "source": "S-L1, scripts/check_m0_fixes.py 2026-11-07: a default block resting on the ground reads y = 15 (save key 3 = protocol y after the M0 sign fix), so the ground top is 0. One level so far; the spec's three-level check (incl. a raised start position) is still open.",
+        "confidence": "measured"
     },
     "units_per_second": {
         "0.5x": { "value": 251.16, "source": "initial-guess: commonly cited", "confidence": "guess" },

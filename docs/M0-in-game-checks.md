@@ -47,7 +47,33 @@ What I'll do with the results:
   needs another signal before snapshots can be trusted.
 - **Step 4:** M0's target is under 3 s per 10k objects.
 
+**Done 2026-11-07.** It found three bugs: y off by +180, a spike described as a solid
+block, and Edit Object not moving the revision. All three are fixed in the mod (SPEC.md
+0.2a). Step 4's timing needs a bigger level to mean anything.
+
+## 1b. Confirm the fixes, and measure the ground (S-L1)
+
+**Restart the game first**, so it loads the rebuilt mod. Then, from `sidecar/`:
+
+```bash
+uv run python scripts/check_m0_fixes.py
+```
+
+It checks the object descriptions and the y fix with no input from you. Then it asks you to:
+
+1. Place one plain default block on the lowest row, resting on the ground, and leave only
+   it selected. This measures the ground height.
+2. Change its colour through Edit Object. The revision should move.
+3. Deselect it, then select it again. The revision should *not* move.
+4. Scroll so the block is in the middle of the screen. This checks the camera's y.
+
+It writes `build/m0-fixes-report.json`. Send me that file.
+
+**Done 2026-11-07.** Every check passed; the ground top is y = 0.
+
 ## 2. Role dump: S-L2, in full
+
+Run this **after 1b**: before the `customSetup` fix, every object came out as a solid block.
 
 ```bash
 uv run python scripts/dump_roles.py
@@ -56,6 +82,8 @@ uv run python scripts/dump_roles.py
 This instantiates every object type off-scene, a few thousand of them. Nothing is added to
 the level. It writes `sidecar/src/gd_ai_assistant/data/roles.json` and prints counts by
 role and a few spot checks. That file is meant to be committed.
+
+**Done 2026-11-07.** 4093 ids, no crash, none refused. Speed portals and the editor guides were relabelled from `special` by id (SPEC.md 0.2a).
 
 ## 3. If the game crashes during the dump
 

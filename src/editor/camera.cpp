@@ -1,4 +1,5 @@
 #include "camera.hpp"
+#include "properties.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/EditorUI.hpp>
@@ -82,7 +83,8 @@ Camera measureCamera(EditorUI* ui, LevelEditorLayer* editor) {
     if (editor->m_objectLayer != nullptr) {
         auto const centre = editor->m_objectLayer->convertToNodeSpace(viewCentre());
         camera.x = centre.x;
-        camera.y = centre.y;
+        // Node space is cocos space; the wire speaks level y, like every object.
+        camera.y = cocosYToLevel(centre.y);
 
         auto const winSize = cocos2d::CCDirector::sharedDirector()->getWinSize();
         camera.visible = screenRectToLevel({ 0.f, 0.f, winSize.width, winSize.height });
@@ -104,9 +106,9 @@ LevelRect screenRectToLevel(cocos2d::CCRect const& rect) {
     auto const a = editor->m_objectLayer->convertToNodeSpace({ rect.getMinX(), rect.getMinY() });
     auto const b = editor->m_objectLayer->convertToNodeSpace({ rect.getMaxX(), rect.getMaxY() });
     level.x1 = std::min(a.x, b.x);
-    level.y1 = std::min(a.y, b.y);
+    level.y1 = cocosYToLevel(std::min(a.y, b.y));
     level.x2 = std::max(a.x, b.x);
-    level.y2 = std::max(a.y, b.y);
+    level.y2 = cocosYToLevel(std::max(a.y, b.y));
     return level;
 }
 
@@ -135,7 +137,7 @@ geode::Result<Camera> writeCamera(
         // does not also jump vertically.
         auto const wanted = cocos2d::CCPoint {
             static_cast<float>(x.value_or(before.x)),
-            static_cast<float>(y.value_or(before.y)),
+            static_cast<float>(levelYToCocos(y.value_or(before.y))),
         };
         if (editor->m_objectLayer != nullptr) {
             // The layer must travel by however far the wanted point is from the screen

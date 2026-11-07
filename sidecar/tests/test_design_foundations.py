@@ -30,9 +30,11 @@ def test_packaged_constants_load_and_carry_provenance() -> None:
         assert not value.calibrated or value.confidence != "guess"
 
 
-def test_ground_is_not_guessed_before_s_l1() -> None:
-    """S-L1 has not run, so the ground height must be unknown rather than plausible."""
-    assert load_constants().ground_top_y.value is None
+def test_ground_is_the_measured_s_l1_value() -> None:
+    """S-L1 measured the ground top at y = 0; it must stay a measurement, not a guess."""
+    ground = load_constants().ground_top_y
+    assert ground.value == 0.0
+    assert ground.calibrated
 
 
 @pytest.mark.parametrize(
@@ -142,6 +144,29 @@ def test_decoration_flag_overrides_the_solid_default() -> None:
 
 def test_decoration_flag_does_not_hide_a_hazard() -> None:
     assert role_from_description(_description(2, is_decoration=True)).role is Role.HAZARD
+
+
+@pytest.mark.parametrize(
+    ("object_id", "role", "variant"),
+    [(200, Role.PORTAL_SPEED, "0.5x"), (1334, Role.PORTAL_SPEED, "4x"),
+     (2016, Role.DECO, "camera"), (2063, Role.SPECIAL, None)],
+)
+def test_modifiers_are_told_apart_by_id(object_id, role, variant) -> None:
+    entry = role_from_description({**_description(20), "id": object_id})
+    assert entry.role is role and entry.variant == variant
+
+
+def test_modifier_id_override_needs_the_modifier_type() -> None:
+    """If a future version renumbers id 200, it must not inherit the speed-portal label."""
+    assert role_from_description({**_description(0), "id": 200}).role is Role.SOLID
+
+
+def test_speed_portal_variants_are_known_speeds() -> None:
+    from gd_ai_assistant.design.constants import SPEEDS
+    from gd_ai_assistant.design.roles import _MODIFIER_IDS
+
+    speeds = {v for r, _, v in _MODIFIER_IDS.values() if r is Role.PORTAL_SPEED}
+    assert speeds == set(SPEEDS)
 
 
 def test_unmapped_type_is_special_not_deco() -> None:

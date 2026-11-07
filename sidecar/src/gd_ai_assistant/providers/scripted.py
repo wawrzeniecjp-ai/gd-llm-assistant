@@ -49,7 +49,11 @@ _DEMO_GRID = 30.0
 #: in a level whose ground line sits higher: created correctly, reported correctly,
 #: and invisible. The real height now comes from the `ground_y` field of the last
 #: `get_editor_state` result, which is what `default_plan` reads.
-_DEMO_GROUND_Y_FALLBACK = 105.0
+#:
+#: 15 is the centre of the ground row: the ground top is y = 0 (S-L1, measured in M0).
+#: The old 105 was in the mod's former, +180-shifted coordinates, and still landed
+#: under the ground, because the true value in those coordinates was 195.
+_DEMO_GROUND_Y_FALLBACK = 15.0
 
 
 def _seed(text: str) -> int:

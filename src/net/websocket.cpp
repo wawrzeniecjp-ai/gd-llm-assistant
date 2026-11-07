@@ -227,6 +227,10 @@ arc::Future<Result<>> WebSocket::performHandshake(
     co_return Ok();
 }
 
+arc::Future<Result<>> WebSocket::sendPing() {
+    co_return co_await sendFrame(Opcode::Ping, {});
+}
+
 arc::Future<Result<>> WebSocket::sendFrame(std::uint8_t opcode, std::string_view payload) {
     std::string frame;
 
