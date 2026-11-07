@@ -17,6 +17,7 @@
 #include "../editor/level_revision.hpp"
 #include "../editor/object_catalog.hpp"
 #include "../editor/properties.hpp"
+#include "replay.hpp"
 
 using namespace geode::prelude;
 
@@ -342,10 +343,14 @@ std::optional<int> optionalInt(matjson::Value const& payload, char const* key, i
 } // namespace
 
 bool isDesignRequest(std::string_view type) {
-    return type == "get_level_objects" || type == "describe_object_types";
+    return type == "get_level_objects" || type == "describe_object_types"
+        || type == "run_replay";
 }
 
 std::unique_ptr<Job> makeDesignJob(std::string_view type, matjson::Value const& payload) {
+    if (type == "run_replay") {
+        return makeReplayJob(payload);
+    }
     if (type == "get_level_objects") {
         auto limit = optionalInt(payload, "limit", kDefaultLevelPage);
         if (!limit || *limit < 1 || *limit > kMaxLevelPage) {

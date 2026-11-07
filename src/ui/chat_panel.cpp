@@ -1220,6 +1220,10 @@ void ChatPanel::submitFromInputNode() {
     }
 }
 
+void ChatPanel::clearPlaytestSuppression() {
+    g_suppressPlaytestUntilMs = 0.0;
+}
+
 bool ChatPanel::inputHasFocus() {
     if (s_attached == nullptr || s_attached->m_inputNode == nullptr) {
         return false;

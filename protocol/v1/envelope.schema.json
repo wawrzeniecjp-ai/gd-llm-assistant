@@ -259,6 +259,16 @@
                     "required": ["direction", "payload", "result"],
                     "additionalProperties": false
                 },
+                "run_replay": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/runReplayPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/runReplayResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
                 "describe_object_types": {
                     "type": "object",
                     "properties": {

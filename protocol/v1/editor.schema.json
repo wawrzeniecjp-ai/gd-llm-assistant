@@ -397,6 +397,76 @@
             "additionalProperties": false
         },
 
+        "runReplayPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "description": "Play the level in the editor's playtest with scripted inputs at physics-tick granularity (LEVEL-DESIGN-SPEC.md 7.2).",
+            "properties": {
+                "start": {
+                    "type": "object",
+                    "properties": { "kind": { "enum": ["level_start", "start_pos"] }, "uid": { "type": "integer" } },
+                    "required": ["kind"],
+                    "additionalProperties": false
+                },
+                "inputs": {
+                    "type": "array",
+                    "maxItems": 2000,
+                    "items": {
+                        "type": "object",
+                        "required": ["tick", "action"],
+                        "properties": {
+                            "tick": { "type": "integer", "minimum": 0 },
+                            "action": { "enum": ["press", "release"] },
+                            "player": { "enum": [1, 2] }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "max_ticks": { "type": "integer", "minimum": 1, "maximum": 14400, "default": 2400 },
+                "sample_every": { "type": "integer", "minimum": 1, "maximum": 240, "default": 1 },
+                "time_scale": { "type": "number", "minimum": 1, "maximum": 1, "description": "Fixed at 1 until spike S-L4." }
+            },
+            "additionalProperties": false
+        },
+        "runReplayResult": {
+            "type": "object",
+            "required": ["outcome", "ticks", "trace", "tick_rate_observed"],
+            "properties": {
+                "outcome": { "enum": ["death", "max_ticks", "no_ticks", "stalled"] },
+                "ticks": { "type": "integer", "minimum": 0 },
+                "death": {
+                    "type": ["object", "null"],
+                    "properties": {
+                        "tick": { "type": "integer" },
+                        "x": { "type": "number" },
+                        "y": { "type": "number" },
+                        "cause_uid": { "type": ["integer", "null"] },
+                        "cause_id": { "type": ["integer", "null"] }
+                    }
+                },
+                "trace": {
+                    "type": "object",
+                    "description": "Columnar: one array per field, all the same length.",
+                    "properties": {
+                        "tick": { "type": "array", "items": { "type": "integer" } },
+                        "x": { "type": "array", "items": { "type": "number" } },
+                        "y": { "type": "array", "items": { "type": "number" } },
+                        "vy": { "type": "array", "items": { "type": "number" } },
+                        "speed": { "type": "array", "items": { "type": "number" } },
+                        "grounded": { "type": "array", "items": { "type": "integer" } },
+                        "gravity": { "type": "array", "items": { "type": "integer" } },
+                        "mini": { "type": "array", "items": { "type": "integer" } },
+                        "mode": { "type": "array", "items": { "type": "string" } }
+                    }
+                },
+                "trace_truncated": { "type": "boolean" },
+                "tick_rate_observed": { "type": "number" },
+                "time_scale": { "type": "number" },
+                "diagnostics": { "type": "object", "description": "Spike S-L3 measurements; shape may change." }
+            },
+            "additionalProperties": false
+        },
+
         "describeObjectTypesPayload": {
             "x-direction": "s2m",
             "type": "object",

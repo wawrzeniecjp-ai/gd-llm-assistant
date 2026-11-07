@@ -3,17 +3,41 @@
     "game_version": "2.2091",
     "calibrated_at": null,
     "note": "LEVEL-DESIGN-SPEC.md 6.3. Every leaf is {value, source, confidence}. confidence is measured | derived | guess. A null value means 'not known yet', and code that needs it must refuse rather than assume. Replaced by scripts/calibrate.py (M2).",
-    "tick_rate": { "value": 240, "source": "initial-guess: GD 2.2 physics rate, to be confirmed by S-L3", "confidence": "guess" },
+    "tick_rate": {
+        "value": 240,
+        "source": "S-L3, scripts/check_replay.py 2026-11-07: processCommands runs 240/s with a fixed 1/240 s step",
+        "confidence": "measured"
+    },
     "ground_top_y": {
         "value": 0.0,
         "source": "S-L1, scripts/check_m0_fixes.py 2026-11-07: a default block resting on the ground reads y = 15 (save key 3 = protocol y after the M0 sign fix), so the ground top is 0. One level so far; the spec's three-level check (incl. a raised start position) is still open.",
         "confidence": "measured"
     },
     "units_per_second": {
-        "0.5x": { "value": 251.16, "source": "initial-guess: commonly cited", "confidence": "guess" },
-        "1x": { "value": 311.58, "source": "initial-guess: commonly cited", "confidence": "guess" },
-        "2x": { "value": 387.42, "source": "initial-guess: commonly cited", "confidence": "guess" },
-        "3x": { "value": 468.0, "source": "initial-guess: commonly cited", "confidence": "guess" },
-        "4x": { "value": 576.0, "source": "initial-guess: commonly cited", "confidence": "guess" }
+        "0.5x": {
+            "value": 251.16,
+            "source": "initial-guess: commonly cited",
+            "confidence": "guess"
+        },
+        "1x": {
+            "value": 311.58,
+            "source": "S-L3: getRealPosition advances 1.29825 units per tick at 1x, x 240",
+            "confidence": "measured"
+        },
+        "2x": {
+            "value": 387.42,
+            "source": "initial-guess: commonly cited",
+            "confidence": "guess"
+        },
+        "3x": {
+            "value": 468.0,
+            "source": "initial-guess: commonly cited",
+            "confidence": "guess"
+        },
+        "4x": {
+            "value": 576.0,
+            "source": "initial-guess: commonly cited",
+            "confidence": "guess"
+        }
     }
 }

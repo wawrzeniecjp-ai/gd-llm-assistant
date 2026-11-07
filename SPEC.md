@@ -274,6 +274,46 @@ actually be launched and the mod verified against it -- a version claim that has
 been run is worse than an honest narrower one, because it turns a clear refusal into a
 crash.
 
+## 0.2c Level design layer, M2 in progress: S-L3 playtest control (2026-11-07)
+
+`run_replay` exists in the mod (LEVEL-DESIGN-SPEC.md 7.2), with `scripts/check_replay.py`
+as the spike. Three in-game runs; findings, all measured:
+
+- **The tick is `GJBaseGameLayer::processCommands`**: 240 calls per second during the
+  editor's playtest, a fixed `dt` of 1/240 s, no half-ticks, two per frame at ~120 fps.
+  `m_gameState.m_currentProgress` advances by 2 per tick.
+- **Order within a tick:** `PlayerObject::update(dt = 0.25)` (the move; GD's dt is in
+  60 fps frames, so 0.25 is one 240 Hz tick), then `PlayerObject::postCollision`, then
+  `processCommands`. A press injected with `handleButton` at the start of
+  `processCommands` for tick N takes effect in the move of tick N+1: the first airborne
+  sample is tick N+1.
+- **Sample `getRealPosition()`, not `m_position`.** `m_position` is a copy that lags a tick
+  and only catches up every other tick (x read 0, 2.596, 0, 2.596...). The first run
+  sampled it and reported a false one-tick non-determinism.
+- **Determinism: exact.** Five runs of one jump agree to 0.000 units in x and y (exit
+  criterion 0.01).
+- **1x speed: 311.58 units/s**, 1.29825 per tick, measured (it matches the commonly cited
+  value). Tick rate 240, measured. Both recorded in `physics_constants.json`.
+- **Cube jump, first look** (calibration proper is the next step): vy 11.18 at take-off,
+  minus 0.216 per tick; y moves 0.225 x vy per tick, so gravity is exactly constant (second
+  difference -0.0486); apex 63.85 units, airtime 103 ticks.
+- **Death:** the editor stops its playtest **by itself** when the player dies, from
+  inside the player's collision step (outside `processCommands`), and the reset clears
+  the player. The replay watches the stop paths (`LevelEditorLayer::onStopPlaytest`,
+  `EditorUI::onStopPlaytest` / `playtestStopped`): a stop during any part of the physics
+  step, or with the player's dead flag set, is a death; between ticks it is the user,
+  `CANCELLED`. Measured: death at tick 460, player x 597.2, so its right edge (+15) is
+  612.2 against the spike hitbox's left edge at 615 - 3 = 612.
+- **The game does not report the death's cause** for a hazard: `m_collidedObject` is null.
+  The sidecar names it instead, from the death position and the level geometry, which
+  the simulator needs anyway. So S-L3's "death object reported" is met on the sidecar
+  side, not by the mod.
+- **Bridge:** the reconnect backoff (up to 30 s) now sleeps in 250 ms slices, so a stop is
+  seen promptly. A 5-6 s delay on closing GD was reported; the log shows Geode's shutdown
+  completing in the same second, so it is not attributed to the mod.
+- **Not done yet:** the on-screen "Assistant is testing..." label; `start_pos` starts;
+  removing the probe instrumentation once calibration no longer needs it.
+
 ## 0.2b Level design layer, M1: GridText and schematic (2026-11-07)
 
 Built and tested headless (277 sidecar tests). **Live test passed (2026-11-07):** in the

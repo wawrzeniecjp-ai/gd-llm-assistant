@@ -128,6 +128,10 @@ public:
     /// True when the panel is open and its text input has keyboard focus.
     [[nodiscard]] static bool inputHasFocus();
 
+    /// Lifts the post-send playtest block, for a playtest the assistant starts itself
+    /// (`run_replay`): the block exists to stop the user's Enter from starting one.
+    static void clearPlaytestSuppression();
+
     /// Shows or hides the message area and input, keeping the header visible.
     void toggle();
 

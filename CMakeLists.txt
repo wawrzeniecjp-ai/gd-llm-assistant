@@ -31,6 +31,7 @@ add_library(${PROJECT_NAME} SHARED
     src/editor/screenshot.cpp
     src/editor/transaction.cpp
     src/exec/design_jobs.cpp
+    src/exec/replay.cpp
     src/exec/editor_jobs.cpp
     src/exec/handler_verification.cpp
     src/exec/job_queue.cpp

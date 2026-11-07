@@ -78,6 +78,8 @@ def test_registry_covers_every_message_in_the_spec() -> None:
         # level design layer foundations (LEVEL-DESIGN-SPEC.md 4.2, 4.3)
         "describe_object_types",
         "get_level_objects",
+        # in-game replay, the simulator's ground truth (LEVEL-DESIGN-SPEC.md 7.2)
+        "run_replay",
         # events, mod -> sidecar
         "editor_closed",
         "level_changed",

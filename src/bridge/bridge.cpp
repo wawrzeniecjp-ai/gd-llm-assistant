@@ -548,7 +548,11 @@ arc::Future<> Bridge::run(std::string url) {
             }
         }
 
-        co_await arc::sleep(asp::time::Duration::fromSecs(backoffSecs));
+        // In short slices, so a stop (the game exiting, the editor closing) is seen
+        // within a quarter second instead of after the rest of a backoff of up to 30 s.
+        for (int slice = 0; slice < backoffSecs * 4 && !m_stopRequested; ++slice) {
+            co_await arc::sleep(asp::time::Duration::fromMillis(250));
+        }
         backoffSecs = std::min(backoffSecs * 2, kMaxBackoffSecs);
     }
 

@@ -918,6 +918,15 @@ limit, or paged into multiple responses. S-L3 picks one of the two.
 - Replay is refused (`EDITOR_BUSY`) while a transaction is open with uncommitted work in
   progress. It runs between transactions, or the sidecar ends the transaction first.
 
+**As built (S-L3, 2026-11-07).** The tick hook is `processCommands` (240/s, fixed
+1/240 s); the move happens in `PlayerObject::update` just before it, so an input injected
+at tick N moves the player from tick N+1. Positions are sampled with
+`getRealPosition()` (`m_position` lags). Death stops the playtest from inside the
+collision step and the game leaves `m_collidedObject` null for hazards, so the mod reports
+the death tick and position and the **sidecar** names the cause from the geometry. The
+trace is columnar (`trace.tick`, `trace.x`, ...), capped at 6000 samples per call. See
+SPEC.md 0.2c.
+
 ### 7.2.2 Start positions
 
 Testing from mid-level needs a start position. v1 uses only **existing** start position
