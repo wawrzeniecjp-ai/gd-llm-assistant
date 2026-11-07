@@ -19,6 +19,7 @@ cancellation that triggered it.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -30,7 +31,10 @@ from typing import Any, Protocol
 from . import capture, properties_table, save_properties, tools
 from . import catalog as catalog_module
 from .agent_prompt import system_prompt
-from .design.level_model import SnapshotCache
+from .design import grid_tools
+from .design import render as render_module
+from .design.coords import Grid, GroundUnknownError
+from .design.level_model import LevelChangingError, SnapshotCache, SnapshotError
 from .design.roles import load_role_table
 from .providers.base import (
     AssistantTurn,
@@ -595,6 +599,8 @@ class ToolLoop:
                 return properties_table.search_properties(call.arguments), False
             if tool.spec.name == "describe_class":
                 return properties_table.describe_class(call.arguments), False
+            if tool.spec.name in tools.DESIGN_TOOLS:
+                return await self._run_design_tool(tool, call)
             # Lazy, and only here. Reading the game's object table costs a handful of
             # round trips, and most turns never look an id up -- paying for it at the
             # start of every turn would slow down "delete the spikes" for nothing.
@@ -650,6 +656,107 @@ class ToolLoop:
             self._objects_used += tool.object_count(call.arguments)
         if tool.is_action:
             self._actions.append(_describe(tool.spec.name, call.arguments, result))
+        return result, False
+
+    async def _run_design_tool(
+        self, tool: tools.Tool, call: ToolCall
+    ) -> tuple[dict[str, Any], bool]:
+        """GridText and schematic tools: computed here from the level snapshot.
+
+        `place_grid` is the one that edits, and it goes through the same machinery as
+        `create_objects`: the per-turn cap (counted before anything is sent), the turn's
+        lazy transaction, and plain `delete_objects` / `create_objects` requests, so the
+        mod needs nothing new and the result is one undo step with the rest of the turn.
+        """
+        args = call.arguments if isinstance(call.arguments, dict) else {}
+        try:
+            grid = Grid.from_constants()
+            model = await self._snapshot.get()
+        except GroundUnknownError as exc:
+            return {"error": str(exc)}, True
+        except LevelChangingError:
+            return {"error": "the level kept changing while it was being read; try again "
+                    "once the user has stopped editing"}, True
+        except SnapshotError as exc:
+            if exc.code == "UNSUPPORTED_REQUEST":
+                self._unsupported.add("get_level_objects")
+            return {"error": f"could not read the level: {exc}"}, True
+
+        name = tool.spec.name
+        if name == "render_grid":
+            result = grid_tools.render_grid(model, grid, args)
+            return result, "error" in result
+
+        if name == "render_schematic":
+            try:
+                schematic = render_module.render_schematic(model, grid, args)
+            except render_module.SchematicError as exc:
+                return {"error": str(exc)}, True
+            if len(schematic.png) > capture.MAX_FILE_BYTES:
+                return {"error": "the schematic is too large; narrow the range"}, True
+            encoded = base64.b64encode(schematic.png).decode("ascii")
+            self._pending_images.append(f"data:image/png;base64,{encoded}")
+            result = schematic.describe(grid)
+            result["note"] = "The image is attached to your next message."
+            return result, False
+
+        plan = grid_tools.plan_place_grid(model, grid, self._snapshot.roles, args)
+        if isinstance(plan, dict):
+            return plan, True
+        if plan.preview:
+            return plan.preview_result(), False
+        if not plan.creates and not plan.deletes:
+            return {"created": 0, "deleted": 0, "notes": ["the grid is empty"]}, False
+        if self._objects_used + plan.object_count > self._max_objects:
+            return (
+                {
+                    "error": (
+                        f"refused: this grid would take the turn to "
+                        f"{self._objects_used + plan.object_count} objects, over the "
+                        f"{self._max_objects} limit"
+                    ),
+                    "_limit_reached": True,
+                },
+                True,
+            )
+        if self._txn_id is None:
+            opened, is_error = await self._begin_transaction()
+            if is_error:
+                return opened, True
+
+        deleted = 0
+        if plan.deletes:
+            response = await self._link.request("delete_objects", {"targets": plan.deletes})
+            self._snapshot.invalidate()
+            if not response.ok:
+                return self._request_failed("delete_objects", response), True
+            delete_result = response.result if isinstance(response.result, dict) else {}
+            deleted = int(delete_result.get("deleted_count", len(plan.deletes)) or 0)
+            self._objects_used += len(plan.deletes)
+            self._actions.append(
+                _describe("delete_objects", {"targets": plan.deletes}, delete_result)
+            )
+
+        created: list[int] = []
+        if plan.creates:
+            payload = {"objects": plan.creates}
+            response = await self._link.request("create_objects", payload)
+            self._snapshot.invalidate()
+            if not response.ok:
+                failed = self._request_failed("create_objects", response)
+                if deleted:
+                    failed["note"] = (f"{deleted} objects were already deleted before the "
+                                      "create failed; the turn's undo restores them")
+                return failed, True
+            create_result = response.result if isinstance(response.result, dict) else {}
+            created = [int(u) for u in create_result.get("created") or []]
+            self._objects_used += len(plan.creates)
+            self._actions.append(_describe("create_objects", payload, create_result))
+
+        result: dict[str, Any] = {"created": len(created), "deleted": deleted,
+                                  "created_uids": created}
+        if plan.notes:
+            result["notes"] = plan.notes
         return result, False
 
     def _request_failed(self, request_type: str, response: Any) -> dict[str, Any]:

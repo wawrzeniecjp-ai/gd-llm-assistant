@@ -274,6 +274,46 @@ actually be launched and the mod verified against it -- a version claim that has
 been run is worse than an honest narrower one, because it turns a clear refusal into a
 crash.
 
+## 0.2b Level design layer, M1: GridText and schematic (2026-11-07)
+
+Built and tested headless (277 sidecar tests). **Live test passed (2026-11-07):** in the
+game, the model read a hand-built section with `render_grid`, rebuilt it with `place_grid`
+(`replace`), and the second read was identical. M1's done-when criteria are met.
+Sidecar only: the mod is unchanged, `place_grid` builds through the existing
+`delete_objects` / `create_objects` requests.
+
+- **`design/grid.py`:** GridText parse/emit, the built-in legend (every default id is
+  checked against `roles.json`), custom legends, hitbox footprints for multi-cell objects,
+  reading from the snapshot and planning placement. Property test: `emit(parse(g)) == g`
+  (hypothesis, 300 cases); fixture test: a written grid reads back as the same text.
+- **Tools:** `render_grid` (also accepts `cols`/`rows` in grid cells, and returns
+  `legend_for_place_grid` when custom characters appear), `place_grid` (`add` refuses
+  occupied cells, `replace` rebuilds the rectangle, `preview`, per-turn cap and the turn's
+  transaction; `verify` waits for M2), `render_schematic` (hitbox diagram, `grid` overlay;
+  the others report the milestone that brings them).
+- **Prompt:** a GridText section; the ground paragraph now gives y = 0 (S-L1) instead of
+  the `lowest_y` workaround.
+- **Roles:** the start position (id 31) is typed by the game as a trigger-flagged Modifier;
+  it is now `start_pos`, by id.
+- **S-L9, measured** (`scripts/check_snap.py` and a read of the test level, 2026-11-07).
+  Placed by a normal click, offsets from the cell centre: small spike (39) y -9, yellow
+  and pink pads (35, 140) -13, blue pad (67) -12, the orb (36, control) 0, and **half
+  slabs at the top of the cell**: planks (40, 1903, 147, 1904, 215) +8, the 15-unit
+  outlined half block (662) +7.5. So the editor's natural slab is `-` (+8); `=` (bottom)
+  is -8, derived from the plank's hitbox. Offsets are per character (`_SNAP_BY_CHAR`).
+- **The editor's in-cell offset is per object, not geometry.** Planks are flush with their
+  hitbox (+8, where the sprite would give +8.25), the thin "perspective outline" blocks
+  (534, 525: 10-unit sprite, 2-unit hitbox) are flush with their sprite (-10), and the
+  small spike matches neither (-9). Custom legend entries can therefore say
+  `"align": "top"` (or bottom/left/right): flush with the hitbox edge, which covers the
+  common half blocks exactly. On read an aligned match must be exact (+-0.5); anything
+  else stays `?`.
+- **Found in the test level:** 17 spikes at x = 30c, on cell *boundaries* rather than
+  centres, probably from early programmatic placement. They read as `?` (-15 units off),
+  which is correct; an early version of the alignment fallback accepted them as "flush
+  left" within the +-3 centre tolerance, hence the exact-match rule.
+- **Dependencies:** Pillow (renderer, planned by the spec), hypothesis (dev).
+
 ## 0.2a Level design layer, M0 (2026-11-07)
 
 Foundations for docs/LEVEL-DESIGN-SPEC.md, built and unit-tested. The first in-game check

@@ -335,6 +335,10 @@ class SnapshotCache:
         self._model: LevelModel | None = None
         self.loads = 0
 
+    @property
+    def roles(self) -> RoleTable:
+        return self._roles
+
     async def get(self) -> LevelModel:
         if self._model is None:
             self._model = await load_level_model(self._link, self._roles)

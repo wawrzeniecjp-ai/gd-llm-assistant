@@ -504,6 +504,16 @@ role, and a test checks this.
 
 `;` is not a cell character: it only starts a comment line, so a row can never begin with it.
 
+**As built (M1).** Snap offsets are per character (`_SNAP_BY_CHAR` in `grid.py`), not
+in `roles.json`: only the built-in legend needs them. Measured (S-L9): `,` -9, `_` and `~`
+-13, `!` -12, and the editor puts a half slab at the **top** of its cell, so `-` is +8
+(measured) and `=` is -8 (derived from the plank's hitbox); the rest 0 (the orb was
+measured as the control). The editor's offsets are per object and do not follow one
+geometric rule (SPEC.md 0.2b), so a custom legend entry may add `"align"`:
+`top`/`bottom`/`left`/`right`, flush with that edge of its hitbox. `render_grid` reads an
+object as aligned only on an exact match (+-0.5), otherwise `?`. The start position (id 31) is
+typed by the game as a trigger-flagged `Modifier`, so `roles.py` maps it by id.
+
 Orientation for the pad characters follows the gravity the solver reports at that cell.
 Where there is no route yet, they face up. An explicit custom-legend entry overrides this.
 
@@ -572,6 +582,10 @@ Representation rules:
   and the object is listed in `extras` with the reason. Nothing is silently snapped.
 - When two gameplay objects share a cell, the cell shows the one with the higher-priority role
   (hazard > orb > pad > portal > solid) and the cell is listed in `overlaps`.
+- `cols` / `rows` (inclusive pairs, in cells) may be given instead of `x_range` /
+  `y_range`: after one read the model thinks in cells.
+- When custom characters appear, the result also carries `legend_for_place_grid`, the
+  legend that recreates them, so a copy through `place_grid` loses nothing.
 - Ids without a built-in character get a custom character assigned automatically for this
   response, and `legend_used` reports it. That way the model can copy an unusual block type
   back into `place_grid`.
@@ -1389,6 +1403,9 @@ draw what no screenshot can: the route, the timing windows, the beats, the secti
   each press, width = window), `beats` (vertical lines: bars solid, beats dashed), `sections`
   (plan sections shaded and labelled), `camera` (the player's visible rectangle at selected
   presses, for blind-jump review).
+- **As built (M1):** only the `grid` overlay draws; the others return a note naming the
+  milestone that brings them. A hazard is drawn as its sprite outline (faint) with its
+  hitbox solid inside, because a spike's deadly area is a fraction of its art.
 - Max image size 1600×600 px. Wider ranges reduce `px_per_cell` automatically, with a floor
   of 4. Below that the call errors and asks for a narrower range.
 

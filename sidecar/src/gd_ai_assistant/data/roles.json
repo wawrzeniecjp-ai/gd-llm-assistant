@@ -551,8 +551,8 @@
   },
   {
    "id": 31,
-   "role": "trigger",
-   "subrole": "trigger",
+   "role": "start_pos",
+   "subrole": "start_pos",
    "object_type": 20,
    "hitbox": {
     "x": -15.0,

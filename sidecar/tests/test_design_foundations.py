@@ -156,6 +156,11 @@ def test_modifiers_are_told_apart_by_id(object_id, role, variant) -> None:
     assert entry.role is role and entry.variant == variant
 
 
+def test_start_position_beats_its_trigger_flag() -> None:
+    entry = role_from_description({**_description(20, is_trigger=True), "id": 31})
+    assert entry.role is Role.START_POS
+
+
 def test_modifier_id_override_needs_the_modifier_type() -> None:
     """If a future version renumbers id 200, it must not inherit the speed-portal label."""
     assert role_from_description({**_description(0), "id": 200}).role is Role.SOLID

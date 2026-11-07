@@ -185,6 +185,7 @@ _MODIFIER_IDS: dict[int, tuple[Role, str | None, str | None]] = {
     202: (Role.PORTAL_SPEED, "speed", "2x"),    # boost_03
     203: (Role.PORTAL_SPEED, "speed", "3x"),    # boost_04
     1334: (Role.PORTAL_SPEED, "speed", "4x"),   # boost_05
+    31: (Role.START_POS, "start_pos", None),    # flagged as a trigger by the game
     2016: (Role.DECO, "editor_guide", "camera"),
     3642: (Role.DECO, "editor_guide", "bpm"),
 }
@@ -207,10 +208,11 @@ def role_from_description(
     if object_type not in _GAME_TYPES:
         log.info("roles: unmapped GameObjectType %d (id %d)", object_type, object_id)
 
-    if description.get("is_trigger"):
-        role, subrole, variant = Role.TRIGGER, "trigger", None
-    elif object_type == _MODIFIER and object_id in _MODIFIER_IDS:
+    if object_type == _MODIFIER and object_id in _MODIFIER_IDS:
+        # Before the trigger flag: the start position is flagged as a trigger too.
         role, subrole, variant = _MODIFIER_IDS[object_id]
+    elif description.get("is_trigger"):
+        role, subrole, variant = Role.TRIGGER, "trigger", None
     elif description.get("is_decoration") and role is Role.SOLID:
         # The type enum's default is Solid (0), so a decoration that never set its
         # type would otherwise read as a collidable block.

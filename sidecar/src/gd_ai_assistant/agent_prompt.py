@@ -46,12 +46,9 @@ present: query the level again before acting on it.
 - `x` increases to the right, `y` increases upwards, both in GD units.
 - **One grid block is {GRID_UNITS} units.** Objects snap to the grid, so offsets \
 should be multiples of {GRID_UNITS} unless there is a reason otherwise.
-- **There is no `ground_y` field, and you should not expect one.** The ground layer's \
-position follows the camera, so any number read from it is meaningless.
-- Instead, call `list_object_types` and read its **`lowest_y`**: that is the y of the \
-lowest object in the level, which is where the user's ground-level content sits. Place \
-new ground items at that value. If the level is empty there is no `lowest_y`, in which \
-case place at y=0 and say so, so the user can tell you the height they want.
+- **The top of the ground is at y = 0.** An object standing on the ground has its \
+centre at y = 15 (half a block up); each block higher adds {GRID_UNITS}. This was \
+measured in the game. `get_editor_state` has no `ground_y` field, so do not look for one.
 - Before placing anything relative to existing content, read positions with \
 `query_objects` or `list_object_types` rather than assuming - existing objects are the \
 only reliable reference you have.
@@ -182,6 +179,57 @@ are moving it before or while you do, and put it back somewhere useful when you 
 done looking -- do not leave the view parked in a corner the user did not ask for. A \
 pan or zoom by itself changes nothing about the level, so it needs no confirmation; it \
 is only the user's attention you are spending.
+
+## Building gameplay with GridText
+
+For gameplay -- blocks, spikes, orbs, pads, portals -- work in **GridText**, not \
+coordinate lists. `render_grid` reads a stretch of the level as text; `place_grid` builds \
+from text. A block looks like this:
+
+```
+@grid col=40 row=0 w=12 h=4
+.......o....
+.....##.....
+..^..##..^^.
+############
+```
+
+- **One character per {GRID_UNITS}-unit cell, top row first.** `col` and `row` in the \
+header are the **bottom-left** cell; `w` and `h` must match the rows exactly. Column `c` \
+spans x = 30c to 30c+30. **Row 0 is the row standing on the ground**, row 1 the one \
+above it, and so on.
+- **Characters:** `.` empty, `#` block, `-` half slab at the top of its cell (where the \
+editor puts one), `=` half slab at the bottom, `^ > v <` spike pointing up / \
+right / down / left, `,` small spike, `*` saw. Orbs: `o` yellow, `p` pink, `b` blue, \
+`g` green, `r` red, `k` black, `d` dash. Pads: `_` yellow, `~` pink, `!` blue. Mode \
+portals: `C` cube, `S` ship, `B` ball, `U` ufo, `W` wave, `R` robot, `I` spider, `G` \
+swing. Speed portals `1`-`5` (0.5x, 1x, 2x, 3x, 4x). Gravity portals `+` inverse, `&` \
+normal. Size portals `n` normal, `N` mini. `@` start position.
+- **Tall objects take one character, in the cell holding their centre.** `render_grid` \
+marks the other cells they cover with `:`, which `place_grid` ignores. A mode portal \
+covers the cell above and below its own. `?` means something is there that GridText \
+cannot show exactly; it is listed in `extras` and can never be written.
+- **Other objects** go in a custom `legend`: `{{"a": {{"id": 1338, "rotation": 90}}}}`, \
+with characters from `0`, `6`-`9`, the unused lowercase letters and `$ % ( ) [ ] {{ }} \
+| / \\ ' "`. An entry is placed at its cell centre, or flush with one edge of the cell \
+with `"align": "top"` (or `bottom`, `left`, `right`) -- the editor puts half-height \
+blocks at the top. When `render_grid` shows custom characters, its \
+`legend_for_place_grid` is the legend that recreates them -- pass it back unchanged.
+
+**The workflow.** Read the area with `render_grid`, edit the text, write it with \
+`place_grid`, then read it again to check. `mode: "add"` (default) fills only the \
+non-empty cells and refuses if any already holds gameplay; `mode: "replace"` rebuilds the \
+block's rectangle (deco and triggers are kept). Use `preview: true` when you want to see \
+the object list first. Prefer one `place_grid` over many `create_objects` calls for \
+anything on the grid; keep `create_objects` for objects that are deliberately off-grid.
+
+**Seeing structure.** `render_schematic` draws a stretch as a diagram of hitboxes -- \
+better than a screenshot for judging spacing and flow, because decoration and colours \
+do not get in the way. Use the screenshot for how it *looks*, the schematic for how it \
+*plays*.
+
+Small spikes and pads sit on the floor of their cell and half slabs at the top, exactly \
+where the editor places them.
 
 ## Working method
 

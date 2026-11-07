@@ -785,8 +785,144 @@ def _build() -> dict[str, Tool]:
             mutates_objects=False,
             is_action=True,
         ),
+        *_design_tools(),
     ]
     return {tool.spec.name: tool for tool in tools}
+
+
+#: Local tools built on the level snapshot (LEVEL-DESIGN-SPEC.md 5, 13). The agent runs
+#: them itself; `place_grid` then sends ordinary `delete_objects`/`create_objects`.
+DESIGN_TOOLS = frozenset({"render_grid", "place_grid", "render_schematic"})
+
+
+def _design_tools() -> list[Tool]:
+    layers = {
+        "type": "array",
+        "items": {"type": "string", "enum": ["gameplay", "triggers", "deco"]},
+        "description": "Which objects to include. Default: gameplay only.",
+    }
+    cell_range = {
+        "type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2,
+        "description": "Inclusive [first, last] pair, in grid cells.",
+    }
+    return [
+        Tool(
+            spec=ToolSpec(
+                name="render_grid",
+                description=(
+                    "Read a stretch of the level as GridText: one character per 30-unit "
+                    "cell, top row first, under a header `@grid col=C row=R w=W h=H` giving "
+                    "the bottom-left cell. Row 0 is the row standing on the ground. Use it "
+                    "to understand gameplay structure before changing it, and as the "
+                    "starting point for `place_grid`. Objects GridText cannot show exactly "
+                    "(off-centre, rotated by a non-right angle, scaled) appear as `?` and "
+                    "are listed in `extras`; nothing is silently snapped. Two gameplay "
+                    "objects in one cell are listed in `overlaps`. Objects without a "
+                    "built-in character get a custom one, and `legend_for_place_grid` "
+                    "holds the legend that recreates them. Limits: 200 columns, 40 rows."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "x_range": {**_RANGE, "description": "Level units, [min, max]."},
+                        "y_range": {
+                            **_RANGE,
+                            "description": "Level units. Default: from the ground up to "
+                            "two rows above the highest gameplay object.",
+                        },
+                        "cols": cell_range,
+                        "rows": cell_range,
+                        "layers": layers,
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+            requires=("get_level_objects",),
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="place_grid",
+                description=(
+                    "Build gameplay from a GridText block (same format `render_grid` "
+                    "returns). Each character places one object at its cell centre. "
+                    "`mode: add` (default) only fills non-empty cells and refuses if any "
+                    "of them already holds a gameplay object, listing the clashes. "
+                    "`mode: replace` first deletes every gameplay object in the block's "
+                    "rectangle (deco and triggers are kept), then builds. `.` is empty, "
+                    "`:` marks a cell covered by a tall object anchored elsewhere (it is "
+                    "ignored), `?` cannot be written. `preview: true` changes nothing and "
+                    "returns the objects it would create. Everything placed is one undo "
+                    "step with the rest of the turn."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["grid"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "grid": {"type": "string", "description": "One GridText block."},
+                        "legend": {
+                            "type": "object",
+                            "description": (
+                                "Custom characters, e.g. {\"a\": {\"id\": 1338, "
+                                "\"rotation\": 90}}. Keys: id (required), rotation "
+                                "(multiple of 90), flip_x, flip_y, properties (z_layer, "
+                                "z_order, editor_layer, groups, color_channel_1/2). "
+                                "Built-in characters cannot be redefined."
+                            ),
+                        },
+                        "mode": {"type": "string", "enum": ["add", "replace"],
+                                 "default": "add"},
+                        "preview": {"type": "boolean", "default": False},
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=True,
+            is_action=True,
+            requires=("get_level_objects", "create_objects", "delete_objects"),
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="render_schematic",
+                description=(
+                    "Draw a stretch of the level as a diagram and look at it: hitboxes, "
+                    "not sprites, so what you see is what collides. Solids blue, hazards "
+                    "red, orbs and pads as coloured circles, portals as labelled outlined "
+                    "bars, deco faint grey, triggers as ticks along the top, the ground in "
+                    "brown, with a cell grid and column numbers. Works without the game's "
+                    "visuals getting in the way: use it to judge structure, spacing and "
+                    "flow over a longer stretch than GridText shows comfortably. Up to "
+                    "1600x600 px; wide ranges are drawn smaller."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["x_range"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "x_range": {**_RANGE, "description": "Level units, [min, max]."},
+                        "y_range": {**_RANGE, "description": "Level units. Default: auto."},
+                        "layers": {**layers, "description": "Default: gameplay and deco."},
+                        "overlays": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": [
+                                "grid", "route", "windows", "beats", "sections", "camera"]},
+                            "description": "Default: grid. The others arrive with later "
+                            "features and are reported as unavailable for now.",
+                        },
+                        "px_per_cell": {"type": "integer", "minimum": 4, "maximum": 40,
+                                        "default": 12},
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+            requires=("get_level_objects",),
+        ),
+    ]
 
 
 TOOLS: dict[str, Tool] = _build()

@@ -827,9 +827,11 @@ def test_every_tool_schema_is_valid_json_schema(name: str) -> None:
 
 
 def test_every_mutating_tool_maps_to_a_protocol_request() -> None:
+    """A mutating tool either is a mod request or is built from the mutating ones."""
     for tool in tools.TOOLS.values():
         if tool.mutates_objects or tool.is_action:
-            assert tool.protocol_type is not None, tool.spec.name
+            builds = "create_objects" in tool.requires
+            assert tool.protocol_type is not None or builds, tool.spec.name
 
 
 def test_the_prompt_lists_exactly_the_settable_properties() -> None:
