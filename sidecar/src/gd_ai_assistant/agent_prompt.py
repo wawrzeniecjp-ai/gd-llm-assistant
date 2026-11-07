@@ -231,6 +231,22 @@ do not get in the way. Use the screenshot for how it *looks*, the schematic for 
 Small spikes and pads sit on the floor of their cell and half slabs at the top, exactly \
 where the editor places them.
 
+**Checking that it can be played.** `verify_section` simulates the cube with physics \
+measured in the game and finds the presses that get through, with each press's timing \
+window. Pass `verify` to `place_grid` to check a block as you build it (a preview works \
+too). The rules:
+
+- **Never say gameplay is playable unless a verification said `possible`.** If you did \
+not verify, say so.
+- `impossible`: fix it (`furthest_x` and `frontier_causes` say where and what), or tell \
+the user plainly that it cannot be beaten.
+- `unverifiable`: the stretch holds something not simulated yet (only the cube, solids, \
+hazards, yellow/pink orbs and pads, and speed portals are). Say it could not be checked \
+and why; do not guess.
+- `inconclusive` is not a no: the search was cut short.
+- **Timing windows are difficulty.** One tick (~4 ms) is frame-perfect: a flaw unless the \
+user asked for an extreme level. Under ~25 ms is hard; 50 ms and up is comfortable.
+
 ## Working method
 
 - Start by calling `get_editor_state` when placement or coordinates matter.

@@ -31,10 +31,8 @@ DEFAULT_PX_PER_CELL = 12
 _HEADROOM_ROWS = 2
 _TRIGGER_STRIP = 8  # px at the top of the image for trigger ticks
 
-OVERLAYS_NOW = frozenset({"grid"})
+OVERLAYS_NOW = frozenset({"grid", "route", "windows"})
 OVERLAYS_LATER = {
-    "route": "M2 (simulator)",
-    "windows": "M2 (simulator)",
     "camera": "M2 (simulator)",
     "beats": "M4 (timeline)",
     "sections": "M4 (level plan)",
@@ -143,7 +141,8 @@ def _corners(obj: LevelObject, *, visual: bool = False) -> list[tuple[float, flo
     return out
 
 
-def render_schematic(model: LevelModel, grid: Grid, args: dict[str, Any]) -> Schematic:
+def render_schematic(model: LevelModel, grid: Grid, args: dict[str, Any],
+                     route: dict[str, Any] | None = None) -> Schematic:
     """Draw the requested range. Raises `SchematicError` for a range it cannot draw."""
     layers = args.get("layers") or ["gameplay", "deco"]
     unknown = [layer for layer in layers if layer not in LAYER_ROLES]
@@ -239,6 +238,13 @@ def render_schematic(model: LevelModel, grid: Grid, args: dict[str, Any]) -> Sch
         if _draw_object(draw, obj, px, ppc, font):
             drawn[obj.role.value] = drawn.get(obj.role.value, 0) + 1
 
+    if route is not None and route.get("result") == "possible":
+        _draw_route(draw, route, px, ppc, overlays, height, font)
+        drawn["route_presses"] = len(route.get("presses", []))
+    elif route is not None:
+        notes.append(f"no route drawn: the section is {route.get('result')}"
+                     + (f" ({route['reason']})" if route.get("reason") else ""))
+
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", optimize=True)
     return Schematic(buffer.getvalue(), width, height, ppc, (c0, c1), (r0, r1), notes, drawn)
@@ -300,3 +306,28 @@ def _draw_object(draw: ImageDraw.ImageDraw, obj: LevelObject, px, ppc: int, font
     else:
         draw.polygon(points, fill=(*colour, 255))
     return True
+
+
+_ROUTE = (20, 20, 20)
+_WINDOW = (46, 160, 67)
+
+
+def _draw_route(draw: ImageDraw.ImageDraw, route: dict[str, Any], px, ppc: int,
+                overlays: list[str], height: int, font) -> None:
+    """The solver's path as a line, presses as dots, windows as bars under each press."""
+    if "route" in overlays:
+        points = [px(x, y) for x, y in route.get("points", [])[::2]]
+        if len(points) > 1:
+            draw.line(points, fill=(*_ROUTE, 200), width=2)
+        for press in route.get("presses", []):
+            cx, cy = px(press["x"], press["y"])
+            draw.ellipse((cx - 4, cy - 4, cx + 4, cy + 4), fill=(*_ROUTE, 255))
+    if "windows" in overlays:
+        for press in route.get("presses", []):
+            x1, _ = px(press["x_lo"], 0)
+            x2, _ = px(press["x_hi"], 0)
+            draw.rectangle((x1, height - 6, max(x2, x1 + 2), height - 2),
+                           fill=(*_WINDOW, 230))
+            if ppc >= 8:
+                draw.text((x1, height - 18), f"{press['ms']:.0f}ms",
+                          fill=(*_WINDOW, 255), font=font)

@@ -792,7 +792,9 @@ def _build() -> dict[str, Tool]:
 
 #: Local tools built on the level snapshot (LEVEL-DESIGN-SPEC.md 5, 13). The agent runs
 #: them itself; `place_grid` then sends ordinary `delete_objects`/`create_objects`.
-DESIGN_TOOLS = frozenset({"render_grid", "place_grid", "render_schematic"})
+DESIGN_TOOLS = frozenset(
+    {"render_grid", "place_grid", "render_schematic", "verify_section"}
+)
 
 
 def _design_tools() -> list[Tool]:
@@ -876,6 +878,23 @@ def _design_tools() -> list[Tool]:
                         "mode": {"type": "string", "enum": ["add", "replace"],
                                  "default": "add"},
                         "preview": {"type": "boolean", "default": False},
+                        "verify": {
+                            "type": "object",
+                            "description": (
+                                "Simulate the block (plus 10 columns either side) and "
+                                "attach the result: is it playable, the presses, how much "
+                                "timing slack each has. Also works with preview. Placement "
+                                "is not blocked by a failure: fix it or tell the user."
+                            ),
+                            "properties": {
+                                "gamemode": {"type": "string", "default": "cube"},
+                                "speed": {"type": "string",
+                                          "enum": ["0.5x", "1x", "2x", "3x", "4x"],
+                                          "default": "1x"},
+                                "entry_row": {"type": "integer", "minimum": 0, "default": 0},
+                            },
+                            "additionalProperties": False,
+                        },
                     },
                 },
             ),
@@ -883,6 +902,58 @@ def _design_tools() -> list[Tool]:
             mutates_objects=True,
             is_action=True,
             requires=("get_level_objects", "create_objects", "delete_objects"),
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="verify_section",
+                description=(
+                    "Check that a stretch of the level can actually be played, with the "
+                    "game's measured physics. Finds a route (the presses), and for each "
+                    "press its timing window: how many ms early or late it can be. "
+                    "Results: possible (with route, windows, difficulty and the exit "
+                    "state), impossible (how far the furthest attempt got and what killed "
+                    "it), inconclusive (search cut short; not a no), unverifiable (the "
+                    "stretch contains something not simulated yet: only the cube, solids, "
+                    "hazards, yellow/pink orbs and pads, and speed portals are). "
+                    "`deaths_without_input` says where a run with no presses dies: the "
+                    "first obstacle. A window of one tick (~4 ms) is frame-perfect: too "
+                    "hard for any normal level."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["x_range"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "x_range": {**_RANGE, "description": "Level units, [start, end]."},
+                        "start_from": {
+                            "type": "string", "enum": ["level_start", "explicit"],
+                            "default": "level_start",
+                            "description": (
+                                "level_start plays from the beginning of the level and "
+                                "lists the presses inside x_range; explicit starts at "
+                                "x_range[0] in the given state."
+                            ),
+                        },
+                        "start": {
+                            "type": "object",
+                            "properties": {
+                                "mode": {"type": "string", "default": "cube"},
+                                "speed": {"type": "string",
+                                          "enum": ["0.5x", "1x", "2x", "3x", "4x"]},
+                                "row": {"type": "integer", "minimum": 0},
+                                "vy": {"type": "number"},
+                                "gravity": {"type": "integer", "enum": [1, -1]},
+                                "mini": {"type": "boolean"},
+                            },
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+            requires=("get_level_objects",),
         ),
         Tool(
             spec=ToolSpec(
@@ -909,8 +980,10 @@ def _design_tools() -> list[Tool]:
                             "type": "array",
                             "items": {"type": "string", "enum": [
                                 "grid", "route", "windows", "beats", "sections", "camera"]},
-                            "description": "Default: grid. The others arrive with later "
-                            "features and are reported as unavailable for now.",
+                            "description": "Default: grid. `route` draws the simulated "
+                            "path from the level start with presses as dots; `windows` "
+                            "shows each press's timing window as a green bar. beats, "
+                            "sections and camera arrive later.",
                         },
                         "px_per_cell": {"type": "integer", "minimum": 4, "maximum": 40,
                                         "default": 12},

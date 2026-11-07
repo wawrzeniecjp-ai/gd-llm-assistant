@@ -36,6 +36,7 @@ from .design import render as render_module
 from .design.coords import Grid, GroundUnknownError
 from .design.level_model import LevelChangingError, SnapshotCache, SnapshotError
 from .design.roles import load_role_table
+from .design.sim import verify as verify_module
 from .providers.base import (
     AssistantTurn,
     Message,
@@ -687,9 +688,18 @@ class ToolLoop:
             result = grid_tools.render_grid(model, grid, args)
             return result, "error" in result
 
+        if name == "verify_section":
+            result = verify_module.verify_section(model, args)
+            return result, "error" in result
+
         if name == "render_schematic":
             try:
-                schematic = render_module.render_schematic(model, grid, args)
+                overlays = set(args.get("overlays") or ())
+                route = None
+                if overlays & {"route", "windows"} and args.get("x_range"):
+                    route = verify_module.route_overlay(
+                        model, max(float(v) for v in args["x_range"]))
+                schematic = render_module.render_schematic(model, grid, args, route)
             except render_module.SchematicError as exc:
                 return {"error": str(exc)}, True
             if len(schematic.png) > capture.MAX_FILE_BYTES:
@@ -703,8 +713,17 @@ class ToolLoop:
         plan = grid_tools.plan_place_grid(model, grid, self._snapshot.roles, args)
         if isinstance(plan, dict):
             return plan, True
+        verification = None
+        if plan.verify is not None:
+            # Verified against the level as it would stand, so it works for a preview
+            # too, and computed before the edit so a failure is reported either way.
+            verification = verify_module.verify_placement(
+                model, plan.creates, plan.deletes, plan.block_x, plan.verify)
         if plan.preview:
-            return plan.preview_result(), False
+            preview = plan.preview_result()
+            if verification is not None:
+                preview["verification"] = verification
+            return preview, False
         if not plan.creates and not plan.deletes:
             return {"created": 0, "deleted": 0, "notes": ["the grid is empty"]}, False
         if self._objects_used + plan.object_count > self._max_objects:
@@ -755,6 +774,8 @@ class ToolLoop:
 
         result: dict[str, Any] = {"created": len(created), "deleted": deleted,
                                   "created_uids": created}
+        if verification is not None:
+            result["verification"] = verification
         if plan.notes:
             result["notes"] = plan.notes
         return result, False

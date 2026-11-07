@@ -107,6 +107,8 @@ class PlaceGridPlan:
     deletes: list[int] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     preview: bool = False
+    verify: dict[str, Any] | None = None
+    block_x: tuple[float, float] = (0.0, 0.0)
 
     @property
     def object_count(self) -> int:
@@ -126,8 +128,9 @@ def plan_place_grid(
     model: LevelModel, grid: Grid, roles: RoleTable, args: dict[str, Any]
 ) -> PlaceGridPlan | dict[str, Any]:
     """`place_grid`, up to the point of touching the editor. Returns a plan or an error."""
-    if args.get("verify") is not None:
-        return _error("`verify` is not available yet: the simulator arrives in milestone M2")
+    verify_spec = args.get("verify")
+    if verify_spec is not None and not isinstance(verify_spec, dict):
+        return _error("`verify` must be an object: {gamemode, speed, entry_row}")
     mode = args.get("mode", "add")
     if mode not in ("add", "replace"):
         return _error("`mode` must be 'add' or 'replace'")
@@ -177,4 +180,6 @@ def plan_place_grid(
         deletes=deletes,
         notes=list(placement.notes),
         preview=bool(args.get("preview", False)),
+        verify=verify_spec,
+        block_x=(block.col * CELL, (block.col + block.w) * CELL),
     )

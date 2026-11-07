@@ -1,0 +1,185 @@
+"""`verify_section` (LEVEL-DESIGN-SPEC.md 6.9): can a stretch of the level be played?"""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from ..constants import SPEEDS, PhysicsConstants, load_constants
+from ..level_model import LevelModel
+from .cube import HALF, Cube, CubeParams, UncalibratedError, simulate
+from .solver import describe_route, solve
+from .world import World, world_from_model
+
+#: Most unsupported objects listed in a result; the rest are counted.
+_MAX_LISTED = 20
+
+
+def _start_state(args: dict[str, Any], x0: float) -> tuple[Cube | None, float, str | None]:
+    """(cube, start x, reason it cannot be simulated)."""
+    start_from = args.get("start_from", "level_start")
+    if start_from in ("level_start", "auto"):
+        return Cube(), 0.0, None
+    if start_from != "explicit":
+        return None, 0.0, f"unknown start_from {start_from!r}"
+    start = args.get("start") or {}
+    mode = start.get("mode", "cube")
+    if mode != "cube":
+        return None, x0, f"the simulator handles the cube only so far, not {mode}"
+    if start.get("gravity", 1) != 1 or start.get("mini", False):
+        return None, x0, "flipped gravity and mini size are not simulated yet"
+    speed = start.get("speed", "1x")
+    if speed not in SPEEDS:
+        return None, x0, f"unknown speed {speed!r}"
+    row = int(start.get("row", 0))
+    cube = Cube(x=x0, y=HALF + 30.0 * row, vy=float(start.get("vy", 0.0)), speed=speed,
+                grounded=row == 0 and float(start.get("vy", 0.0)) == 0.0)
+    return cube, x0, None
+
+
+def verify(world: World, params: CubeParams, args: dict[str, Any]) -> dict[str, Any]:
+    began = time.perf_counter()
+    x_range = args.get("x_range")
+    if not x_range or len(x_range) != 2:
+        return {"error": "give `x_range` as [start, end] in level units"}
+    x0, x1 = sorted(float(v) for v in x_range)
+    cube, sx, reason = _start_state(args, x0)
+    base: dict[str, Any] = {
+        "constants": "calibrated" if params.calibrated else "uncalibrated",
+        "start": {"x": sx, "from": args.get("start_from", "level_start")},
+    }
+    if cube is None:
+        return {**base, "result": "unverifiable", "unverifiable": [{"reason": reason}]}
+
+    blocked = world.unsupported_between(sx - 60, x1)
+    if blocked:
+        return {
+            **base, "result": "unverifiable",
+            "unverifiable": blocked[:_MAX_LISTED],
+            "unverifiable_count": len(blocked),
+            "note": "Sim-1 simulates the cube with solids, hazards, yellow/pink orbs and "
+                    "pads, and speed portals. Anything else in the span stops it.",
+        }
+
+    idle = simulate(world, params, [], max_ticks=10**6, until_x=x1, start=cube,
+                    start_tick=0, record=False)
+    deaths_without_input = []
+    if idle.death is not None:
+        deaths_without_input.append({"x": round(idle.death.x, 1),
+                                     "cause_uid": idle.death.cause_uid})
+
+    solved = solve(world, params, cube, x1, budget_s=float(args.get("budget_s", 10.0)))
+    result: dict[str, Any] = {**base, "result": solved.result,
+                              "deaths_without_input": deaths_without_input}
+    if solved.result == "possible":
+        described = describe_route(world, params, cube, solved, x1)
+        if args.get("start_from", "level_start") != "explicit":
+            # From the level start, only the presses inside the asked-for range matter
+            # to the caller; the approach is summarised.
+            inside = [r for r in described["route"] if r["x"] >= x0 - 30]
+            result["approach_presses"] = len(described["route"]) - len(inside)
+            described["route"] = inside
+        result.update(described)
+        final = solved.final
+        assert final is not None
+        result["exit"] = {"x": round(final.x, 1), "y": round(final.y, 2),
+                          "vy": round(final.vy, 3), "mode": "cube", "speed": final.speed,
+                          "gravity": 1, "mini": False, "grounded": final.grounded}
+    else:
+        result["furthest_x"] = round(solved.furthest_x, 1)
+        causes = sorted({d.cause_uid for d in solved.frontier_deaths if d.cause_uid})
+        result["frontier_causes"] = causes[:_MAX_LISTED]
+        if solved.reason:
+            result["reason"] = solved.reason
+    result["elapsed_ms"] = round((time.perf_counter() - began) * 1000)
+    return result
+
+
+def verify_section(model: LevelModel, args: dict[str, Any],
+                   constants: PhysicsConstants | None = None) -> dict[str, Any]:
+    """The tool: the level snapshot, the calibrated cube, and `verify`."""
+    try:
+        params = CubeParams.from_constants(constants or load_constants())
+    except UncalibratedError as exc:
+        return {"result": "unverifiable",
+                "unverifiable": [{"reason": f"constants not calibrated for cube: {exc}"}]}
+    return verify(world_from_model(model), params, args)
+
+
+#: Columns of existing level verified either side of a placed block (LEVEL-DESIGN-SPEC.md 5.4).
+CONTEXT_COLS = 10
+
+
+def verify_placement(model: LevelModel, creates: list[dict[str, Any]], deletes: list[int],
+                     block_x: tuple[float, float], spec: dict[str, Any],
+                     constants: PhysicsConstants | None = None) -> dict[str, Any]:
+    """`place_grid`'s `verify`: the block as it would stand in the level, plus context.
+
+    Works before anything is placed (preview) because the world is built from the
+    snapshot minus the deletions plus the planned objects.
+    """
+    from dataclasses import replace
+
+    from ..roles import load_role_table
+    from .world import world_from_objects
+
+    try:
+        params = CubeParams.from_constants(constants or load_constants())
+    except UncalibratedError as exc:
+        return {"result": "unverifiable",
+                "unverifiable": [{"reason": f"constants not calibrated for cube: {exc}"}]}
+    removed = set(deletes)
+    current = world_from_model(model)
+    planned = world_from_objects(creates, load_role_table())
+    world = World(
+        [b for b in current.bodies if b.uid not in removed]
+        + [replace(b, uid=-b.uid) for b in planned.bodies],
+        [u for u in current.unsupported if u["uid"] not in removed] + planned.unsupported,
+    )
+    x0 = block_x[0] - CONTEXT_COLS * 30
+    x1 = block_x[1] + CONTEXT_COLS * 30
+    args = {
+        "x_range": [x0, x1],
+        "start_from": "explicit",
+        "start": {"mode": spec.get("gamemode", "cube"), "speed": spec.get("speed", "1x"),
+                  "row": int(spec.get("entry_row", 0))},
+    }
+    result = verify(world, params, args)
+    result["note"] = ("Planned objects have negative uids in this result. The start is "
+                      f"assumed: {args['start']} at x={x0:g}.")
+    return result
+
+
+def route_overlay(model: LevelModel, x_end: float,
+                  constants: PhysicsConstants | None = None) -> dict[str, Any]:
+    """The solver's route from the level start to `x_end`, as points to draw: the path,
+    each press, and the x span its timing window covers (LEVEL-DESIGN-SPEC.md 13.2)."""
+    try:
+        params = CubeParams.from_constants(constants or load_constants())
+    except UncalibratedError as exc:
+        return {"result": "unverifiable", "reason": str(exc)}
+    world = world_from_model(model)
+    blocked = world.unsupported_between(-60, x_end)
+    if blocked:
+        return {"result": "unverifiable", "reason": blocked[0]["reason"]}
+    start = Cube()
+    solved = solve(world, params, start, x_end)
+    if solved.result != "possible":
+        return {"result": solved.result, "furthest_x": solved.furthest_x}
+    described = describe_route(world, params, start, solved, x_end)
+    taps = [{"tick": t, "action": a} for r in solved.route
+            for t, a in ((r, "press"), (r + 1, "release"))]
+    run = simulate(world, params, taps, max_ticks=(solved.end_tick or 0) + 2,
+                   until_x=x_end, start=start, start_tick=0)
+    xs = dict(zip(run.trace["tick"], run.trace["x"], strict=True))
+    ys = dict(zip(run.trace["tick"], run.trace["y"], strict=True))
+    presses = []
+    for item in described["route"]:
+        lo, hi = item["window_ticks"]
+        presses.append({"x": xs.get(item["tick"] + 1, item["x"]),
+                        "y": ys.get(item["tick"] + 1, 15.0),
+                        "x_lo": xs.get(lo + 1, item["x"]), "x_hi": xs.get(hi + 1, item["x"]),
+                        "ms": item["window_ms"]})
+    return {"result": "possible",
+            "points": list(zip(run.trace["x"], run.trace["y"], strict=True)),
+            "presses": presses}

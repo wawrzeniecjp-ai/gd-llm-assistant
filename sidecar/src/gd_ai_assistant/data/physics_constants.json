@@ -78,14 +78,14 @@
                 "confidence": "measured"
             },
             "landing_tolerance": {
-                "value": null,
-                "source": "fitted by the simulator to the P4 outcome table (M2)",
-                "confidence": "guess"
+                "value": 8.5,
+                "source": "simulator golden fit, 2026-11-07: every P4/P5 run reproduces for a tolerance of 5 to 12 units; 8.5 is the middle.",
+                "confidence": "derived"
             },
             "inner_hitbox": {
-                "value": null,
-                "source": "calibrate.py P4, 2026-11-07: running into a block's side (x 240) dies at player x 236.28 and not at 234.98, so the inner half-width is in (3.72, 5.02]; the simulator fits the exact value to the P4 table",
-                "confidence": "guess"
+                "value": 9.0,
+                "source": "simulator golden fit, 2026-11-07: every P4/P5 run reproduces for an inner half-width of 3.8 to 5.0 (P4 alone bounds it to 3.72..5.02); 9 (half 4.5) is the middle. A block-height probe would narrow it.",
+                "confidence": "derived"
             },
             "terminal_velocity": {
                 "value": null,

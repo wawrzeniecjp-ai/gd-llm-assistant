@@ -274,6 +274,42 @@ actually be launched and the mod verified against it -- a version claim that has
 been run is worse than an honest narrower one, because it turns a clear refusal into a
 crash.
 
+## 0.2e Level design layer, M2: cube simulator, solver, verify_section (2026-11-07)
+
+`design/sim/` (`world.py`, `cube.py`, `solver.py`, `verify.py`). Built and tested
+headless; not yet used by the model in the game.
+
+- **Golden: all 109 calibration replays reproduce** within the spec's tolerance (|dx| 0.5,
+  |dy| 1 at every sample; deaths at the same position). `tests/test_sim_golden.py`.
+- **The per-tick model the replays forced** (each found by a golden mismatch):
+  - a **fresh press** jumps in the command phase (vy now, movement next tick); a **held**
+    button re-jumps **inside the next move**, with no gravity that tick (P3: landed at 164,
+    already at 15 + 11.18 x 0.225 at 165);
+  - **orbs are touched before or after the move** (P6: a press at 222 fired with the cube
+    0.2 past the orb after the move);
+  - the game numbers a death caught mid-step by completed ticks, one lower than the
+    sample it belongs to, so deaths are compared by position.
+- **Fitted:** inner hitbox half-width 3.8..5.0 and landing tolerance 5..12 both reproduce
+  every P4/P5 run; 9 (half 4.5) and 8.5 recorded as `derived`.
+- **Solver:** breadth-first by tick over decision points (grounded, or touching an orb),
+  dedup on state, taps only. A press is only considered with something within a jump's
+  reach ahead; a coarse pass (ground jumps every 4th tick) runs first, and only the full
+  every-tick pass may answer `impossible`. Windows: each press shifted +-24 ticks, checked
+  from the recorded state just before it until the path rejoins the reference. A real-data
+  check: the solver's spike window ends where P5 says (173 clears, 176 dies).
+- **Performance:** 1000 columns with an obstacle every 9 (110 presses): solve 2.25-2.5 s,
+  windows 1.4 s, on this machine. The spec's budget is 2 s for the solve: close, not met.
+  The hot path is `advance`; vectorising or compiling it is the spec's stated remedy.
+- **Tools:** `verify_section` (level start or explicit start; possible / impossible /
+  inconclusive / unverifiable, route with windows, difficulty, exit state, where a no-input
+  run dies, frontier causes); `place_grid.verify` (the block as it would stand, plus 10
+  columns either side, also in preview); schematic `route` and `windows` overlays.
+- **Prompt:** never call gameplay playable without a `possible`; what each outcome means;
+  timing windows as difficulty (1 tick is frame-perfect).
+- **Still open for M2:** the 20 hand-made sections (10 possible, 10 impossible) the spec
+  asks to be classified correctly; `playtest_verify` (an in-game replay of a solver route);
+  terminal velocity; the solve-time budget.
+
 ## 0.2d Level design layer, M2: cube calibration (2026-11-07)
 
 `scripts/calibrate.py` ran the Sim-1 probes in the game (about 160 runs over three

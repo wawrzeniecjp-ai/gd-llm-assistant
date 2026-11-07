@@ -110,8 +110,31 @@ async def test_render_schematic_attaches_an_image() -> None:
 async def test_schematic_reports_later_overlays_as_unavailable() -> None:
     editor = FakeEditor()
     provider = ScriptProvider([
-        call("render_schematic", {"x_range": [0, 300], "overlays": ["grid", "route"]}),
+        call("render_schematic", {"x_range": [0, 300], "overlays": ["grid", "beats"]}),
         text(),
     ])
     await make_loop(editor, provider).run(turn_id="t1", message_id="m1", user_text="look")
-    assert any("M2" in note for note in _tool_result(provider)["notes"])
+    assert any("M4" in note for note in _tool_result(provider)["notes"])
+
+
+async def test_verify_section_through_the_agent() -> None:
+    editor = FakeEditor()
+    editor.add(8, 255, 15)                       # one spike
+    provider = ScriptProvider([call("verify_section", {"x_range": [0, 600]}), text()])
+    await make_loop(editor, provider).run(turn_id="t1", message_id="m1", user_text="ok?")
+    result = _tool_result(provider)
+    assert result["result"] == "possible"
+    assert len(result["route"]) == 1
+
+
+async def test_place_grid_preview_verifies_the_planned_block() -> None:
+    editor = FakeEditor()
+    wall = "@grid col=12 row=0 w=1 h=5\n#\n#\n#\n#\n#"
+    provider = ScriptProvider([
+        call("place_grid", {"grid": wall, "preview": True, "verify": {"speed": "1x"}}),
+        text(),
+    ])
+    await make_loop(editor, provider).run(turn_id="t1", message_id="m1", user_text="wall")
+    preview = _tool_result(provider)
+    assert preview["verification"]["result"] == "impossible"
+    assert editor.objects == {}                  # a preview places nothing
