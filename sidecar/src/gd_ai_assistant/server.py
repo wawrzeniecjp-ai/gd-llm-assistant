@@ -35,6 +35,7 @@ from websockets.http11 import Response as HttpResponse
 from . import __version__, agent, catalog, protocol
 from .auth import load_or_create_token, token_matches
 from .config import SidecarConfig
+from .design.versions import data_version_warnings
 from .providers import Provider, ProviderUnavailable, create_provider
 
 log = logging.getLogger("sidecar")
@@ -76,6 +77,11 @@ class SidecarServer:
         # Request types the connected mod answered with UNSUPPORTED_REQUEST. The tool
         # loop reads and extends this set; it is reset on every new connection.
         self.unsupported_requests: set[str] = set()
+
+        # The connected game's version, from the hello. The data files dumped from the
+        # game (roles.json, physics_constants.json) record the version they came from;
+        # a mismatch is logged so an upgrade is noticed (docs/UPGRADING.md).
+        self.gd_version: str | None = None
 
         # Developer scripts (`scripts/dump_roles.py`, `scripts/check_foundations.py`)
         # run their requests from here once a mod has connected and the handshake is
@@ -375,6 +381,11 @@ class SidecarServer:
             level.get("name"),
             level.get("object_count"),
         )
+        gd_version = client.get("gd_version")
+        self.gd_version = gd_version if isinstance(gd_version, str) else None
+        if self.gd_version:
+            for warning in data_version_warnings(self.gd_version):
+                log.warning("%s", warning)
         return str(level.get("key", ""))
 
     # -- dispatch ------------------------------------------------------

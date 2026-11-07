@@ -127,6 +127,7 @@ window for the sidecar.
 | `protocol/v1/` | JSON Schemas — the contract both sides validate against |
 | `SPEC.md` | The specification, decision log and measured findings |
 | `docs/LEVEL-DESIGN-SPEC.md` | The level design layer: GridText, simulator, music, plan, patterns, decoration, effects, critique, evals |
+| `docs/UPGRADING.md` | Checklist for a new GD or Geode version: what was measured, how to re-measure it, how to review the role-table diff |
 
 The protocol is the test seam: the mod cannot run headless, so both sides are
 validated against the schemas in `protocol/v1/` instead.

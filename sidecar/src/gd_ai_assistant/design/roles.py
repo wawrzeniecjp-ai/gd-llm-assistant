@@ -354,6 +354,39 @@ def _default_path() -> Path:
     return Path(str(resources.files("gd_ai_assistant") / "data" / "roles.json"))
 
 
+#: Entry fields compared by `diff_role_tables`: the ones the design layer acts on.
+#: Frame names and visual sizes are left out; they change with art, not gameplay.
+_DIFF_FIELDS: tuple[str, ...] = ("role", "subrole", "variant", "object_type", "hitbox")
+
+
+@dataclass(frozen=True)
+class RoleTableDiff:
+    """What a re-dump changed, for review before the new table is committed."""
+
+    added: list[int]
+    removed: list[int]
+    #: (id, field, old value, new value)
+    changed: list[tuple[int, str, Any, Any]]
+
+    @property
+    def empty(self) -> bool:
+        return not (self.added or self.removed or self.changed)
+
+
+def diff_role_tables(old: RoleTable, new: RoleTable) -> RoleTableDiff:
+    """Compare two role tables, id by id (docs/UPGRADING.md)."""
+    added = sorted(set(new.entries) - set(old.entries))
+    removed = sorted(set(old.entries) - set(new.entries))
+    changed: list[tuple[int, str, Any, Any]] = []
+    for object_id in sorted(set(old.entries) & set(new.entries)):
+        before, after = old.entries[object_id], new.entries[object_id]
+        for name in _DIFF_FIELDS:
+            a, b = getattr(before, name), getattr(after, name)
+            if a != b:
+                changed.append((object_id, name, a, b))
+    return RoleTableDiff(added=added, removed=removed, changed=changed)
+
+
 #: Guard against a mod that never reports a last page.
 _MAX_DESCRIBE_PAGES = 100
 

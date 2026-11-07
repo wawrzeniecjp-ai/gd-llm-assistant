@@ -240,3 +240,46 @@ async def test_fetch_role_table_from_the_fake_editor() -> None:
     assert table.entries[8].frame == "spike_01_001.png"
     assert failed == [5]
     assert seen[-1] == (4, 4)
+
+
+# -- upgrades (docs/UPGRADING.md) ------------------------------------------------------
+
+
+def test_data_files_match_the_version_they_were_measured_on() -> None:
+    """The committed data and the version it claims must agree with each other."""
+    from gd_ai_assistant.design.versions import data_version_warnings
+
+    version = load_role_table().game_version
+    assert version is not None
+    assert load_constants().game_version == version
+    assert data_version_warnings(version) == []
+
+
+def test_a_newer_game_is_reported_with_the_refresh_script(tmp_path) -> None:
+    from gd_ai_assistant.design.versions import data_version_warnings
+
+    roles = tmp_path / "roles.json"
+    roles.write_text(json.dumps({"schema": 1, "game_version": "2.2091"}), encoding="utf-8")
+    absent = tmp_path / "missing.json"
+    warnings = data_version_warnings("2.300", {"roles": roles, "physics_constants": absent})
+    assert len(warnings) == 1
+    assert "2.2091" in warnings[0] and "2.300" in warnings[0]
+    assert "dump_roles.py" in warnings[0]
+
+
+def test_role_table_diff_reports_added_removed_and_changed() -> None:
+    from gd_ai_assistant.design.roles import diff_role_tables
+
+    block = role_from_description({**_description(0), "id": 1})
+    spike = role_from_description({**_description(2), "id": 8})
+    old = RoleTable(entries={1: block, 8: spike})
+    retyped = role_from_description({**_description(7), "id": 8}, frame="new_art.png")
+    orb = role_from_description({**_description(11), "id": 36})
+    new = RoleTable(entries={8: retyped, 36: orb})
+
+    diff = diff_role_tables(old, new)
+    assert diff.added == [36]
+    assert diff.removed == [1]
+    assert (8, "role", Role.HAZARD, Role.DECO) in diff.changed
+    assert all(name != "frame" for _, name, _, _ in diff.changed)
+    assert diff_role_tables(old, old).empty

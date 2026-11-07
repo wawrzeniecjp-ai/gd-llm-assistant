@@ -205,3 +205,16 @@ async def test_unknown_type_gets_a_structured_error(tmp_path) -> None:
         assert response["id"] == "m-3"
         assert response["payload"]["ok"] is False
         assert response["payload"]["error"]["code"] == "INVALID_REQUEST"
+
+
+async def test_hello_records_the_game_version_and_flags_stale_data(tmp_path, caplog) -> None:
+    """dump_roles stamps the role table with this version, and an upgrade is logged."""
+    import logging
+
+    async with running_sidecar(tmp_path) as (sidecar, url), connect(url) as websocket:
+        with caplog.at_level(logging.WARNING):
+            await websocket.send(hello_frame(sidecar.token))
+            await websocket.recv()
+        assert sidecar.gd_version == "2.2081"
+    # The committed data was measured on a newer version than this hello claims.
+    assert any("dump_roles.py" in r.getMessage() for r in caplog.records)
