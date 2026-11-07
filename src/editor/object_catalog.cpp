@@ -46,6 +46,11 @@ std::vector<int> allIds(ObjectToolbox* box) {
 
 } // namespace
 
+std::vector<int> catalogIds() {
+    auto* box = toolbox();
+    return box == nullptr ? std::vector<int>{} : allIds(box);
+}
+
 bool catalogAvailable() {
     auto* box = toolbox();
     return box != nullptr && !box->m_allKeys.empty();

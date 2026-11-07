@@ -27,6 +27,10 @@ std::unique_ptr<Job> makeJob(std::string_view type, matjson::Value const& payloa
 /// quickly instead of queueing them.
 bool isImplementedRequest(std::string_view type);
 
+/// Request types whose jobs change level objects. The queue bumps the level
+/// revision for these (LEVEL-DESIGN-SPEC.md 4.3.2).
+bool isMutatingRequest(std::string_view type);
+
 /// A job that has already failed validation and simply reports the error.
 ///
 /// Exists so that `makeJob` has one return type and the caller never has to

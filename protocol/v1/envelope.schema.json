@@ -259,6 +259,26 @@
                     "required": ["direction", "payload", "result"],
                     "additionalProperties": false
                 },
+                "describe_object_types": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/describeObjectTypesPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/describeObjectTypesResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
+                "get_level_objects": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/getLevelObjectsPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/getLevelObjectsResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
                 "capture_screenshot": {
                     "type": "object",
                     "properties": {

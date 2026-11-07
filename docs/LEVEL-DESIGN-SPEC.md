@@ -249,6 +249,15 @@ Dependencies added: `Pillow` (renderer), nothing else required. Optional extra
   y = 105) and the old demo constant matches it, but SPEC §0.1b also records a level where
   that constant placed objects under the ground. S-L1 must resolve this before GridText
   ships.
+- **Found during M0 (unverified):** `docs/save-string-keys.md` measured
+  `cocos y = save y + 90` (e.g. save −105, cocos −15), while `src/editor/properties.hpp`
+  converts `level y = cocos y + 90`. Both cannot be true. If the table is right, protocol
+  `y` is save-string `y` **+ 180**, and a ground-row block reads as y ≈ 195 in
+  `query_objects`. That would also explain §0.1b: y = 105 in protocol coordinates is
+  cocos 15, below a ground at cocos 90. `scripts/check_foundations.py` measures the
+  difference directly. Until it has, `ground_top_y` is `null` in the constants file,
+  `coords.Grid.from_constants` refuses to run, and the design layer never decodes positions
+  from save strings: `get_level_objects` reports them as `query_objects` does (§4.3.2).
 
 **Resolution procedure (S-L1).** In replay (§7), a cube standing still at the level start is
 on the ground; its `y` minus half its hitbox height is the ground top. Measure it on three
@@ -381,17 +390,30 @@ A uniform-grid spatial index (bucket = 1 cell column band of 10 columns) backs `
 
 ### 4.3.2 Loading
 
-A new mod request `get_level_objects { cursor?, limit }` returns objects as **save
-strings** with their unique ids, paged (default 1000, max 2000 per page). Each page carries
-`revision`. The sidecar parses save strings with the existing properties table
-(`save_properties.py`). Save strings are used, not the compact record, because they carry
-every key: trigger parameters, hidden flags, everything the model and the critique need.
+A new mod request `get_level_objects { cursor?, limit }` returns objects paged (default
+1000, max 2000 per page). Each record is `{ object_id, id, properties, save }`:
 
-**Revision counter.** The mod keeps `level_revision`, a counter incremented on every object
-mutation from any source (the hooks behind `level_changed`, `SPEC.md` §6.1.7, plus the mod's
-own mutations). Every `get_level_objects` page reports it. If it changes between pages, the
-sidecar discards the partial snapshot and restarts, once. A second change aborts with a
-`LEVEL_CHANGING` tool error that tells the model the user is editing.
+- `properties` is the named property set, read by the **same code** as
+  `get_object_properties` (position in protocol coordinates, rotation, scale, flip, layers,
+  groups, colour channels). The sidecar never decodes these from the save string. The
+  bindings do not annotate the rotation and flip keys (4–6), and the y offset is in doubt
+  (§4.1), so decoding them would mean guessing.
+- `save` is the full save string, for everything else (trigger parameters, hidden flags).
+  The sidecar parses it into `LevelObject.raw` (key → text).
+
+Each page carries `revision`. The cursor is `<offset>@<revision>`, and the mod refuses a
+cursor from another revision with `LEVEL_CHANGING`. It also fails a page whose revision
+moves while the page is being read (one object per job slice).
+
+**Revision counter (as built).** The editor's undo and redo entry points are `win inline`
+in the bindings and cannot be hooked, so the mod polls a fingerprint once per frame instead:
+the object count, the sizes of the undo and redo lists, and the identity of the newest entry
+on each. Any difference bumps the revision. The mod's own mutating jobs (`create_objects`,
+`modify_objects`, `delete_objects`, `set_save_property`) bump it on every slice, since they
+mostly bypass the undo list. Over-counting only costs a re-read. Under-counting is what
+S-L10 checks for. If a change lands between pages, the sidecar discards the partial
+snapshot and restarts, once. A second change raises `LevelChangingError`, which tools report
+as "the user is editing".
 
 ### 4.3.3 Caching
 
@@ -604,7 +626,7 @@ Anything outside the current phase that appears inside a verified span makes tha
   "game_version": "2.2091",
   "calibrated_at": "YYYY-MM-DD",
   "tick_rate": 240,
-  "ground_top_y": { "value": 90.0, "source": "replay:S-L1", "confidence": "measured" },
+  "ground_top_y": { "value": null, "source": "S-L1 not yet run", "confidence": "guess" },
   "units_per_second": {
     "0.5x": { "value": 251.16, "source": "initial-guess", "confidence": "guess" },
     "1x":   { "value": 311.58, "source": "initial-guess", "confidence": "guess" },
@@ -1638,7 +1660,7 @@ registry entry in `envelope.schema.json`.
 | Request | Payload | Result | Section |
 | --- | --- | --- | --- |
 | `describe_object_types` | `{ offset?, limit? (≤500) }` | `{ entries: [RoleEntry], total, next_offset, denylisted: [id] }` | §4.2 |
-| `get_level_objects` | `{ cursor?, limit? (≤2000) }` | `{ objects: [ { uid, save: string } ], revision, next_cursor, total }` | §4.3 |
+| `get_level_objects` | `{ cursor?, limit? (≤2000) }` | `{ objects: [ { object_id, id, properties, save } ], revision, next_cursor, total }` | §4.3 |
 | `create_objects_from_strings` | `{ objects: [ { save: string } ] }` (≤1000) | `{ created: [uid], count }` | §12 |
 | `allocate_ids` | `{ kind: "group"\|"color"\|"item"\|"editor_layer", count (≤64), exclude?: [int] }` | `{ ids: [int] }` | §12.3 |
 | `run_replay` | §7.2 | §7.2 | §7 |
@@ -1651,8 +1673,8 @@ Changes to existing messages:
 - `level_changed` event: add `revision`.
 - `turn_started` event: add optional `auto` (boolean) (§17.3).
 - Error codes (§7.7): add `UNSUPPORTED_REQUEST` (the mod does not implement this request
-  type) and `LEVEL_CHANGING` (sidecar-side tool error, not a mod code: listed for
-  completeness).
+  type; replaces the `INVALID_REQUEST` the mod used to send for unknown types) and
+  `LEVEL_CHANGING` (a `get_level_objects` page or cursor straddled an edit).
 
 `create_objects_from_strings` rules (mod side):
 

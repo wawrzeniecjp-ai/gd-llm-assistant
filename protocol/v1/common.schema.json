@@ -45,7 +45,9 @@
                 "TRANSACTION_NOT_REVERTIBLE",
                 "CANCELLED",
                 "THREAD_DISPATCH_FAILED",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "UNSUPPORTED_REQUEST",
+                "LEVEL_CHANGING"
             ]
         },
 

@@ -21,6 +21,8 @@
 #include "../editor/object_catalog.hpp"
 #include "../editor/screenshot.hpp"
 #include "../editor/transaction.hpp"
+#include "../editor/level_revision.hpp"
+#include "../exec/design_jobs.hpp"
 #include "../exec/editor_jobs.hpp"
 #include "../exec/handler_verification.hpp"
 #include "../exec/job_queue.hpp"
@@ -369,6 +371,7 @@ void Bridge::sendLevelChanged(int delta) {
     payload["removed"] = delta < 0 ? -delta : 0;
     payload["modified"] = 0;
     payload["source"] = "user";
+    payload["revision"] = editor::LevelRevision::get().current();
 
     auto frame = matjson::Value::object();
     frame["type"] = "level_changed";
@@ -683,7 +686,9 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
             snapshot->playtesting
         );
         // The sidecar re-reads the level here, so it is no longer stale.
-        co_return co_await sendResult(socket, requestId, editor::toJson(*snapshot));
+        auto state = editor::toJson(*snapshot);
+        state["revision"] = editor::LevelRevision::get().current();
+        co_return co_await sendResult(socket, requestId, std::move(state));
     }
 
     if (type == "list_object_catalog") {
@@ -999,12 +1004,30 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
         co_return co_await sendResponseError(socket, requestId, outcome.payload);
     }
 
-    // Phase 2/4 handle the rest; answering with a clear error beats silence,
-    // which would strand the caller until its timeout.
+    if (exec::isDesignRequest(type)) {
+        // Read-only, but still queued: both read the editor across many objects, so
+        // they are sliced across frames like any other bulk job (SPEC.md 6.1.4).
+        auto job = exec::makeDesignJob(type, payload);
+        if (job == nullptr) {
+            co_return co_await sendError(
+                socket, requestId, "INVALID_REQUEST",
+                fmt::format("'{}' could not be prepared", type)
+            );
+        }
+        auto outcome = co_await exec::JobQueue::get().submit(std::move(job));
+        if (outcome.ok) {
+            co_return co_await sendResult(socket, requestId, std::move(outcome.payload));
+        }
+        co_return co_await sendResponseError(socket, requestId, outcome.payload);
+    }
+
+    // A distinct code rather than INVALID_REQUEST: the sidecar may be newer than this
+    // mod, and "I do not implement this" lets it hide the dependent tools instead of
+    // treating the request as malformed (LEVEL-DESIGN-SPEC.md LD14).
     log::info("unhandled request type '{}'", type);
     co_return co_await sendError(
-        socket, requestId, "INVALID_REQUEST",
-        fmt::format("'{}' is not implemented yet", type)
+        socket, requestId, "UNSUPPORTED_REQUEST",
+        fmt::format("'{}' is not implemented by this mod version", type)
     );
 }
 

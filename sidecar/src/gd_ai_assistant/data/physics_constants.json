@@ -1,0 +1,19 @@
+{
+    "schema": 1,
+    "game_version": "2.2091",
+    "calibrated_at": null,
+    "note": "LEVEL-DESIGN-SPEC.md 6.3. Every leaf is {value, source, confidence}. confidence is measured | derived | guess. A null value means 'not known yet', and code that needs it must refuse rather than assume. Replaced by scripts/calibrate.py (M2).",
+    "tick_rate": { "value": 240, "source": "initial-guess: GD 2.2 physics rate, to be confirmed by S-L3", "confidence": "guess" },
+    "ground_top_y": {
+        "value": null,
+        "source": "S-L1 not yet run. Protocol y and save-string y may differ (see docs/save-string-keys.md vs src/editor/properties.hpp), so no value is guessed here.",
+        "confidence": "guess"
+    },
+    "units_per_second": {
+        "0.5x": { "value": 251.16, "source": "initial-guess: commonly cited", "confidence": "guess" },
+        "1x": { "value": 311.58, "source": "initial-guess: commonly cited", "confidence": "guess" },
+        "2x": { "value": 387.42, "source": "initial-guess: commonly cited", "confidence": "guess" },
+        "3x": { "value": 468.0, "source": "initial-guess: commonly cited", "confidence": "guess" },
+        "4x": { "value": 576.0, "source": "initial-guess: commonly cited", "confidence": "guess" }
+    }
+}

@@ -19,6 +19,7 @@ SPEC.md 6.2.3 fixes the tool set. Two rules shape this module:
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any
 
@@ -89,6 +90,18 @@ class Tool:
     is_action: bool
     """Whether this appears in `turn_finished.actions` (SPEC.md 7.4). Includes
     `set_selection`, which the schema's `kind` enum lists."""
+
+    requires: tuple[str, ...] = ()
+    """Mod request types this tool needs besides `protocol_type`.
+
+    A local tool that reads the level snapshot needs `get_level_objects`, for instance.
+    When the connected mod answers any of them with `UNSUPPORTED_REQUEST`, the tool is
+    withdrawn for the session (LEVEL-DESIGN-SPEC.md LD14) rather than offered and failed.
+    """
+
+    def needed_requests(self) -> tuple[str, ...]:
+        own = (self.protocol_type,) if self.protocol_type is not None else ()
+        return own + self.requires
 
     def object_count(self, arguments: dict[str, Any]) -> int:
         """Objects this call would affect, counted from the arguments.
@@ -779,9 +792,18 @@ def _build() -> dict[str, Tool]:
 TOOLS: dict[str, Tool] = _build()
 
 
-def tool_specs() -> list[ToolSpec]:
-    """The tool list handed to the provider, in a stable order."""
-    return [tool.spec for tool in TOOLS.values()]
+def tool_specs(unsupported: Collection[str] = ()) -> list[ToolSpec]:
+    """The tool list handed to the provider, in a stable order.
+
+    Tools that depend on a request the connected mod has said it does not implement
+    are left out, so the model is never offered something that can only fail.
+    """
+    blocked = frozenset(unsupported)
+    return [
+        tool.spec
+        for tool in TOOLS.values()
+        if not blocked.intersection(tool.needed_requests())
+    ]
 
 
 def get(name: str) -> Tool | None:

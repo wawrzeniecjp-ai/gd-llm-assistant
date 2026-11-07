@@ -23,12 +23,14 @@ add_library(${PROJECT_NAME} SHARED
     src/editor/camera.cpp
     src/editor/color_channel.cpp
     src/editor/editor_state.cpp
+    src/editor/level_revision.cpp
     src/editor/level_settings.cpp
     src/editor/object_catalog.cpp
     src/editor/properties.cpp
     src/editor/save_properties.cpp
     src/editor/screenshot.cpp
     src/editor/transaction.cpp
+    src/exec/design_jobs.cpp
     src/exec/editor_jobs.cpp
     src/exec/handler_verification.cpp
     src/exec/job_queue.cpp

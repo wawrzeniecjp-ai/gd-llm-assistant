@@ -274,6 +274,28 @@ actually be launched and the mod verified against it -- a version claim that has
 been run is worse than an honest narrower one, because it turns a clear refusal into a
 crash.
 
+## 0.2a Level design layer, M0 (2026-11-07)
+
+Foundations for docs/LEVEL-DESIGN-SPEC.md, built and unit-tested. **The in-game checks
+(S-L2, S-L10, coordinates) have not been run yet.** See docs/M0-in-game-checks.md.
+
+- **Protocol (additive to v1):** `get_level_objects`, `describe_object_types`, `revision` on
+  `get_editor_state` and `level_changed`, and error codes `UNSUPPORTED_REQUEST` and
+  `LEVEL_CHANGING`. The mod now answers unknown request types with `UNSUPPORTED_REQUEST`
+  instead of `INVALID_REQUEST`.
+- **Level revision (mod):** a per-frame fingerprint (object count, undo/redo list sizes and
+  newest entries), plus explicit bumps from the mod's own mutating jobs. The editor's
+  undo/redo entry points are inlined on Windows and cannot be hooked.
+- **Sidecar `design` package:** measured constants with provenance, grid coordinates,
+  the role table (from the game's `GameObjectType`, with a flagged frame-name fallback), and
+  the per-turn level snapshot with its spatial index and cache.
+- **Fake editor** (`sidecar/evals/fake_editor.py`): in-memory, schema-validated in both
+  directions, used by the new agent-level tests.
+- **Tool hiding:** a request answered with `UNSUPPORTED_REQUEST` withdraws every tool that
+  depends on it for the rest of the connection.
+- **Open finding:** the y-offset sign in `docs/save-string-keys.md` and in
+  `properties.hpp` disagree (LEVEL-DESIGN-SPEC §4.1). `check_foundations.py` settles it.
+
 ## 0.2 Changes from 0.8.0
 
 Phase 3 (chat UI) is implemented and verified end to end in the editor against the
@@ -1025,6 +1047,8 @@ All return the uniform response envelope; `result` shapes are shown.
 | `revert_transaction` | `{ txn_id }` | `{ reverted: true }` | Usually triggered from the UI, not the sidecar. |
 | `list_object_catalog` | `{ offset?, limit? }` | `{ entries: [ { id, frame?, grid_size? } ], total, next_offset }` | The game's own object table, read from `ObjectToolbox` (§7.5.1). Paged; `next_offset` is null on the last page. Does not require an open editor. |
 | `ping` | `{}` | `{ pong: true }` | Health check. |
+| `get_level_objects` | `{ cursor?, limit? }` | `{ objects: [ { object_id, id, properties, save } ], total, revision, next_cursor }` | Whole level, paged, revision-guarded. docs/LEVEL-DESIGN-SPEC.md §4.3. |
+| `describe_object_types` | `{ offset?, limit? } \| { ids }` | `{ entries: [ ObjectTypeDescription ], total, next_offset, failed }` | Each type instantiated off-scene and described. docs/LEVEL-DESIGN-SPEC.md §4.2. |
 
 **`query_objects` filters:** `id` (object type ID), `ids` (unique IDs), `editor_layer`, `z_layer`, `group`, `x_range` `[min, max]`, `y_range` `[min, max]`, `selected_only`. Defaults: `limit` 100, maximum 500; results beyond the limit set `truncated: true` and a `next_cursor`.
 
@@ -1501,6 +1525,8 @@ miscalculation.
 | `CANCELLED` | Request cancelled by the sender or by disconnect. |
 | `THREAD_DISPATCH_FAILED` | Could not schedule work on the main thread. |
 | `INTERNAL_ERROR` | Unexpected failure, including request timeouts on the caller side. |
+| `UNSUPPORTED_REQUEST` | The mod does not implement this request type (it is older than the sidecar). The sidecar hides the tools that depend on it for the rest of the connection. |
+| `LEVEL_CHANGING` | A `get_level_objects` page or cursor straddled an edit; read again from the start. |
 
 ## 7.8 Connection Lifecycle
 

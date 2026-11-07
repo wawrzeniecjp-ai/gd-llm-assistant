@@ -75,6 +75,9 @@ def test_registry_covers_every_message_in_the_spec() -> None:
         # where the editor is looking, and how to move it
         "get_camera",
         "set_camera",
+        # level design layer foundations (LEVEL-DESIGN-SPEC.md 4.2, 4.3)
+        "describe_object_types",
+        "get_level_objects",
         # events, mod -> sidecar
         "editor_closed",
         "level_changed",

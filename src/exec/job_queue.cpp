@@ -2,6 +2,9 @@
 
 #include <Geode/Geode.hpp>
 
+#include "../editor/level_revision.hpp"
+#include "editor_jobs.hpp"
+
 #include <utility>
 
 using namespace geode::prelude;
@@ -84,6 +87,13 @@ void JobQueue::drain(double budgetMs) {
 
         auto& pending = *m_current;
         auto const finished = pending.job->step();
+
+        // The mod's own edits are mostly made without undo entries, so the per-frame
+        // fingerprint cannot see a modify; the revision is moved here instead. Every
+        // slice counts, because a reader can be served between two slices of one job.
+        if (isMutatingRequest(pending.job->type())) {
+            editor::LevelRevision::get().bump();
+        }
 
         if (!finished) {
             // Budget is re-checked at the top of the loop, so an overrunning

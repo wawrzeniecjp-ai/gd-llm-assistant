@@ -30,6 +30,8 @@ from typing import Any, Protocol
 from . import capture, properties_table, save_properties, tools
 from . import catalog as catalog_module
 from .agent_prompt import system_prompt
+from .design.level_model import SnapshotCache
+from .design.roles import load_role_table
 from .providers.base import (
     AssistantTurn,
     Message,
@@ -266,6 +268,16 @@ class ToolLoop:
         # then dropped -- see `_with_pending_images` for why they are drained, not kept.
         self._pending_images: list[str] = []
 
+        # Request types the connected mod has said it does not implement. Shared with the
+        # link when it offers a set, so the knowledge outlives this turn but not the
+        # connection (the server replaces the set when a mod connects).
+        shared = getattr(link, "unsupported_requests", None)
+        self._unsupported: set[str] = shared if isinstance(shared, set) else set()
+
+        # The level snapshot for design tools (LEVEL-DESIGN-SPEC.md 4.3.3): built on first
+        # use, dropped after any mutation and at the end of the turn.
+        self._snapshot = SnapshotCache(link, load_role_table())
+
     # -- public entry point ---------------------------------------------
 
     async def run(self, *, turn_id: str, message_id: str, user_text: str) -> TurnResult:
@@ -443,7 +455,7 @@ class ToolLoop:
                 return await self._provider.complete(
                     system=system_prompt(),
                     messages=self._with_pending_images(messages),
-                    tools=tools.tool_specs(),
+                    tools=tools.tool_specs(self._unsupported),
                 )
             except ProviderError as exc:
                 attempt += 1
@@ -624,14 +636,10 @@ class ToolLoop:
 
         response = await self._link.request(tool.protocol_type, call.arguments)
         if not response.ok:
-            error = response.error or {}
-            return (
-                {
-                    "error": error.get("message", "the request failed"),
-                    "code": error.get("code", "INTERNAL_ERROR"),
-                },
-                True,
-            )
+            return self._request_failed(tool.protocol_type, response), True
+
+        if tool.mutates_objects:
+            self._snapshot.invalidate()
 
         result = response.result if isinstance(response.result, dict) else {}
         if tool.spec.name == "get_save_properties":
@@ -643,6 +651,30 @@ class ToolLoop:
         if tool.is_action:
             self._actions.append(_describe(tool.spec.name, call.arguments, result))
         return result, False
+
+    def _request_failed(self, request_type: str, response: Any) -> dict[str, Any]:
+        """A failed mod request as a tool result, remembering unsupported requests.
+
+        `UNSUPPORTED_REQUEST` means the connected mod is older than this sidecar. The
+        request type is recorded on the link, so every later call for this connection
+        -- this turn and the next -- leaves out the tools that depend on it
+        (LEVEL-DESIGN-SPEC.md LD14), and the model is told plainly rather than left to
+        retry something that cannot work.
+        """
+        error = response.error or {}
+        code = error.get("code", "INTERNAL_ERROR")
+        result: dict[str, Any] = {
+            "error": error.get("message", "the request failed"),
+            "code": code,
+        }
+        if code == "UNSUPPORTED_REQUEST":
+            self._unsupported.add(request_type)
+            log.warning("mod does not implement %r; hiding dependent tools", request_type)
+            result["note"] = (
+                "The connected version of the mod does not support this. The tool has "
+                "been removed for this session; tell the user it needs a newer mod."
+            )
+        return result
 
     async def _prepare_set_save_property(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Turn a property *name* into a key, and refuse keys the mod will reject.
@@ -699,15 +731,9 @@ class ToolLoop:
         assert tool.protocol_type is not None
         response = await self._link.request(tool.protocol_type, call.arguments)
         if not response.ok:
-            error = response.error or {}
-            return (
-                {
-                    "error": error.get("message", "the request failed"),
-                    "code": error.get("code", "INTERNAL_ERROR"),
-                },
-                True,
-            )
+            return self._request_failed(tool.protocol_type, response), True
 
+        self._snapshot.invalidate()
         result = dict(response.result) if isinstance(response.result, dict) else {}
         resolved = prepared.get("resolved", {})
         result["property"] = resolved
@@ -825,6 +851,7 @@ class ToolLoop:
         self._text = ""
         self._renamed_ids = {}
         self._pending_images = []
+        self._snapshot.invalidate()
 
     def _result(self, status: str, text: str, *, txn_id: str | None = None) -> TurnResult:
         return TurnResult(

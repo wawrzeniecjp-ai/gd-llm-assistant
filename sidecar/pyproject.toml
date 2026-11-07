@@ -31,6 +31,8 @@ packages = ["src/gd_ai_assistant"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `evals` (the fake editor and harness) lives beside `src`, not inside the package.
+pythonpath = ["."]
 asyncio_mode = "auto"
 
 [tool.ruff]

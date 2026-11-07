@@ -1206,6 +1206,11 @@ private:
     int m_unchanged = 0;
 };
 
+bool isMutatingRequest(std::string_view type) {
+    return type == "create_objects" || type == "modify_objects" || type == "delete_objects"
+        || type == "set_save_property";
+}
+
 bool isImplementedRequest(std::string_view type) {
     return type == "create_objects" || type == "modify_objects" || type == "delete_objects"
         || type == "set_selection" || type == "query_objects" || type == "summarize_region"

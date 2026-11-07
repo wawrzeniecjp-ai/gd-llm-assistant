@@ -5,6 +5,7 @@
 #include <chrono>
 
 #include "bridge/bridge.hpp"
+#include "editor/level_revision.hpp"
 #include "editor/transaction.hpp"
 #include "exec/job_queue.hpp"
 #include "net/sha1.hpp"
@@ -131,6 +132,7 @@ void armDrain() {
         if (editor == nullptr) {
             g_draining = false;
             g_reportedObjectCount = -1;
+            gdai::editor::LevelRevision::get().forgetEditor();
             gdai::ui::PanelHost::get().detach();
             return;
         }
@@ -152,6 +154,10 @@ void armDrain() {
             gdai::ui::PanelHost::get().setPlaytestHidden(playtesting);
         }
         gdai::exec::JobQueue::get().drain(frameBudgetMs());
+
+        // After the drain, so a change made by this frame's jobs and a change made by
+        // the user in the same frame are both seen before the next request is served.
+        gdai::editor::LevelRevision::get().poll(editor);
 
         // Notice hand edits.
         //

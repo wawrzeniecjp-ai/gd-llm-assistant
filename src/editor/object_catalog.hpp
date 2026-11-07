@@ -52,6 +52,10 @@ bool catalogAvailable();
 /// reads the game's toolbox, which is Cocos-adjacent state (SPEC.md 6.1.3).
 CatalogPage takeCatalogPage(int offset, int limit);
 
+/// Every object id the game knows, ascending -- the same order `takeCatalogPage`
+/// pages through, so an offset means the same thing to both. Main thread.
+std::vector<int> catalogIds();
+
 /// Converts a page to the protocol result object (SPEC.md 7.5).
 matjson::Value catalogPageToJson(CatalogPage const& page);
 

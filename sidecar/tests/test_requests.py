@@ -239,3 +239,31 @@ async def test_response_with_unusable_id_is_ignored(tmp_path, bad_id) -> None:
         response = await sidecar.request("ping", {}, timeout=5)
         await responder
         assert response.ok is True
+
+
+async def test_on_connect_hook_runs_requests_after_the_handshake(tmp_path) -> None:
+    """Developer scripts drive the mod through this hook (scripts/_harness.py)."""
+    async with running_sidecar(tmp_path) as (sidecar, url):
+        results: list = []
+        finished = asyncio.Event()
+
+        async def hook(server: SidecarServer) -> None:
+            results.append(await server.request("ping", {}, timeout=5))
+            finished.set()
+
+        sidecar.on_connect = hook
+        async with connect(url) as websocket:
+            await do_handshake(websocket, sidecar.token)
+            request = await answer_next_request(websocket, {"pong": True})
+            await asyncio.wait_for(finished.wait(), timeout=5)
+
+        assert request["type"] == "ping"
+        assert results[0].ok is True
+
+
+async def test_a_new_connection_forgets_unsupported_requests(tmp_path) -> None:
+    async with running_sidecar(tmp_path) as (sidecar, url):
+        sidecar.unsupported_requests.add("get_camera")
+        async with connect(url) as websocket:
+            await do_handshake(websocket, sidecar.token)
+            assert sidecar.unsupported_requests == set()

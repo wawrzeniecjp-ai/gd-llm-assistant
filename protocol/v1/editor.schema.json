@@ -93,9 +93,16 @@
                     "type": "object",
                     "properties": { "name": { "type": "string", "maxLength": 256 } },
                     "additionalProperties": false
-                }
+                },
+                "revision": { "$ref": "#/$defs/Revision" }
             },
             "additionalProperties": false
+        },
+
+        "Revision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "LEVEL-DESIGN-SPEC.md 4.3.2. Increases whenever the mod observes the level's objects change, from any source. Only equality is meaningful: two reads with the same revision saw the same objects."
         },
 
         "QueryFilters": {
@@ -386,6 +393,109 @@
                     "type": "number",
                     "description": "Grid footprint in GD units, from ObjectToolbox::gridNodeSizeForKey. Absent when the game reports none."
                 }
+            },
+            "additionalProperties": false
+        },
+
+        "describeObjectTypesPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "description": "LEVEL-DESIGN-SPEC.md 4.2. One page of the game's object types, each instantiated off-scene and described. Same paging as list_object_catalog.",
+            "properties": {
+                "offset": { "type": "integer", "minimum": 0 },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
+                "ids": {
+                    "type": "array",
+                    "items": { "type": "integer" },
+                    "maxItems": 500,
+                    "description": "Describe exactly these ids instead of a page of the table."
+                }
+            },
+            "additionalProperties": false
+        },
+        "describeObjectTypesResult": {
+            "x-direction": "m2s",
+            "type": "object",
+            "required": ["entries", "total", "next_offset", "failed"],
+            "properties": {
+                "entries": { "type": "array", "items": { "$ref": "#/$defs/ObjectTypeDescription" } },
+                "total": { "type": "integer", "minimum": 0 },
+                "next_offset": { "type": ["integer", "null"], "minimum": 0 },
+                "failed": {
+                    "type": "array",
+                    "items": { "type": "integer" },
+                    "description": "Ids the game would not instantiate (createWithKey returned null) or that are on the mod's creation denylist."
+                }
+            },
+            "additionalProperties": false
+        },
+        "ObjectTypeDescription": {
+            "type": "object",
+            "description": "Read from an instance that was never added to the editor. `hitbox` is getObjectRect() relative to the object's centre at scale 1, rotation 0.",
+            "required": ["id", "object_type", "hitbox", "radius", "is_trigger", "is_decoration", "has_detail_color", "default_z_layer"],
+            "properties": {
+                "id": { "type": "integer" },
+                "object_type": { "type": "integer", "description": "GameObjectType, as the game's integer." },
+                "hitbox": {
+                    "type": "object",
+                    "required": ["x", "y", "w", "h"],
+                    "properties": {
+                        "x": { "type": "number", "description": "Left edge, relative to the centre." },
+                        "y": { "type": "number", "description": "Bottom edge, relative to the centre." },
+                        "w": { "type": "number", "minimum": 0 },
+                        "h": { "type": "number", "minimum": 0 }
+                    },
+                    "additionalProperties": false
+                },
+                "radius": { "type": "number", "minimum": 0, "description": "m_objectRadius; non-zero for circular hitboxes." },
+                "visual": {
+                    "type": "object",
+                    "required": ["w", "h"],
+                    "properties": {
+                        "w": { "type": "number", "minimum": 0 },
+                        "h": { "type": "number", "minimum": 0 }
+                    },
+                    "additionalProperties": false
+                },
+                "is_trigger": { "type": "boolean" },
+                "is_decoration": { "type": "boolean" },
+                "has_detail_color": { "type": "boolean" },
+                "default_z_layer": { "type": "integer" }
+            },
+            "additionalProperties": false
+        },
+
+        "getLevelObjectsPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "description": "LEVEL-DESIGN-SPEC.md 4.3.2. Every object as its save string, paged. The cursor is only valid while `revision` is unchanged.",
+            "properties": {
+                "cursor": { "type": ["string", "null"], "maxLength": 32 },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 2000 }
+            },
+            "additionalProperties": false
+        },
+        "getLevelObjectsResult": {
+            "x-direction": "m2s",
+            "type": "object",
+            "required": ["objects", "total", "revision", "next_cursor"],
+            "properties": {
+                "objects": { "type": "array", "items": { "$ref": "#/$defs/LevelObjectRecord" } },
+                "total": { "type": "integer", "minimum": 0 },
+                "revision": { "$ref": "#/$defs/Revision" },
+                "next_cursor": { "type": ["string", "null"], "maxLength": 32 }
+            },
+            "additionalProperties": false
+        },
+        "LevelObjectRecord": {
+            "type": "object",
+            "description": "`properties` is read exactly as get_object_properties reads it -- protocol coordinates included -- so callers never decode position, rotation, scale or flip from the save string. `save` carries everything else.",
+            "required": ["object_id", "id", "properties", "save"],
+            "properties": {
+                "object_id": { "$ref": "common.schema.json#/$defs/UniqueId" },
+                "id": { "$ref": "common.schema.json#/$defs/ObjectTypeId" },
+                "properties": { "$ref": "common.schema.json#/$defs/PropertySet" },
+                "save": { "type": "string", "maxLength": 65536 }
             },
             "additionalProperties": false
         },
@@ -706,7 +816,8 @@
                 "removed": { "type": "integer", "minimum": 0 },
                 "modified": { "type": "integer", "minimum": 0 },
                 "bounds": { "$ref": "#/$defs/Bounds" },
-                "source": { "type": "string", "enum": ["user", "assistant"] }
+                "source": { "type": "string", "enum": ["user", "assistant"] },
+                "revision": { "$ref": "#/$defs/Revision" }
             },
             "additionalProperties": false
         },

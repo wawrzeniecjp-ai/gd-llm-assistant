@@ -22,6 +22,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any
@@ -71,6 +72,16 @@ class SidecarServer:
         # disjoint prefixes (m- / s-) so an id is unambiguous in logs (7.3).
         self._pending: dict[str, asyncio.Future[Response]] = {}
         self._next_request_id = 0
+
+        # Request types the connected mod answered with UNSUPPORTED_REQUEST. The tool
+        # loop reads and extends this set; it is reset on every new connection.
+        self.unsupported_requests: set[str] = set()
+
+        # Developer scripts (`scripts/dump_roles.py`, `scripts/check_foundations.py`)
+        # run their requests from here once a mod has connected and the handshake is
+        # done. None in normal operation.
+        self.on_connect: Callable[[SidecarServer], Awaitable[None]] | None = None
+        self._hook_task: asyncio.Task[None] | None = None
 
         # The turn currently running, if any. The protocol has no request to
         # await here: `user_message` is an event, and the answer arrives as a
@@ -124,6 +135,9 @@ class SidecarServer:
                 await websocket.close(CLOSE_ANOTHER_CLIENT, "another client is connected")
                 return
             self._client = websocket
+            # A new connection may be a different mod build, so whatever the last one
+            # could not do is forgotten (LEVEL-DESIGN-SPEC.md LD14).
+            self.unsupported_requests = set()
 
         try:
             await self._serve_client(websocket)
@@ -171,6 +185,10 @@ class SidecarServer:
         try:
             if self.config.probe_on_connect:
                 await self._probe(websocket)
+            if self.on_connect is not None:
+                # Run beside the read loop, not before it: the hook issues requests,
+                # and their replies arrive through `reader`.
+                self._hook_task = asyncio.create_task(self.on_connect(self), name="on-connect")
             await reader
         finally:
             reader.cancel()
