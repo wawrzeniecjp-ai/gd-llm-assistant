@@ -1,7 +1,7 @@
 {
     "schema": 1,
     "game_version": "2.2091",
-    "calibrated_at": null,
+    "calibrated_at": "2026-11-07",
     "note": "LEVEL-DESIGN-SPEC.md 6.3. Every leaf is {value, source, confidence}. confidence is measured | derived | guess. A null value means 'not known yet', and code that needs it must refuse rather than assume. Replaced by scripts/calibrate.py (M2).",
     "tick_rate": {
         "value": 240,
@@ -16,28 +16,128 @@
     "units_per_second": {
         "0.5x": {
             "value": 251.16,
-            "source": "initial-guess: commonly cited",
-            "confidence": "guess"
+            "source": "scripts/calibrate.py P1/P8, 2026-11-07: distance over ticks after the speed portal",
+            "confidence": "measured"
         },
         "1x": {
             "value": 311.58,
-            "source": "S-L3: getRealPosition advances 1.29825 units per tick at 1x, x 240",
+            "source": "scripts/calibrate.py P1/P8, 2026-11-07: distance over ticks after the speed portal",
             "confidence": "measured"
         },
         "2x": {
             "value": 387.42,
-            "source": "initial-guess: commonly cited",
-            "confidence": "guess"
+            "source": "scripts/calibrate.py P1/P8, 2026-11-07: distance over ticks after the speed portal",
+            "confidence": "measured"
         },
         "3x": {
             "value": 468.0,
-            "source": "initial-guess: commonly cited",
-            "confidence": "guess"
+            "source": "scripts/calibrate.py P1/P8, 2026-11-07: distance over ticks after the speed portal",
+            "confidence": "measured"
         },
         "4x": {
             "value": 576.0,
-            "source": "initial-guess: commonly cited",
-            "confidence": "guess"
+            "source": "scripts/calibrate.py P1/P8, 2026-11-07: distance over ticks after the speed portal",
+            "confidence": "measured"
+        }
+    },
+    "modes": {
+        "cube": {
+            "jump_velocity": {
+                "value": 11.18,
+                "source": "scripts/calibrate.py P2, 2026-11-07",
+                "confidence": "measured"
+            },
+            "gravity": {
+                "value": 0.216,
+                "source": "scripts/calibrate.py P2, 2026-11-07",
+                "confidence": "measured"
+            },
+            "velocity_scale": {
+                "value": 0.225009,
+                "source": "scripts/calibrate.py P2, 2026-11-07",
+                "confidence": "measured"
+            },
+            "jump_apex": {
+                "value": 63.847,
+                "source": "scripts/calibrate.py P2, 2026-11-07",
+                "confidence": "derived"
+            },
+            "jump_airtime_ticks": {
+                "value": 103,
+                "source": "scripts/calibrate.py P2, 2026-11-07",
+                "confidence": "derived"
+            },
+            "rejump_on_landing": {
+                "value": 1,
+                "source": "scripts/calibrate.py P3, 2026-11-07",
+                "confidence": "measured"
+            },
+            "rejump_delay_ticks": {
+                "value": 1,
+                "source": "scripts/calibrate.py P3, 2026-11-07",
+                "confidence": "measured"
+            },
+            "landing_tolerance": {
+                "value": null,
+                "source": "fitted by the simulator to the P4 outcome table (M2)",
+                "confidence": "guess"
+            },
+            "inner_hitbox": {
+                "value": null,
+                "source": "calibrate.py P4, 2026-11-07: running into a block's side (x 240) dies at player x 236.28 and not at 234.98, so the inner half-width is in (3.72, 5.02]; the simulator fits the exact value to the P4 table",
+                "confidence": "guess"
+            },
+            "terminal_velocity": {
+                "value": null,
+                "source": "not reached by the Sim-1 probes",
+                "confidence": "guess"
+            },
+            "orb_impulse": {
+                "yellow": {
+                    "value": 11.18,
+                    "source": "scripts/calibrate.py P6, 2026-11-07",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 8.05,
+                    "source": "scripts/calibrate.py P6, 2026-11-07",
+                    "confidence": "measured"
+                }
+            },
+            "pad_impulse": {
+                "yellow": {
+                    "value": 16.0,
+                    "source": "scripts/calibrate.py P7, 2026-11-07",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 10.4,
+                    "source": "scripts/calibrate.py P7, 2026-11-07",
+                    "confidence": "measured"
+                }
+            },
+            "orb_buffering": {
+                "air_press_buffered": {
+                    "value": 1,
+                    "source": "scripts/calibrate.py P6, 2026-11-07: a press made in the air before reaching the orb, still held, fires on the first overlapping tick (pressed 160, fired 172)",
+                    "confidence": "measured"
+                },
+                "jump_hold_fires_orb": {
+                    "value": 0,
+                    "source": "scripts/calibrate.py P6, 2026-11-07: holding the press that made the ground jump does not fire the orb (no impulse in the orb window; the next one is the re-jump on landing)",
+                    "confidence": "measured"
+                },
+                "fire_delay_ticks": {
+                    "value": 1,
+                    "source": "scripts/calibrate.py P6, 2026-11-07: a press at tick N while overlapping fires on tick N+1 (every sweep run)",
+                    "confidence": "measured"
+                }
+            },
+            "outer_hitbox": {
+                "value": 30.0,
+                "source": "calibrate.py P5, 2026-11-07: running into a spike (hitbox x 252..258) dies at player x 237.58 (right edge 252.58) and not at 236.28 (251.28): half-width 15",
+                "confidence": "measured"
+            }
         }
     }
 }

@@ -288,3 +288,19 @@ def test_role_table_diff_reports_added_removed_and_changed() -> None:
     assert (8, "role", Role.HAZARD, Role.DECO) in diff.changed
     assert all(name != "frame" for _, name, _, _ in diff.changed)
     assert diff_role_tables(old, old).empty
+
+
+def test_mode_constants_parse_nested_and_missing() -> None:
+    raw = json.loads(constants_module._default_path().read_text(encoding="utf-8"))
+    raw["modes"] = {"cube": {
+        "gravity": {"value": 0.216, "source": "probe", "confidence": "measured"},
+        "orb_impulse": {"yellow": {"value": 11.2, "source": "probe", "confidence": "measured"}},
+    }}
+    constants = PhysicsConstants.from_json(raw)
+    assert constants.mode_value("cube", "gravity").value == 0.216
+    assert constants.mode_value("cube", "orb_impulse", "yellow").calibrated
+    assert constants.mode_value("cube", "orb_impulse", "pink") is None
+    assert constants.mode_value("ship", "gravity") is None
+    raw["modes"]["cube"]["gravity"] = {"value": 0.2, "source": "x", "confidence": "sure"}
+    with pytest.raises(ValueError):
+        PhysicsConstants.from_json(raw)

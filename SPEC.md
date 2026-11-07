@@ -274,6 +274,39 @@ actually be launched and the mod verified against it -- a version claim that has
 been run is worse than an honest narrower one, because it turns a clear refusal into a
 crash.
 
+## 0.2d Level design layer, M2: cube calibration (2026-11-07)
+
+`scripts/calibrate.py` ran the Sim-1 probes in the game (about 160 runs over three
+sittings); fitting code in `design/calibration.py`, golden runs in
+`sidecar/tests/fixtures/replays/cal_*.json`. All values in `physics_constants.json`,
+each with its probe as the source. Measured:
+
+- **Speeds** (units/s): 0.5x 251.16, 1x 311.58, 2x 387.42, 3x 468.00, 4x 576.00. They
+  match the commonly cited values. Computed as distance over ticks: the trace is rounded
+  to 3 decimals, and a median of single steps read 1x as 311.52.
+- **Cube jump:** vy 11.18 on take-off; each tick vy -= 0.216, then y += 0.225 x vy. The
+  model reproduces the real jump to 0.003 units. Apex 63.85, airtime 103 ticks.
+- **Holding** re-jumps on the tick after landing, at full strength, indefinitely.
+- **Orbs:** yellow 11.18 (same as a jump), pink 8.05. A press at tick N while overlapping
+  fires on N+1. **Buffering:** a fresh press made in the air before reaching the orb, still
+  held, fires on the first overlapping tick; holding the press that made the ground jump
+  does not fire it.
+- **Pads:** yellow 16.0, pink 10.4.
+- **Hitboxes:** hazards collide with the player's outer box, 30 wide (a spike at
+  x 252..258 kills at player x 237.58, not 236.28). Solids kill from the side with an
+  inner box of half-width between 3.72 and 5.02 (a block's side at x 240 kills at 236.28,
+  not 234.98). The exact inner size and the landing tolerance are fitted by the simulator
+  to the P4 outcome table (29 press timings: died / landed / cleared over).
+- **The editor's "ignore damage" playtest setting** was on, and the first P4/P5 run (103
+  replays) recorded no deaths: the cube ran through blocks and spikes but still landed on
+  top. `run_replay` now clears `m_ignoreDamage` on the layer and the player for the run,
+  restores it afterwards, and reports `ignore_damage_was_on`. The P5 probe warns if a sweep
+  has no deaths, and a cancelled run is recorded as an error, not as "clear".
+- **A crash on quitting GD** after this session was inside the AMD graphics driver
+  (`amdxx64.dll`) during `ExitProcess`, with no mod frames on the stack: not attributed to
+  the mod.
+- Not reached: terminal velocity (the Sim-1 probes never fall far enough).
+
 ## 0.2c Level design layer, M2 in progress: S-L3 playtest control (2026-11-07)
 
 `run_replay` exists in the mod (LEVEL-DESIGN-SPEC.md 7.2), with `scripts/check_replay.py`

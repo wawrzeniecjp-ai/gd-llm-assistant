@@ -138,6 +138,12 @@ struct Replay {
     matjson::Value stops = matjson::Value::array();
     std::string deathSource;
 
+    // The editor's "ignore damage" playtest setting, saved so it can be restored. A
+    // replay always takes damage: calibration ran 103 runs with it on and recorded no
+    // deaths at all, the cube running straight through blocks and spikes.
+    bool layerIgnoredDamage = false;
+    bool playerIgnoredDamage = false;
+
     static Replay& get() {
         static Replay instance;
         return instance;
@@ -235,6 +241,8 @@ struct Replay {
     }
 
     void beforeTick(GJBaseGameLayer* layer, float dt, bool isHalfTick, bool isLastTick) {
+        layer->m_ignoreDamage = false;
+        if (layer->m_player1 != nullptr) layer->m_player1->m_ignoreDamage = false;
         auto const now = nowSeconds();
         if (ticks == 0) {
             firstTickAt = now;
@@ -298,6 +306,7 @@ struct Replay {
         d["probes"] = probes;
         d["stops"] = stops;
         d["death_source"] = deathSource;
+        d["ignore_damage_was_on"] = layerIgnoredDamage || playerIgnoredDamage;
         return d;
     }
 };
@@ -474,6 +483,13 @@ public:
             // A message sent a moment ago would otherwise have the panel swallow this.
             ui::ChatPanel::clearPlaytestSuppression();
             ui->onPlaytest(nullptr);
+            replay.layerIgnoredDamage = level->m_ignoreDamage;
+            replay.playerIgnoredDamage =
+                level->m_player1 != nullptr && level->m_player1->m_ignoreDamage;
+            if (replay.layerIgnoredDamage || replay.playerIgnoredDamage) {
+                log::info("run_replay: the editor's ignore-damage setting is on; "
+                          "overriding it for the replay");
+            }
             if (level->m_playbackMode != PlaybackMode::Playing) {
                 replay.state = Replay::State::Idle;
                 return fail("EDITOR_BUSY", "the editor's playtest did not start");
@@ -502,6 +518,12 @@ public:
             replay.stoppingOurselves = true;
             ui->onStopPlaytest(nullptr);
             replay.stoppingOurselves = false;
+        }
+        if (level != nullptr) {
+            level->m_ignoreDamage = replay.layerIgnoredDamage;
+            if (level->m_player1 != nullptr) {
+                level->m_player1->m_ignoreDamage = replay.playerIgnoredDamage;
+            }
         }
         auto const wall = nowSeconds() - replay.startedAt;
 

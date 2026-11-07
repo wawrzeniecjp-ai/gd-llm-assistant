@@ -8,7 +8,7 @@ a missing value is `None` -- never a plausible default.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path
@@ -66,6 +66,19 @@ class PhysicsConstants:
     tick_rate: Measured
     ground_top_y: Measured
     units_per_second: dict[str, Measured]
+    #: Per-mode constants (LEVEL-DESIGN-SPEC.md 6.3), e.g. `modes["cube"]["gravity"]`, with
+    #: nested groups such as `modes["cube"]["orb_impulse"]["yellow"]`. Empty until
+    #: calibration writes them.
+    modes: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def mode_value(self, mode: str, *path: str) -> Measured | None:
+        """A per-mode constant, or None when it has not been calibrated or listed."""
+        node: Any = self.modes.get(mode)
+        for key in path:
+            if not isinstance(node, dict):
+                return None
+            node = node.get(key)
+        return node if isinstance(node, Measured) else None
 
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> PhysicsConstants:
@@ -81,7 +94,24 @@ class PhysicsConstants:
             tick_rate=Measured.from_json(raw.get("tick_rate"), where="tick_rate"),
             ground_top_y=Measured.from_json(raw.get("ground_top_y"), where="ground_top_y"),
             units_per_second=speeds,
+            modes={
+                mode: _parse_tree(values, where=f"modes.{mode}")
+                for mode, values in (raw.get("modes") or {}).items()
+            },
         )
+
+
+def _parse_tree(raw: Any, *, where: str) -> dict[str, Any]:
+    """A dict whose leaves are `{value, source, confidence}` objects."""
+    if not isinstance(raw, dict):
+        raise ValueError(f"{where}: expected an object")
+    out: dict[str, Any] = {}
+    for key, value in raw.items():
+        if isinstance(value, dict) and "confidence" in value:
+            out[key] = Measured.from_json(value, where=f"{where}.{key}")
+        else:
+            out[key] = _parse_tree(value, where=f"{where}.{key}")
+    return out
 
 
 def _default_path() -> Path:
