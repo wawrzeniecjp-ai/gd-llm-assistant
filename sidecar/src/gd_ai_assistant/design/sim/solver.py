@@ -103,7 +103,7 @@ def _search(world: World, p: CubeParams, start: Cube, end_x: float, *, beam: int
             cube = branch.cube
             reach = cube.x + PRESS_HORIZON_TICKS * p.dx[cube.speed] + 30
             may_press = (branch.release_at in (None, tick - 1)
-                         and world.any_between(cube.x - 30, reach))
+                         and world.obstacle_between(cube.x - 30, reach))
             pre = cube.copy() if may_press else None
             death = advance(cube, world, p, tick, _actions(branch, tick - 1, False))
             if death is not None:

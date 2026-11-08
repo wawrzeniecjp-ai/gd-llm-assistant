@@ -77,16 +77,21 @@ class World:
         self.bodies.sort(key=lambda b: b.box.x1)
         self._lefts = [b.box.x1 for b in self.bodies]
         self._widest = max((b.box.x2 - b.box.x1 for b in self.bodies), default=0.0)
-        # Running maximum of right edges, for `any_between` in O(log n).
+        # Obstacles only (not speed portals): their left edges and a running maximum of
+        # right edges, for `obstacle_between` in O(log n). A speed portal is not a reason
+        # to press, and treating it as one let branches cross it at different ticks and
+        # split into dozens of x-tracks (a 0.5x section overflowed the beam).
+        obstacles = [b for b in self.bodies if b.role is not Role.PORTAL_SPEED]
+        self._obstacle_lefts = [b.box.x1 for b in obstacles]
         self._right_max: list[float] = []
         best = float("-inf")
-        for body in self.bodies:
+        for body in obstacles:
             best = max(best, body.box.x2)
             self._right_max.append(best)
 
-    def any_between(self, x1: float, x2: float) -> bool:
-        """Is any body's box within [x1, x2) horizontally? (Cheaper than `near`.)"""
-        count = bisect_left(self._lefts, x2)
+    def obstacle_between(self, x1: float, x2: float) -> bool:
+        """Is any obstacle (anything but a speed portal) within [x1, x2) horizontally?"""
+        count = bisect_left(self._obstacle_lefts, x2)
         return count > 0 and self._right_max[count - 1] > x1
 
     def near(self, x1: float, x2: float) -> list[Body]:
@@ -108,7 +113,8 @@ def body_for(uid: int, entry: RoleEntry, x: float, y: float, *, rotation: float 
              scale_x: float = 1.0, scale_y: float = 1.0, flip_x: bool = False,
              flip_y: bool = False) -> Body | dict[str, Any] | None:
     """A body, an `unsupported` record (dict), or None for something irrelevant."""
-    if not entry.is_gameplay:
+    if not entry.is_gameplay or entry.role is Role.START_POS:
+        # A start position marks where a playtest begins; it collides with nothing.
         return None
     reason = None
     if entry.role not in SIM1_ROLES:

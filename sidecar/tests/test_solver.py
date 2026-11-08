@@ -115,3 +115,39 @@ def test_verify_explicit_start_mid_level() -> None:
     ship = _verify(spike, {"x_range": [2700, 3300], "start_from": "explicit",
                            "start": {"mode": "ship"}})
     assert ship["result"] == "unverifiable"
+
+
+def test_start_positions_do_not_block_verification() -> None:
+    result = _verify([{"id": 31, "x": 75, "y": 15}, {"id": 8, "x": 255, "y": 15}],
+                     {"x_range": [0, 600]})
+    assert result["result"] == "possible"
+
+
+def test_tricky_columns_beaten_by_hand() -> None:
+    """A section a strong player built and beat by hand (2026-11-08): possible, but only
+    just. At 0.5x, each column needs its press in a 4-tick window; one tick early lands
+    on the small spike after the block, one tick late touches the one before it.
+
+    Small hitboxes, slow speed and a tight arc: if a change to gravity, jump strength or
+    hitboxes turns this impossible, the change is wrong, whatever else it fixes.
+    """
+    import json
+    from pathlib import Path
+
+    from gd_ai_assistant.design.sim.cube import simulate
+
+    fixture = Path(__file__).parent / "fixtures" / "tricky_columns.json"
+    world = _world(json.loads(fixture.read_text(encoding="utf-8"))["objects"])
+    solved = solve(world, PARAMS, Cube(), 420)
+    assert solved.result == "possible" and len(solved.route) == 2
+    spans = windows(world, PARAMS, Cube(), solved.route, 420, solved.end_tick + 2)
+    assert [hi - lo + 1 for lo, hi in spans] == [4, 4]
+
+    def first_column(press: int) -> bool:
+        taps = [{"tick": press, "action": "press"}, {"tick": press + 1, "action": "release"}]
+        return simulate(world, PARAMS, taps, max_ticks=400, until_x=240, start=Cube(),
+                        start_tick=0).death is None
+
+    lo, hi = spans[0]
+    assert all(first_column(t) for t in range(lo, hi + 1))
+    assert not first_column(lo - 1) and not first_column(hi + 1)
