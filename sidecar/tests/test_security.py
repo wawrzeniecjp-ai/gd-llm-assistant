@@ -142,7 +142,7 @@ def test_the_shipped_env_example_parses(tmp_path) -> None:
 
     config = SidecarConfig(_env_file=example)
 
-    assert config.ws_port == 8765
+    assert config.ws_port == 18765
     assert config.max_tool_rounds >= 1
 
 

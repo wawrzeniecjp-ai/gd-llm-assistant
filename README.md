@@ -5,7 +5,7 @@ want, a local sidecar process drives an LLM, and the model edits your level
 through the editor's own API — in batches, roughly one undo step per request.
 
 ```
-GD (Geode mod)  ──ws://127.0.0.1:8765──►  sidecar (Python)  ──https──►  LLM provider
+GD (Geode mod)  ──ws://127.0.0.1:18765──►  sidecar (Python)  ──https──►  LLM provider
 ```
 
 The mod is the trust boundary: it validates and rate-limits everything the
@@ -110,7 +110,7 @@ request at once.
 | --- | --- |
 | Game exits a second after launch | Launched directly instead of through Steam |
 | No Geode button in the menu | Geode's UI is unavailable on a mismatched game build — check the log line `Running Geode v…` |
-| Panel says it cannot reach the sidecar | `start-sidecar.bat` is not running, or it failed to bind port 8765 |
+| Panel says it cannot reach the sidecar | `start-sidecar.bat` is not running, or it failed to bind port 18765 |
 | Panel says the sidecar needs configuration | `llm_provider`, `api_key` or `model` is unset in `sidecar\.env` |
 | Mod does not load at all | Game/Geode version mismatch. The mod targets **2.2091** |
 | Panel never appears | Not in the level editor — the panel is editor-only |

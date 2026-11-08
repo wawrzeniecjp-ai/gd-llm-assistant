@@ -9,7 +9,7 @@ real time while you keep working.
 ## How it works
 
 The mod is the WebSocket **client**; the sidecar is the **server**, listening on
-`ws://127.0.0.1:8765` by default. The game process opens no listening socket and
+`ws://127.0.0.1:18765` by default. The game process opens no listening socket and
 never sees your LLM API key — that lives only in the sidecar's configuration.
 
 Every assistant turn is grouped into a single transaction, so one undo reverts

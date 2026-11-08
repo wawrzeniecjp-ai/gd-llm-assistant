@@ -109,9 +109,21 @@ std::string readTokenFile(std::filesystem::path const& path) {
     return contents;
 }
 
+constexpr char const* kDefaultUrl = "ws://127.0.0.1:18765";
+
+/// The default before 0.2f. Geode saves every setting's value, so an install that never
+/// touched the URL keeps the old default after the change; that value is moved to the
+/// new default once. (8765 kept colliding with other local dev servers.)
+constexpr char const* kOldDefaultUrl = "ws://127.0.0.1:8765";
+
 std::string configuredUrl() {
-    auto const url = Mod::get()->getSettingValue<std::string>("sidecar-url");
-    return url.empty() ? std::string("ws://127.0.0.1:8765") : url;
+    auto url = Mod::get()->getSettingValue<std::string>("sidecar-url");
+    if (url == kOldDefaultUrl) {
+        Mod::get()->setSettingValue<std::string>("sidecar-url", kDefaultUrl);
+        log::info("sidecar-url: moved the old default {} to {}", kOldDefaultUrl, kDefaultUrl);
+        url = kDefaultUrl;
+    }
+    return url.empty() ? std::string(kDefaultUrl) : url;
 }
 
 /// The session key for a level (SPEC.md 6.2.5).

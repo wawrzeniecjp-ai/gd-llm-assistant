@@ -112,7 +112,7 @@ class SidecarConfig(BaseSettings):
     # `allow_non_loopback` must precede `ws_host` only if the check were a
     # field validator; it is a model validator instead, so order is free.
     ws_host: str = "127.0.0.1"
-    ws_port: int = Field(default=8765, ge=1, le=65535)
+    ws_port: int = Field(default=18765, ge=1, le=65535)
     allow_non_loopback: bool = False
     token_path: Path = Field(default_factory=_default_token_path)
 

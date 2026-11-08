@@ -274,6 +274,16 @@ actually be launched and the mod verified against it -- a version claim that has
 been run is worse than an honest narrower one, because it turns a clear refusal into a
 crash.
 
+## 0.2f Default port 18765 (2026-11-08)
+
+The default sidecar port moves from 8765 to **18765**: 8765 is a common default for local
+dev servers and kept being taken (by a WSL server, relayed to Windows), which made the
+scripts and the sidecar fail to bind. 18765 is below both the Windows dynamic range
+(49152+) and the Linux ephemeral range (32768+), and outside Windows' excluded ranges.
+Geode saves every setting's value, so the mod rewrites a saved `sidecar-url` equal to the
+old default to the new one on first use; a URL the user chose is left alone. A sidecar
+`.env` that sets `ws_port=8765` explicitly must be updated by hand.
+
 ## 0.2e Level design layer, M2: cube simulator, solver, verify_section (2026-11-07)
 
 `design/sim/` (`world.py`, `cube.py`, `solver.py`, `verify.py`). Built and tested
@@ -707,7 +717,7 @@ Two processes communicate over a local WebSocket connection. **The sidecar is th
 │  └───────────────────────────────────────────────────────┘  │
 │                            │                                │
 └────────────────────────────┼────────────────────────────────┘
-                             │  ws://127.0.0.1:8765
+                             │  ws://127.0.0.1:18765
                              │  (token handshake, no Origin)
 ┌────────────────────────────▼────────────────────────────────┐
 │  Sidecar Process (Python)                                   │
@@ -754,7 +764,7 @@ All entries are **Proposed** until the owner confirms. Each replaces or answers 
 
 | ID | Decision | Replaces / answers |
 | --- | --- | --- |
-| D1 | Mod is WS client, sidecar is server on `127.0.0.1:8765`. | Port/role contradictions; Q2 partly |
+| D1 | Mod is WS client, sidecar is server on `127.0.0.1:18765`. | Port/role contradictions; Q2 partly |
 | D2 | One undo group per assistant turn via transactions (§6.1.5). | Per-op undo flag; Q3 |
 | D3 | Raw `undo`/`redo` are not exposed to the LLM. User reverts via the editor or the "Revert" action on the turn summary. | Q3 |
 | D4 | Sidecar is stateless w.r.t. level contents: query on demand, no mirror. | Q4, §5.2.4 |
@@ -890,7 +900,7 @@ The sidecar does not act on `level_changed` mid-turn — it would interleave wit
       "type": "string",
       "name": "Sidecar WebSocket URL",
       "description": "WebSocket URL of the local sidecar. Must be a loopback address.",
-      "default": "ws://127.0.0.1:8765"
+      "default": "ws://127.0.0.1:18765"
     },
     "auto-connect": {
       "type": "bool",
@@ -1096,7 +1106,7 @@ One session per level, keyed by `level_key` supplied in `hello`. Default `level_
 | Property | Value |
 | --- | --- |
 | Protocol | WebSocket (RFC 6455) |
-| Default URL | `ws://127.0.0.1:8765` (sidecar listens; mod connects) |
+| Default URL | `ws://127.0.0.1:18765` (sidecar listens; mod connects) |
 | Encoding | UTF-8 JSON text frames |
 | Max frame | 1 MB default (see §6.1.4) |
 | Connections | Exactly one authenticated client at a time; additional connections are closed with code 4003 |
@@ -1717,7 +1727,7 @@ miscalculation.
 
 ## 7.8 Connection Lifecycle
 
-1. Sidecar starts, generates/loads the token, and listens on `127.0.0.1:8765`. If the port is busy it exits with a clear message (the port is configurable).
+1. Sidecar starts, generates/loads the token, and listens on `127.0.0.1:18765`. If the port is busy it exits with a clear message (the port is configurable).
 2. User enters the editor. If `auto-connect` is enabled, the mod reads the token file and connects; otherwise the user presses **Connect** in the panel.
 3. Mod sends `hello`; sidecar validates token and version and responds; sidecar pushes `history`.
 4. Normal request/event flow proceeds.
@@ -1949,7 +1959,7 @@ Loaded from environment variables, a `.env` file, or a config file.
 | `max_tokens` | Maximum tokens per LLM response | 4096 |
 | `temperature` | Sampling temperature | 0.2 |
 | `ws_host` | Bind address. Non-loopback values are refused unless `allow_non_loopback` is set. | 127.0.0.1 |
-| `ws_port` | WebSocket listen port | 8765 |
+| `ws_port` | WebSocket listen port | 18765 |
 | `token_path` | Location of the handshake token file | `%LOCALAPPDATA%\gd-ai-assistant\token` |
 | `session_dir` | Directory for session persistence | `./sessions` |
 | `max_tool_rounds` | Tool-loop rounds per turn | 40 |

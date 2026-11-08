@@ -53,7 +53,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo Starting the sidecar on ws://127.0.0.1:8765
+echo Starting the sidecar on ws://127.0.0.1:18765
 echo Leave this window open while you use the mod. Press Ctrl+C to stop.
 echo.
 uv run gd-ai-assistant-sidecar

@@ -23,7 +23,7 @@
             "type": "string",
             "name": "Sidecar WebSocket URL",
             "description": "WebSocket URL of the local sidecar. Must be a loopback address.",
-            "default": "ws://127.0.0.1:8765"
+            "default": "ws://127.0.0.1:18765"
         },
         "auto-connect": {
             "type": "bool",

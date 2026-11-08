@@ -15,7 +15,7 @@ uv sync
 uv run gd-ai-assistant-sidecar
 ```
 
-It listens on `ws://127.0.0.1:8765` by default and writes the handshake token to
+It listens on `ws://127.0.0.1:18765` by default and writes the handshake token to
 `%LOCALAPPDATA%\gd-ai-assistant\token` on first start. The mod reads that file.
 
 With no `api_key`/`model` configured the sidecar still starts, accepts `hello`,
