@@ -141,6 +141,40 @@ def fit_jump(trace: Trace, after_tick: int = 0) -> JumpFit | None:
     )
 
 
+@dataclass(frozen=True)
+class Landing:
+    tick: int
+    x: float
+    y: float
+    step: float      # the x step into the landing sample
+    extra: float     # how much longer that step was than the steps just before it
+
+
+def landings(trace: Trace) -> list[Landing]:
+    """Every landing (airborne, then grounded on the next tick) with its x step.
+
+    P10: on one stair in the M2 sections the game moved the cube one extra unit forward
+    on the landing tick. `extra` is that step minus the median of the five before it.
+    """
+    rows = _rows(trace)
+    out = []
+    for k in range(6, len(rows)):
+        now, before = rows[k], rows[k - 1]
+        if not now.get("grounded") or before.get("grounded"):
+            continue
+        if now["tick"] - before["tick"] != 1:
+            continue
+        window = rows[k - 6:k]
+        if any(b["tick"] - a["tick"] != 1 for a, b in zip(window, window[1:], strict=False)):
+            continue
+        normal = statistics.median(b["x"] - a["x"] for a, b in zip(window, window[1:],
+                                                                    strict=False))
+        step = now["x"] - before["x"]
+        out.append(Landing(int(now["tick"]), now["x"], now["y"], round(step, 3),
+                           round(step - normal, 3)))
+    return out
+
+
 def outcome_of(result: dict[str, Any], *, landed_y: float | None = None) -> str:
     """Classify a probe run: 'death', 'landed' (stood at `landed_y` at some point), or
     'clear'."""

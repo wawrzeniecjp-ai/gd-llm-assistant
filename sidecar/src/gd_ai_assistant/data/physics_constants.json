@@ -84,7 +84,7 @@
             },
             "inner_hitbox": {
                 "value": 9.0,
-                "source": "simulator golden fit, 2026-11-07: every P4/P5 run reproduces for an inner half-width of 3.8 to 5.0 (P4 alone bounds it to 3.72..5.02); 9 (half 4.5) is the middle. A block-height probe would narrow it.",
+                "source": "simulator golden fit, 2026-11-07: every P4/P5 run reproduces for an inner half-width of 3.8 to 5.0 (P4 alone bounds it to 3.72..5.02); 9 (half 4.5) is the middle. P10/P11 2026-11-09: side hits from a start position agree with 4.5 or come one tick later in the game (identical runs differ: B runs 29-45), never earlier.",
                 "confidence": "derived"
             },
             "terminal_velocity": {
@@ -184,6 +184,146 @@
                     "gravity": {
                         "value": 0.216,
                         "source": "scripts/calibrate.py P9, 2026-11-09",
+                        "confidence": "measured"
+                    }
+                }
+            },
+            "jump_snap": {
+                "0.5x": {
+                    "max_step": {
+                        "value": 1.0,
+                        "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on. The step: the game moved the cube by (needed + one tick of x), capped at this.",
+                        "confidence": "measured"
+                    },
+                    "up": {
+                        "lo": {
+                            "value": 89.48,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        },
+                        "hi": {
+                            "value": 90.98,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        }
+                    },
+                    "down": {
+                        "lo": {
+                            "value": 117.66,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        },
+                        "hi": {
+                            "value": 120.66,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        }
+                    }
+                },
+                "1x": {
+                    "max_step": {
+                        "value": 1.0,
+                        "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on. The step: the game moved the cube by (needed + one tick of x), capped at this.",
+                        "confidence": "measured"
+                    },
+                    "up": {
+                        "lo": {
+                            "value": 119.27,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        },
+                        "hi": {
+                            "value": 120.77,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        }
+                    },
+                    "down": {
+                        "lo": {
+                            "value": 149.0,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        },
+                        "hi": {
+                            "value": 152.5,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        }
+                    }
+                },
+                "2x": {
+                    "max_step": {
+                        "value": 2.0,
+                        "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on. The step: the game moved the cube by (needed + one tick of x), capped at this.",
+                        "confidence": "measured"
+                    },
+                    "up": {
+                        "lo": {
+                            "value": 149.26,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        },
+                        "hi": {
+                            "value": 153.01,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        }
+                    },
+                    "down": {
+                        "lo": {
+                            "value": 191.75,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        },
+                        "hi": {
+                            "value": 197.75,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        }
+                    }
+                },
+                "3x": {
+                    "max_step": {
+                        "value": 2.0,
+                        "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on. The step: the game moved the cube by (needed + one tick of x), capped at this.",
+                        "confidence": "measured"
+                    },
+                    "up": {
+                        "lo": {
+                            "value": 177.0,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        },
+                        "hi": {
+                            "value": 183.0,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        }
+                    },
+                    "down": {
+                        "lo": {
+                            "value": 223.8,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        },
+                        "hi": {
+                            "value": 226.8,
+                            "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on.",
+                            "confidence": "measured"
+                        }
+                    }
+                },
+                "4x": {
+                    "none_found": {
+                        "value": 0,
+                        "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on. No snap at 4x up (204-228), level (235-259) or down (262-286).",
+                        "confidence": "measured"
+                    }
+                },
+                "level": {
+                    "none_found": {
+                        "value": 0,
+                        "source": "calibrate.py P12, 2026-11-09: targets off the grid at the flight distance -12..+12 (3-unit steps) and the nearest grid spacings; the window runs halfway to the nearest spacing that did not snap. Spacing is between the centres of the block jumped from and the block landed on. No level jump snapped at any speed.",
                         "confidence": "measured"
                     }
                 }

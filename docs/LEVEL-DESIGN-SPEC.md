@@ -972,6 +972,38 @@ game moved the cube one extra unit forward on landing (centre 1.4 past the block
 edge, a spike next). No landing in P4 or elsewhere did that; it accounts for slot 6's two
 remaining edge disagreements.
 
+P10 and P11 (calibration, 2026-11-09) found the cause: jump snapping, the game's
+`PlayerObject::checkSnapJumpToObject`. Jumping from one solid and landing on another
+moves the cube towards the place on the new solid matching where it took off on the old
+one, by at most 1 unit, but only for certain spacings between the two solids' centres.
+P12 mapped it at every speed, with targets off the grid. It snaps only when the spacing
+between the two blocks' centres falls in a narrow window, for a jump one block up or one
+block down, never level:
+
+| Speed | Up a block | Down a block | Step cap |
+|---|---|---|---|
+| 0.5x | 89.5-91.0 | 117.7-120.7 | 1 |
+| 1x | 119.3-120.8 | 149.0-152.5 | 1 |
+| 2x | 149.3-153.0 | 191.8-197.8 | 2 |
+| 3x | 177.0-183.0 | 223.8-226.8 | 2 |
+| 4x | none in 204-228 | none in 262-286 | - |
+
+(Window edges are halfway to the nearest spacing that did not snap; the probe stepped 3
+units.) The cube moves by the distance from where it lands to where it took off, mapped
+onto the new block, plus one tick of x, capped by speed; every P12 snap fits that
+exactly, including one under the cap (2x, spacing 150: 1.489). The simulator does the
+same (`modes.cube.jump_snap`). With it, slots 6-10 match the game on every replayed tick
+and every edge check (52 of 52), and all 407 P10-P12 runs are golden tests. Open: jumps
+of two blocks up or down, and 4x outside the ranges tried.
+
+Two more things P10/P11 showed. A shallow hit on a block's side from a start position is
+reported on the same tick as the simulator or one tick later, never earlier, and
+otherwise identical runs differ (P11 B, runs 29-45), so the golden tests allow one tick
+there; the inner hitbox stays at half-width 4.5. And the simulator landed the cube on the
+top of a stacked column's middle block (a top covered by the block above) and jumped on
+from inside it, which made slot 12 possible for smaller inner hitboxes. Covered tops are
+no longer floors.
+
 ## 7.3 When the agent may replay
 
 - **Calibration**: run by the developer via `scripts/calibrate.py`, not by the agent.

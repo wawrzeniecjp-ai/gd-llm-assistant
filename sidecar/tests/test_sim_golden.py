@@ -9,7 +9,7 @@ import pytest
 
 from gd_ai_assistant.design.constants import load_constants
 from gd_ai_assistant.design.roles import load_role_table
-from gd_ai_assistant.design.sim.cube import CubeParams, simulate
+from gd_ai_assistant.design.sim.cube import Cube, CubeParams, simulate
 from gd_ai_assistant.design.sim.world import World, world_from_objects
 
 FIXTURES = Path(__file__).parent / "fixtures" / "replays"
@@ -27,30 +27,51 @@ def _cases():
         for index, run in enumerate(fixture["runs"]):
             if "error" in run:
                 continue
-            objects = fixture["objects"] or [run[k] for k in ("portal", "pad") if k in run]
+            objects = (run.get("objects") or fixture["objects"]
+                       or [run[k] for k in ("portal", "pad") if k in run])
             label = run.get("press_tick", run.get("speed", run.get("buffering", index)))
-            yield pytest.param(objects, run, id=f"{path.stem}-{label}")
+            yield pytest.param(objects, run, id=f"{path.stem}-{index}-{label}")
 
 
 @pytest.mark.parametrize(("objects", "run"), list(_cases()))
 def test_golden_replay(objects, run) -> None:
     world = world_from_objects(objects, ROLES)
     # Two extra ticks: the game numbers a death caught mid-step by completed ticks.
-    result = simulate(world, PARAMS, run["inputs"], max_ticks=run["ticks"] + 2)
-    simulated = dict(zip(result.trace["tick"],
-                         zip(result.trace["x"], result.trace["y"], strict=True), strict=True))
+    if "start" in run:
+        # From a start position: already moving at sim tick 1, one tick ahead of the game
+        # (the same lead as from the level start, playtest 2026-11-09).
+        start = Cube(x=run["start"]["x"], y=run["start"]["y"], grounded=True)
+        inputs = [{**i, "tick": i["tick"] - 1} for i in run["inputs"]]
+        # Sim tick = game tick - 1: a run the game stopped alive at its last tick ends there.
+        limit = run["ticks"] + 1 if run["outcome"] == "death" else run["ticks"] - 1
+        result = simulate(world, PARAMS, inputs, max_ticks=limit, start=start)
+        lead = 1
+    else:
+        limit = run["ticks"] + 2 if run["outcome"] == "death" else run["ticks"]
+        result = simulate(world, PARAMS, run["inputs"], max_ticks=limit)
+        lead = 0
+    simulated = {t + lead: xy for t, xy in zip(
+        result.trace["tick"], zip(result.trace["x"], result.trace["y"], strict=True),
+        strict=True)}
     trace = run["trace"]
     died = run["outcome"] == "death"
     last = trace["tick"][-1]
     for tick, x, y in zip(trace["tick"], trace["x"], trace["y"], strict=True):
         if died and tick == last:
             continue  # the death sample is labelled one tick apart; compared below
+        if tick not in simulated:
+            continue  # tick 0 from a start position: before the simulator's first sample
         sx, sy = simulated[tick]
         assert abs(sx - x) <= MAX_DX and abs(sy - y) <= MAX_DY, (tick, (x, y), (sx, sy))
     if died:
         assert result.outcome == "death"
-        assert abs(result.death.x - run["death"]["x"]) <= MAX_DX
-        assert abs(result.death.y - run["death"]["y"]) <= MAX_DY
+        # A shallow side hit resolves on the same tick or one tick later in the game, never
+        # earlier; identical runs differ (P11, B runs 29-45), so one tick of x is allowed.
+        late = run["death"]["x"] - result.death.x
+        assert -MAX_DX <= late <= PARAMS.dx["1x"] + MAX_DX, late
+        # One tick late in the air also moves y by up to one tick of the fall.
+        dy = MAX_DY if late <= MAX_DX else MAX_DY + PARAMS.terminal_velocity * PARAMS.scale
+        assert abs(result.death.y - run["death"]["y"]) <= dy
     else:
         assert result.outcome != "death", result.death
 

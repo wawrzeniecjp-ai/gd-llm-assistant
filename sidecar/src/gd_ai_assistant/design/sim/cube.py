@@ -67,6 +67,14 @@ class CubeParams:
     #: None: no cap.
     terminal_velocity: float | None = None
     gravity_by_speed: Mapping[str, float] = field(default_factory=dict)
+    #: Jump snapping (the game's `PlayerObject::checkSnapJumpToObject`, calibration
+    #: P10-P12 2026-11-09). Landing on a solid one block up or down from the solid the
+    #: cube jumped from, at a spacing between their centres inside a window for that speed,
+    #: moves the cube towards where it took off on the old solid, mapped onto the new one,
+    #: plus one tick of x, by at most the speed's step. By speed: (dy, lo, hi) windows.
+    snap_windows: Mapping[str, tuple[tuple[float, float, float], ...]] = field(
+        default_factory=dict)
+    snap_max_step: Mapping[str, float] = field(default_factory=dict)
 
     def jump_for(self, speed: str) -> float:
         return self.jump_by_speed.get(speed, self.jump_velocity)
@@ -106,6 +114,21 @@ class CubeParams:
                 jumps[speed] = jump.value
             if gravity is not None and gravity.value is not None:
                 gravities[speed] = gravity.value
+        snap = constants.modes.get("cube", {}).get("jump_snap") or {}
+        windows: dict[str, tuple[tuple[float, float, float], ...]] = {}
+        max_steps: dict[str, float] = {}
+        for speed in SPEEDS:
+            table = snap.get(speed) or {}
+            found = []
+            for kind, dy in (("up", 30.0), ("down", -30.0)):
+                bounds = table.get(kind) or {}
+                lo, hi = bounds.get("lo"), bounds.get("hi")
+                if lo is not None and hi is not None and lo.value is not None \
+                        and hi.value is not None:
+                    found.append((dy, lo.value, hi.value))
+            if found and table.get("max_step") is not None:
+                windows[speed] = tuple(found)
+                max_steps[speed] = table["max_step"].value
         terminal = constants.mode_value("cube", "terminal_velocity")
         inner = constants.mode_value("cube", "inner_hitbox")
         tolerance = constants.mode_value("cube", "landing_tolerance")
@@ -123,6 +146,8 @@ class CubeParams:
             jump_by_speed=jumps,
             terminal_velocity=terminal.value if terminal and terminal.value else None,
             gravity_by_speed=gravities,
+            snap_windows=windows,
+            snap_max_step=max_steps,
         )
 
 
@@ -139,6 +164,10 @@ class Cube:
     touching_orbs: list[Body] = field(default_factory=list)
     dead: bool = False
     was_grounded: bool = True
+    #: The centre of the solid the cube last landed on (None: the floor), and its x on
+    #: the last tick it was grounded: what jump snapping measures from.
+    snap: tuple[float, float] | None = None
+    ground_x: float = 0.0
 
     def box(self, half: float = HALF) -> Box:
         return Box(self.x - half, self.y - half, self.x + half, self.y + half)
@@ -146,12 +175,12 @@ class Cube:
     def key(self) -> tuple:
         """What the solver deduplicates on (LEVEL-DESIGN-SPEC.md 6.8.2)."""
         return (round(self.y * 2) / 2, round(self.vy * 20) / 20, self.speed, self.grounded,
-                self.holding, self.buffered, frozenset(self.used))
+                self.holding, self.buffered, frozenset(self.used), self.snap)
 
     def copy(self) -> Cube:
         clone = Cube(self.x, self.y, self.vy, self.speed, self.grounded, self.holding,
                      self.buffered, set(self.used), list(self.touching_orbs), self.dead,
-                     self.was_grounded)
+                     self.was_grounded, self.snap, self.ground_x)
         return clone
 
 
@@ -177,6 +206,8 @@ def _supported(cube: Cube, near: list[Body]) -> bool:
 
 def move(cube: Cube, near: list[Body], p: CubeParams) -> None:
     cube.was_grounded = cube.grounded
+    if cube.grounded:
+        cube.ground_x = cube.x
     cube.x = f32(cube.x + p.dx[cube.speed])
     if cube.grounded and cube.holding:
         # A held button jumps again from inside the move, with no gravity that tick: in
@@ -193,12 +224,45 @@ def move(cube: Cube, near: list[Body], p: CubeParams) -> None:
         cube.y += cube.vy * p.scale
 
 
+def _snap_jump(cube: Cube, body: Body, p: CubeParams) -> None:
+    """Jump snapping on landing on `body` (see `CubeParams.snap_pairs`)."""
+    cx, cy = (body.box.x1 + body.box.x2) / 2, (body.box.y1 + body.box.y2) / 2
+    if cube.snap is not None and cube.snap != (cx, cy):
+        spacing, rise = cx - cube.snap[0], cy - cube.snap[1]
+        for dy, lo, hi in p.snap_windows.get(cube.speed, ()):
+            if abs(rise - dy) < 0.5 and lo <= spacing <= hi:
+                # The game measures from one tick after the last grounded one (P12: 2x,
+                # spacing 150 moved 1.489, exactly that, below the 2-unit cap).
+                target = cx + (cube.ground_x + p.dx[cube.speed] - cube.snap[0])
+                limit = p.snap_max_step[cube.speed]
+                cube.x = f32(cube.x + max(-limit, min(limit, target - cube.x)))
+                break
+    cube.snap = (cx, cy)
+    # A press on the landing tick jumps before the next move records it (P11 A, run 1).
+    cube.ground_x = cube.x
+
+
+def _covered(body: Body, near: list[Body], outer: Box) -> bool:
+    """Is the top of `body`, where the cube is over it, under another solid sitting flush
+    on it? A stacked column's inner tops are not floors: without this the cube landed on
+    a 3-block step's middle block from the side and jumped on from inside it (slot 12)."""
+    top = body.box.y2
+    x1, x2 = max(body.box.x1, outer.x1), min(body.box.x2, outer.x2)
+    for other in near:
+        if (other is not body and other.role is Role.SOLID
+                and abs(other.box.y1 - top) < 1e-6 and other.box.y2 > top
+                and other.box.x1 <= x1 and other.box.x2 >= x2):
+            return True
+    return False
+
+
 def collide(cube: Cube, near: list[Body], p: CubeParams, tick: int, prev_y: float,
             prev_x: float | None = None) -> Death | None:
     """Resolve contacts after a move. `near` holds every body the cube can touch this
     tick, before or after the move. Returns the death, if this tick kills."""
     if cube.y - HALF <= FLOOR:
         cube.y, cube.vy, cube.grounded = FLOOR + HALF, 0.0, True
+        cube.snap = None
     outer = cube.box()
     if not near:
         cube.touching_orbs = []
@@ -208,8 +272,13 @@ def collide(cube: Cube, near: list[Body], p: CubeParams, tick: int, prev_y: floa
         if body.role is not Role.SOLID or not body.box.overlaps(outer):
             continue
         top = body.box.y2
+        if _covered(body, near, outer):
+            continue
         if cube.vy <= 0 and prev_y - HALF >= top - p.landing_tolerance:
+            landed_now = not cube.was_grounded
             cube.y, cube.vy, cube.grounded = top + HALF, 0.0, True
+            if landed_now:
+                _snap_jump(cube, body, p)
             outer = cube.box()
     inner = cube.box(p.inner_half)
     # Orbs are touched at the position before the move as well as after (P6: a press at

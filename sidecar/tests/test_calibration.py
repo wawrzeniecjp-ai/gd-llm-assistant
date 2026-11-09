@@ -89,3 +89,20 @@ def test_compact_trace_keeps_events() -> None:
     assert len(compact["tick"]) < len(trace["tick"]) / 3
     assert 61 in compact["tick"]          # the take-off
     assert compact["tick"][-1] == trace["tick"][-1]
+
+
+def test_landings_report_an_extra_step() -> None:
+    from gd_ai_assistant.design import calibration as cal
+    """Slot 6, game ticks 512-526: the landing at 521 stepped 2.299 instead of 1.299."""
+    xs = [18738.701, 18740.0, 18741.299, 18742.598, 18743.896, 18745.195, 18746.494,
+          18747.793, 18749.092, 18751.391, 18752.689, 18753.988]
+    trace = {"tick": list(range(512, 524)), "x": xs,
+             "y": [88.8, 87.4, 85.9, 84.4, 82.8, 81.2, 79.5, 77.8, 76.0, 75.0, 75.0, 75.0],
+             "grounded": [0] * 9 + [1, 1, 1]}
+    (landing,) = cal.landings(trace)
+    assert landing.tick == 521 and landing.y == 75.0
+    assert abs(landing.extra - 1.0) < 0.01
+
+    trace["x"] = [18738.701 + 1.299 * i for i in range(12)]
+    (plain,) = cal.landings(trace)
+    assert abs(plain.extra) < 0.01
