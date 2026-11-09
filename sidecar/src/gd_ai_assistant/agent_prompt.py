@@ -205,6 +205,10 @@ right / down / left, `,` small spike, `*` saw. Orbs: `o` yellow, `p` pink, `b` b
 portals: `C` cube, `S` ship, `B` ball, `U` ufo, `W` wave, `R` robot, `I` spider, `G` \
 swing. Speed portals `1`-`5` (0.5x, 1x, 2x, 3x, 4x). Gravity portals `+` inverse, `&` \
 normal. Size portals `n` normal, `N` mini. `@` start position.
+- **Every start position needs a speed portal right after it.** A start position \
+starts the cube at its own speed (1x unless set), not at the speed the level had \
+reached there, so without a portal the part after it plays at a different speed from \
+the start position than when the level is played through.
 - **Tall objects take one character, in the cell holding their centre.** `render_grid` \
 marks the other cells they cover with `:`, which `place_grid` ignores. A mode portal \
 covers the cell above and below its own. `?` means something is there that GridText \
@@ -246,6 +250,12 @@ and why; do not guess.
 - `inconclusive` is not a no: the search was cut short.
 - **Timing windows are difficulty.** One tick (~4 ms) is frame-perfect: a flaw unless the \
 user asked for an extreme level. Under ~25 ms is hard; 50 ms and up is comfortable.
+
+**Testing in the game.** `playtest_verify` replays the route in the real editor playtest. \
+Use it only when the user asks you to playtest or test in the game, and never in a turn \
+that has changed the level: offer it instead ("want me to playtest it?"). `confirmed` is \
+the strongest statement you can make about a section. `failed_in_game` means the \
+simulator was wrong there: tell the user, and do not call the section verified.
 
 ## Working method
 

@@ -138,3 +138,40 @@ async def test_place_grid_preview_verifies_the_planned_block() -> None:
     preview = _tool_result(provider)
     assert preview["verification"]["result"] == "impossible"
     assert editor.objects == {}                  # a preview places nothing
+
+
+# -- playtest_verify (LEVEL-DESIGN-SPEC.md 7.3) ----------------------------------------------
+
+
+async def test_playtest_verify_runs_when_the_user_asks() -> None:
+    editor = FakeEditor()
+    editor.add(8, 255, 15)
+    provider = ScriptProvider([call("playtest_verify", {"x_range": [0, 600]}), text()])
+    await make_loop(editor, provider).run(turn_id="t1", message_id="m1",
+                                          user_text="can you playtest it?")
+    result = _tool_result(provider)
+    assert result["result"] == "confirmed", result
+    assert "run_replay" in [t for t, _ in editor.requests]
+
+
+async def test_playtest_verify_is_refused_unless_asked() -> None:
+    editor = FakeEditor()
+    editor.add(8, 255, 15)
+    provider = ScriptProvider([call("playtest_verify", {"x_range": [0, 600]}), text()])
+    await make_loop(editor, provider).run(turn_id="t1", message_id="m1",
+                                          user_text="make the spike section harder")
+    assert "only when the user asks" in _tool_result(provider)["error"]
+    assert "run_replay" not in [t for t, _ in editor.requests]
+
+
+async def test_playtest_verify_is_refused_after_an_edit_in_the_same_turn() -> None:
+    editor = FakeEditor()
+    provider = ScriptProvider([
+        call("place_grid", {"grid": SECTION}),
+        call("playtest_verify", {"x_range": [0, 600]}, "c2"),
+        text(),
+    ])
+    await make_loop(editor, provider).run(turn_id="t1", message_id="m1",
+                                          user_text="build a section and test it")
+    assert "already changed the level" in _tool_result(provider, 1)["error"]
+    assert "run_replay" not in [t for t, _ in editor.requests]

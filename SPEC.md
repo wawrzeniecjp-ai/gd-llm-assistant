@@ -274,6 +274,20 @@ actually be launched and the mod verified against it -- a version claim that has
 been run is worse than an honest narrower one, because it turns a clear refusal into a
 crash.
 
+## 0.2g Level design layer, M2: playtest_verify (2026-11-08)
+
+`run_replay` accepts `start.kind = start_pos` with the start position's `uid`, picks it by
+disabling the others while the playtest starts (LEVEL-DESIGN-SPEC.md 7.2.2), echoes
+`start` in its result, and shows an "Assistant is testing..." label. New sidecar tool
+`playtest_verify` (`design/sim/playtest.py`): solves the section, replays the route,
+compares the game's trace with the simulator's, and optionally replays each press at its
+window's edges. It corrects its tick offset and start position from the game's own trace
+when they differ from what was assumed. The agent allows it only when the user's message
+asks for a playtest or test (an English word match, until the plan's `allow_replay`
+exists in M4), never after an edit in the same turn (a replay needs the transaction
+closed), at most twice and 12 replays per turn. `scripts/check_playtest.py` runs it over
+the 20 test slots, or a whole level with `--whole`.
+
 ## 0.2f Default port 18765 (2026-11-08)
 
 The default sidecar port moves from 8765 to **18765**: 8765 is a common default for local

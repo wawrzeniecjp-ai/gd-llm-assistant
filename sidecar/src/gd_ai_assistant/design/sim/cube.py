@@ -4,8 +4,9 @@ One sample per tick, numbered like `run_replay`'s trace. Sample 0 is the state b
 anything runs; sample 1 follows the first command phase with no move; every later
 sample t follows, in this order (S-L3 probes):
 
-1. **move**: x += speed; if the cube is no longer supported it is airborne; if airborne,
-   vy -= gravity, then y += vy * scale;
+1. **move**: x += speed, rounded to a 32-bit float as in the game; if the cube is no
+   longer supported it is airborne; if airborne, vy -= gravity (falling no faster than
+   terminal velocity), then y += vy * scale;
 2. **collide**: the floor and solid tops land the cube; a solid hit by the inner box
    kills; a hazard touched by the outer box kills; a pad sets vy at once; touching a
    speed portal changes the speed from the next move; orbs touched are remembered;
@@ -19,6 +20,7 @@ fitted by the golden tests (`inner_half`, `landing_tolerance`).
 
 from __future__ import annotations
 
+import struct
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -28,6 +30,18 @@ from ..roles import Role
 from .world import Body, Box, World
 
 HALF = 15.0          # outer box half-size (measured: 30 wide)
+
+_F32 = struct.Struct("<f")
+
+
+def f32(value: float) -> float:
+    """`value` rounded to a 32-bit float, as the game stores the player's x.
+
+    It matters far from the start: past x 16384 the step is 1/512 of a unit, so a 1x
+    move of 1.29825 becomes 1.298828 every tick and the cube is half a unit ahead after
+    1000 ticks (playtest 2026-11-09: the game's x matched this to 0.0005).
+    """
+    return _F32.unpack(_F32.pack(value))[0]
 FLOOR = 0.0          # the ground's top (S-L1)
 
 
@@ -46,6 +60,25 @@ class CubeParams:
     inner_half: float = 4.5          # measured bounds (3.72, 5.02]; fitted
     landing_tolerance: float = 10.0  # how far below a top the feet may be and still land
     calibrated: bool = True
+    #: The jump differs by speed (playtest 2026-11-09: at 0.5x vy0 10.62, gravity 0.212).
+    #: A speed missing here uses `jump_velocity` and `gravity`, measured at 1x.
+    jump_by_speed: Mapping[str, float] = field(default_factory=dict)
+    #: The fastest fall, as a positive number (playtest 2026-11-09: vy stops at -15.0).
+    #: None: no cap.
+    terminal_velocity: float | None = None
+    gravity_by_speed: Mapping[str, float] = field(default_factory=dict)
+
+    def jump_for(self, speed: str) -> float:
+        return self.jump_by_speed.get(speed, self.jump_velocity)
+
+    def gravity_for(self, speed: str) -> float:
+        return self.gravity_by_speed.get(speed, self.gravity)
+
+    @property
+    def uncalibrated_speeds(self) -> list[str]:
+        """Speeds whose jump is assumed to be the 1x one, not measured."""
+        return [s for s in SPEEDS if s != "1x"
+                and (s not in self.jump_by_speed or s not in self.gravity_by_speed)]
 
     @classmethod
     def from_constants(cls, constants: PhysicsConstants) -> CubeParams:
@@ -62,7 +95,18 @@ class CubeParams:
             if measured.value is None:
                 raise UncalibratedError(f"units_per_second.{speed} is not calibrated")
             calibrated &= measured.calibrated
-            dx[speed] = measured.value / 240.0
+            dx[speed] = f32(measured.value / 240.0)
+        jumps, gravities = {}, {}
+        for speed in SPEEDS:
+            if speed == "1x":
+                continue
+            jump = constants.mode_value("cube", "by_speed", speed, "jump_velocity")
+            gravity = constants.mode_value("cube", "by_speed", speed, "gravity")
+            if jump is not None and jump.value is not None:
+                jumps[speed] = jump.value
+            if gravity is not None and gravity.value is not None:
+                gravities[speed] = gravity.value
+        terminal = constants.mode_value("cube", "terminal_velocity")
         inner = constants.mode_value("cube", "inner_hitbox")
         tolerance = constants.mode_value("cube", "landing_tolerance")
         return cls(
@@ -76,6 +120,9 @@ class CubeParams:
             landing_tolerance=tolerance.value if tolerance and tolerance.value else 10.0,
             calibrated=calibrated and bool(inner and inner.calibrated)
             and bool(tolerance and tolerance.calibrated),
+            jump_by_speed=jumps,
+            terminal_velocity=terminal.value if terminal and terminal.value else None,
+            gravity_by_speed=gravities,
         )
 
 
@@ -130,17 +177,19 @@ def _supported(cube: Cube, near: list[Body]) -> bool:
 
 def move(cube: Cube, near: list[Body], p: CubeParams) -> None:
     cube.was_grounded = cube.grounded
-    cube.x += p.dx[cube.speed]
+    cube.x = f32(cube.x + p.dx[cube.speed])
     if cube.grounded and cube.holding:
         # A held button jumps again from inside the move, with no gravity that tick: in
         # P3 the cube that landed at sample 164 is already at 15 + 11.18 x 0.225 at 165.
-        cube.vy, cube.grounded, cube.buffered = p.jump_velocity, False, False
+        cube.vy, cube.grounded, cube.buffered = p.jump_for(cube.speed), False, False
         cube.y += cube.vy * p.scale
         return
     if cube.grounded and not _supported(cube, near):
         cube.grounded = False
     if not cube.grounded:
-        cube.vy -= p.gravity
+        cube.vy -= p.gravity_for(cube.speed)
+        if p.terminal_velocity is not None and cube.vy < -p.terminal_velocity:
+            cube.vy = -p.terminal_velocity
         cube.y += cube.vy * p.scale
 
 
@@ -196,7 +245,7 @@ def commands(cube: Cube, p: CubeParams, actions: Iterable[str]) -> None:
             if cube.grounded:
                 # A fresh press jumps at once: vy is set now, the cube moves next tick
                 # (P2: vy 11.18 at sample 61, y still 15).
-                cube.vy, cube.grounded, cube.buffered = p.jump_velocity, False, False
+                cube.vy, cube.grounded, cube.buffered = p.jump_for(cube.speed), False, False
                 return
         elif action == "release":
             cube.holding = cube.buffered = False

@@ -1,7 +1,7 @@
 {
     "schema": 1,
     "game_version": "2.2091",
-    "calibrated_at": "2026-11-07",
+    "calibrated_at": "2026-11-09",
     "note": "LEVEL-DESIGN-SPEC.md 6.3. Every leaf is {value, source, confidence}. confidence is measured | derived | guess. A null value means 'not known yet', and code that needs it must refuse rather than assume. Replaced by scripts/calibrate.py (M2).",
     "tick_rate": {
         "value": 240,
@@ -78,8 +78,8 @@
                 "confidence": "measured"
             },
             "landing_tolerance": {
-                "value": 8.5,
-                "source": "simulator golden fit, 2026-11-07: every P4/P5 run reproduces for a tolerance of 5 to 12 units; 8.5 is the middle.",
+                "value": 10.5,
+                "source": "simulator golden fit 2026-11-07 (every P4/P5 run reproduces for 5 to 12 units), narrowed by playtest 2026-11-09 (slot 10: the game landed feet 8.72 below a top), so 8.72 to 12; 10.5 is the middle",
                 "confidence": "derived"
             },
             "inner_hitbox": {
@@ -88,9 +88,9 @@
                 "confidence": "derived"
             },
             "terminal_velocity": {
-                "value": null,
-                "source": "not reached by the Sim-1 probes",
-                "confidence": "guess"
+                "value": 15.0,
+                "source": "playtest 2026-11-09, slot 10: falling vy stops at -15.0 at 1x and stays there until landing; the upward cap is not measured",
+                "confidence": "measured"
             },
             "orb_impulse": {
                 "yellow": {
@@ -137,6 +137,56 @@
                 "value": 30.0,
                 "source": "calibrate.py P5, 2026-11-07: running into a spike (hitbox x 252..258) dies at player x 237.58 (right edge 252.58) and not at 236.28 (251.28): half-width 15",
                 "confidence": "measured"
+            },
+            "by_speed": {
+                "0.5x": {
+                    "jump_velocity": {
+                        "value": 10.62,
+                        "source": "scripts/calibrate.py P9, 2026-11-09",
+                        "confidence": "measured"
+                    },
+                    "gravity": {
+                        "value": 0.212,
+                        "source": "scripts/calibrate.py P9, 2026-11-09",
+                        "confidence": "measured"
+                    }
+                },
+                "2x": {
+                    "jump_velocity": {
+                        "value": 11.42,
+                        "source": "scripts/calibrate.py P9, 2026-11-09",
+                        "confidence": "measured"
+                    },
+                    "gravity": {
+                        "value": 0.215,
+                        "source": "scripts/calibrate.py P9, 2026-11-09",
+                        "confidence": "measured"
+                    }
+                },
+                "3x": {
+                    "jump_velocity": {
+                        "value": 11.23,
+                        "source": "scripts/calibrate.py P9, 2026-11-09",
+                        "confidence": "measured"
+                    },
+                    "gravity": {
+                        "value": 0.216,
+                        "source": "scripts/calibrate.py P9, 2026-11-09",
+                        "confidence": "measured"
+                    }
+                },
+                "4x": {
+                    "jump_velocity": {
+                        "value": 11.23,
+                        "source": "scripts/calibrate.py P9, 2026-11-09",
+                        "confidence": "measured"
+                    },
+                    "gravity": {
+                        "value": 0.216,
+                        "source": "scripts/calibrate.py P9, 2026-11-09",
+                        "confidence": "measured"
+                    }
+                }
             }
         }
     }

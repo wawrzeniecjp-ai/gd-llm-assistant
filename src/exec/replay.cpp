@@ -6,6 +6,7 @@
 #include <Geode/binding/LevelEditorLayer.hpp>
 #include <Geode/binding/PlayLayer.hpp>
 #include <Geode/binding/PlayerObject.hpp>
+#include <Geode/binding/StartPosObject.hpp>
 #include <Geode/modify/EditorUI.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/LevelEditorLayer.hpp>
@@ -143,6 +144,15 @@ struct Replay {
     // deaths at all, the cube running straight through blocks and spikes.
     bool layerIgnoredDamage = false;
     bool playerIgnoredDamage = false;
+
+    // Starting from a start position (LEVEL-DESIGN-SPEC.md 7.2.2). The editor's playtest
+    // picks its own: `LevelEditorLayer::findStartPosObject` (inline, so not hookable)
+    // takes the enabled start position with the highest target order, then the furthest
+    // right. So for the moment the playtest starts, every other start position is
+    // disabled, and all of them for a level-start replay; the flags are restored right
+    // after. The level is not edited: nothing is saved in between.
+    StartPosObject* startPos = nullptr;
+    int startPositionsDisabled = 0;
 
     static Replay& get() {
         static Replay instance;
@@ -307,6 +317,7 @@ struct Replay {
         d["stops"] = stops;
         d["death_source"] = deathSource;
         d["ignore_damage_was_on"] = layerIgnoredDamage || playerIgnoredDamage;
+        d["start_positions_disabled"] = startPositionsDisabled;
         return d;
     }
 };
@@ -448,8 +459,10 @@ private:
 
 class ReplayJob final : public Job {
 public:
-    ReplayJob(std::vector<ScriptedInput> inputs, int maxTicks, int sampleEvery)
-        : m_inputs(std::move(inputs)), m_maxTicks(maxTicks), m_sampleEvery(sampleEvery) {}
+    ReplayJob(std::vector<ScriptedInput> inputs, int maxTicks, int sampleEvery,
+              std::optional<int> startUid)
+        : m_inputs(std::move(inputs)), m_maxTicks(maxTicks), m_sampleEvery(sampleEvery),
+          m_startUid(startUid) {}
 
     std::string_view type() const override { return "run_replay"; }
 
@@ -473,7 +486,16 @@ public:
             if (replay.state != Replay::State::Idle) {
                 return fail("EDITOR_BUSY", "another replay is running");
             }
+            StartPosObject* startPos = nullptr;
+            if (m_startUid) {
+                startPos = typeinfo_cast<StartPosObject*>(level->findGameObject(*m_startUid));
+                if (startPos == nullptr || startPos->m_uniqueID != *m_startUid) {
+                    return fail("NOT_FOUND", fmt::format(
+                        "no start position with uid {} in the level", *m_startUid));
+                }
+            }
             replay.reset();
+            replay.startPos = startPos;
             replay.inputs = m_inputs;
             replay.maxTicks = m_maxTicks;
             replay.sampleEvery = m_sampleEvery;
@@ -482,7 +504,26 @@ public:
             log::info("run_replay: starting, {} inputs, max {} ticks", m_inputs.size(), m_maxTicks);
             // A message sent a moment ago would otherwise have the panel swallow this.
             ui::ChatPanel::clearPlaytestSuppression();
-            ui->onPlaytest(nullptr);
+            showLabel();
+            {
+                // Only `target` may win the editor's start position choice (see Replay).
+                std::vector<std::pair<StartPosObject*, bool>> saved;
+                for (auto* object : CCArrayExt<GameObject*>(level->m_objects)) {
+                    if (object->m_objectID != 31) continue;
+                    auto* pos = static_cast<StartPosObject*>(object);
+                    if (pos->m_startSettings == nullptr) continue;
+                    saved.emplace_back(pos, pos->m_startSettings->m_disableStartPos);
+                    bool const disable = pos != startPos;
+                    if (disable && !pos->m_startSettings->m_disableStartPos) {
+                        ++replay.startPositionsDisabled;
+                    }
+                    pos->m_startSettings->m_disableStartPos = disable;
+                }
+                ui->onPlaytest(nullptr);
+                for (auto const& [pos, wasDisabled] : saved) {
+                    pos->m_startSettings->m_disableStartPos = wasDisabled;
+                }
+            }
             replay.layerIgnoredDamage = level->m_ignoreDamage;
             replay.playerIgnoredDamage =
                 level->m_player1 != nullptr && level->m_player1->m_ignoreDamage;
@@ -492,6 +533,7 @@ public:
             }
             if (level->m_playbackMode != PlaybackMode::Playing) {
                 replay.state = Replay::State::Idle;
+                hideLabel();
                 return fail("EDITOR_BUSY", "the editor's playtest did not start");
             }
             return false;
@@ -526,6 +568,7 @@ public:
             }
         }
         auto const wall = nowSeconds() - replay.startedAt;
+        hideLabel();
 
         if (replay.state == Replay::State::Cancelled) {
             log::info("run_replay: cancelled after {} ticks: {}", replay.ticks, replay.cancelReason);
@@ -544,6 +587,16 @@ public:
         result["tick_rate_observed"] = tickSeconds > 0 && replay.ticks > 1
             ? (replay.ticks - 1) / tickSeconds : 0.0;
         result["time_scale"] = 1.0;
+        auto start = matjson::Value::object();
+        if (replay.startPos != nullptr) {
+            start["kind"] = "start_pos";
+            start["uid"] = replay.startPos->m_uniqueID;
+            start["x"] = replay.startPos->getPositionX();
+            start["y"] = editor::cocosYToLevel(replay.startPos->getPositionY());
+        } else {
+            start["kind"] = "level_start";
+        }
+        result["start"] = start;
         auto diagnostics = replay.diagnostics();
         diagnostics["wall_seconds"] = wall;
         result["diagnostics"] = diagnostics;
@@ -562,9 +615,33 @@ private:
         return true;
     }
 
+    static constexpr int kLabelTag = 0x6a1ab;
+
+    /// "Assistant is testing...": says why the editor is playing on its own, and that a
+    /// key press stops it (LEVEL-DESIGN-SPEC.md 7.2.1). Not interactive.
+    static void showLabel() {
+        auto* scene = cocos2d::CCDirector::get()->getRunningScene();
+        if (scene == nullptr || scene->getChildByTag(kLabelTag) != nullptr) return;
+        auto* label = cocos2d::CCLabelBMFont::create(
+            "Assistant is testing... (press to take over)", "bigFont.fnt");
+        label->setScale(0.45f);
+        label->setOpacity(200);
+        auto const size = cocos2d::CCDirector::get()->getWinSize();
+        label->setPosition({size.width / 2, size.height - 18.0f});
+        label->setTag(kLabelTag);
+        scene->addChild(label, 1000);
+    }
+
+    static void hideLabel() {
+        if (auto* scene = cocos2d::CCDirector::get()->getRunningScene()) {
+            scene->removeChildByTag(kLabelTag);
+        }
+    }
+
     std::vector<ScriptedInput> m_inputs;
     int m_maxTicks;
     int m_sampleEvery;
+    std::optional<int> m_startUid;
     bool m_started = false;
     JobOutcome m_outcome;
 };
@@ -583,11 +660,17 @@ std::unique_ptr<Job> makeReplayJob(matjson::Value const& payload) {
         return std::make_unique<FailedReplay>("INVALID_REQUEST", std::move(message));
     };
 
+    std::optional<int> startUid;
     if (payload.contains("start")) {
         auto kind = payload["start"]["kind"].asString().unwrapOr("level_start");
-        if (kind != "level_start") {
-            return std::make_unique<FailedReplay>(
-                "UNSUPPORTED_REQUEST", "only start.kind 'level_start' is implemented so far");
+        if (kind == "start_pos") {
+            auto uid = payload["start"]["uid"].asInt();
+            if (!uid) {
+                return invalid("start.kind 'start_pos' needs the start position's 'uid'");
+            }
+            startUid = static_cast<int>(uid.unwrap());
+        } else if (kind != "level_start") {
+            return invalid("start.kind must be 'level_start' or 'start_pos'");
         }
     }
     auto maxTicks = intField(payload, "max_ticks", 2400);
@@ -622,7 +705,7 @@ std::unique_ptr<Job> makeReplayJob(matjson::Value const& payload) {
     }
     std::stable_sort(inputs.begin(), inputs.end(),
                      [](auto const& a, auto const& b) { return a.tick < b.tick; });
-    return std::make_unique<ReplayJob>(std::move(inputs), *maxTicks, *sampleEvery);
+    return std::make_unique<ReplayJob>(std::move(inputs), *maxTicks, *sampleEvery, startUid);
 }
 
 } // namespace gdai::exec

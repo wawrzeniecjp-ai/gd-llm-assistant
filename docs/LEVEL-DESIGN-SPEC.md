@@ -935,6 +935,43 @@ transaction path, but only if the user agreed. It is a visible level edit, and r
 the user's undo stack (`SPEC.md` §6.1.5.1). S-L5 looks into a non-mutating alternative (setting
 the editor's playtest start point directly).
 
+**As built (2026-11-08).** The editor's playtest picks its own start position:
+`LevelEditorLayer::findStartPosObject` (inline on Windows, so not hookable) takes the
+enabled one with the highest target order, then the furthest right. A level with any start
+position therefore never playtests from the level start. `run_replay` sets the
+"disabled" flag on every other start position (on all of them for `level_start`) for the
+instant the playtest starts, and restores the flags right after; nothing is saved in
+between. The result echoes `start`. Whether a start position's first move comes after the
+same 1-tick lead as the level start is not measured yet: `playtest_verify` reads it from
+each run's trace and corrects itself (see `design/sim/playtest.py`).
+
+**First run in the game (2026-11-09).** The start position lead is 1 tick, as from the
+level start; no corrections fired. 9 of the 10 possible slots were confirmed. Slot 10 died
+because the solver pressed on its window's last tick, so routes are now replayed with each
+press in the middle of its window (`centre_route`). Gaps the run found, to be traced:
+the jump differs by speed (higher at 2x, lower at 0.5x; calibrated at 1x only), the game
+gets about one tick of x ahead on the stairs, and one tick before a window opens the
+game often still survives.
+
+The second run (the tricky-columns level, 0.5x) measured the 0.5x jump exactly: vy0 10.62
+and gravity 0.212 (1x: 11.18, 0.216). The cube now takes both per speed
+(`modes.cube.by_speed` in the constants, falling back to 1x), and calibration probe P9
+measures 2x, 3x and 4x. With the 0.5x values the tricky columns need each press on one
+exact tick. A start position starts at its own speed, 1x by default, so every M2 runway
+now has a speed portal, and the assistant is told to put one after every start position.
+
+The third run (slots 6-10 with edges, the tricky columns with edges; P9 measured 2x
+11.42/0.215, 3x and 4x 11.23/0.216) confirmed all six, and the tricky columns' one-tick
+windows exactly. Three more gaps were found and fixed: the game's x is a 32-bit float
+(past x 16384 a 1x step is 1.298828, not 1.29825: half a unit ahead after 1000 ticks),
+falling stops at vy -15 (terminal velocity), and a cube lands with its feet up to at least
+8.72 below a block's top (landing tolerance 10.5, the middle of 8.72-12). With these, every
+replayed tick and edge check of slots 7-10 and the tricky columns matches the simulator
+(`tests/fixtures/replays/playtest_slot10.json`). One open: on slot 6's second stair the
+game moved the cube one extra unit forward on landing (centre 1.4 past the block's right
+edge, a spike next). No landing in P4 or elsewhere did that; it accounts for slot 6's two
+remaining edge disagreements.
+
 ## 7.3 When the agent may replay
 
 - **Calibration**: run by the developer via `scripts/calibrate.py`, not by the agent.

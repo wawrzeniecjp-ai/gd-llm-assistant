@@ -149,7 +149,8 @@ class FakeEditor:
 
     # -- EditorLink -----------------------------------------------------------
 
-    async def request(self, type_name: str, payload: dict[str, Any] | None = None) -> FakeResponse:
+    async def request(self, type_name: str, payload: dict[str, Any] | None = None,
+                      timeout: float | None = None) -> FakeResponse:
         payload = dict(payload or {})
         self.requests.append((type_name, payload))
         if self.before_request is not None:
@@ -314,6 +315,56 @@ class FakeEditor:
         if obj is None:
             raise _Refused("OBJECT_NOT_FOUND", "No matching objects.")
         return {"properties": obj.property_set()}
+
+    def _handle_run_replay(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """The replay played by the simulator itself, in the mod's tick numbering.
+
+        Physics here is the simulator's, so this checks the plumbing of a playtest (start,
+        inputs, trace, outcome), never the physics: that is what the real game is for.
+        """
+        from gd_ai_assistant.design.constants import load_constants
+        from gd_ai_assistant.design.roles import load_role_table
+        from gd_ai_assistant.design.sim.cube import Cube, CubeParams, advance
+        from gd_ai_assistant.design.sim.world import world_from_objects
+
+        if self._txn is not None:
+            raise _Refused("EDITOR_BUSY", "a transaction is open; end it before running a replay")
+        params = CubeParams.from_constants(load_constants())
+        objects = [{"id": o.type_id, "x": o.props["x"], "y": o.props["y"]}
+                   for o in self.objects.values()]
+        world = world_from_objects(objects, load_role_table())
+        start = payload.get("start") or {"kind": "level_start"}
+        cube, started = Cube(), {"kind": "level_start"}
+        if start["kind"] == "start_pos":
+            obj = self.objects.get(start["uid"])
+            if obj is None or obj.type_id != 31:
+                raise _Refused("NOT_FOUND", f"no start position with uid {start['uid']}")
+            cube = Cube(x=obj.props["x"], y=obj.props["y"])
+            started = {"kind": "start_pos", "uid": obj.uid, "x": obj.props["x"],
+                       "y": obj.props["y"]}
+        by_tick: dict[int, list[str]] = {}
+        for item in payload.get("inputs", []):
+            by_tick.setdefault(item["tick"], []).append(item["action"])
+        trace: dict[str, list[Any]] = {"tick": [], "x": [], "y": []}
+
+        def sample(t: int) -> None:
+            trace["tick"].append(t)
+            trace["x"].append(round(cube.x, 3))
+            trace["y"].append(round(cube.y, 3))
+
+        sample(0)
+        sample(1)                                  # the level start's standing tick
+        outcome, death = "max_ticks", None
+        for t in range(2, payload.get("max_ticks", 2400) + 1):
+            died = advance(cube, world, params, t, by_tick.get(t - 1, ()))
+            sample(t)
+            if died is not None:
+                outcome = "death"
+                death = {"tick": t, "x": died.x, "y": died.y, "cause_uid": None,
+                         "cause_id": None}
+                break
+        return {"outcome": outcome, "ticks": trace["tick"][-1], "death": death,
+                "trace": trace, "tick_rate_observed": 240.0, "start": started}
 
     def _handle_get_level_objects(self, payload: dict[str, Any]) -> dict[str, Any]:
         limit = payload.get("limit", 1000)

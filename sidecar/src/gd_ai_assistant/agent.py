@@ -24,6 +24,7 @@ import contextlib
 import json
 import logging
 import random
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -36,6 +37,7 @@ from .design import render as render_module
 from .design.coords import Grid, GroundUnknownError
 from .design.level_model import LevelChangingError, SnapshotCache, SnapshotError
 from .design.roles import load_role_table
+from .design.sim import playtest as playtest_module
 from .design.sim import verify as verify_module
 from .providers.base import (
     AssistantTurn,
@@ -60,6 +62,15 @@ INCOMPLETE = "incomplete"
 #: that one frame stays far inside the protocol's 1 MB limit.
 _CATALOG_PAGE_SIZE = 500
 
+#: `playtest_verify` runs only when the user asked for an in-game test in their message
+#: (LEVEL-DESIGN-SPEC.md 7.3: the game plays by itself while it runs). The words are
+#: English only for now; until the plan's `allow_replay` exists (M4), this is the gate.
+_ASKED_TO_PLAY = re.compile(r"\b(play|playtest|playtesting|test|testing|try it|run it)\b",
+                            re.IGNORECASE)
+_MAX_TURN_PLAYTESTS = 2
+#: Replays one turn may run in all: each is a real playtest of the section.
+_MAX_TURN_REPLAYS = 12
+
 #: Cap on pages fetched in one go. A guard against a mod that never reports the last
 #: page, which would otherwise loop until the turn's wall-clock timeout.
 _MAX_CATALOG_PAGES = 40
@@ -68,7 +79,8 @@ _MAX_CATALOG_PAGES = 40
 class EditorLink(Protocol):
     """What the loop needs from the connection to the mod."""
 
-    async def request(self, type_name: str, payload: dict[str, Any] | None = None) -> Any:
+    async def request(self, type_name: str, payload: dict[str, Any] | None = None,
+                      timeout: float | None = None) -> Any:
         """Send a request and await its response.
 
         Must return an object with `ok: bool`, `result: dict | None` and
@@ -260,6 +272,8 @@ class ToolLoop:
         self._txn_id: str | None = None
         self._objects_used = 0
         self._text = ""
+        self._user_text = ""
+        self._playtests = 0
 
         # Object ids that changed because a save-string write rebuilt the object.
         #
@@ -314,6 +328,7 @@ class ToolLoop:
     # -- the loop --------------------------------------------------------
 
     async def _drive(self, user_text: str) -> TurnResult:
+        self._user_text = user_text
         messages = self._history.messages()
 
         # Announce a hand edit *before* the user's message, so the model reads it as
@@ -692,6 +707,16 @@ class ToolLoop:
             result = verify_module.verify_section(model, args)
             return result, "error" in result
 
+        if name == "playtest_verify":
+            refused = self._playtest_refusal()
+            if refused is not None:
+                return {"error": refused}, True
+            self._playtests += 1
+            args = {**args, "max_replays": min(int(args.get("max_replays", 12)),
+                                               _MAX_TURN_REPLAYS)}
+            result = await playtest_module.playtest_verify(self._link.request, model, args)
+            return result, result.get("result") == "error" or "error" in result
+
         if name == "render_schematic":
             try:
                 overlays = set(args.get("overlays") or ())
@@ -803,6 +828,19 @@ class ToolLoop:
                 "been removed for this session; tell the user it needs a newer mod."
             )
         return result
+
+    def _playtest_refusal(self) -> str | None:
+        """Why `playtest_verify` may not run now, or None (LEVEL-DESIGN-SPEC.md 7.3)."""
+        if not _ASKED_TO_PLAY.search(self._user_text or ""):
+            return ("refused: playtest_verify runs only when the user asks for a playtest "
+                    "or an in-game test in their message; the game plays by itself while "
+                    "it runs. Offer it instead.")
+        if self._txn_id is not None:
+            return ("refused: this turn has already changed the level, and a replay needs "
+                    "the edits finished. End the turn and offer to playtest next.")
+        if self._playtests >= _MAX_TURN_PLAYTESTS:
+            return f"refused: at most {_MAX_TURN_PLAYTESTS} playtest_verify calls per turn"
+        return None
 
     async def _prepare_set_save_property(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Turn a property *name* into a key, and refuse keys the mod will reject.
@@ -979,6 +1017,8 @@ class ToolLoop:
         self._text = ""
         self._renamed_ids = {}
         self._pending_images = []
+        self._playtests = 0
+        self._user_text = ""
         self._snapshot.invalidate()
 
     def _result(self, status: str, text: str, *, txn_id: str | None = None) -> TurnResult:

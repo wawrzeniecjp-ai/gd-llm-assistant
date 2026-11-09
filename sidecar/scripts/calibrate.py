@@ -18,6 +18,7 @@ cancels a run). Run from `sidecar/`, with `start-sidecar.bat` closed:
 
     uv run python scripts/calibrate.py              # every probe
     uv run python scripts/calibrate.py P6 P7        # only some
+    uv run python scripts/calibrate.py P9           # the jump at 0.5x, 2x, 3x, 4x
 """
 
 from __future__ import annotations
@@ -167,6 +168,37 @@ async def probe_jump(r: Runner, out: dict, cube: dict) -> None:
         cube["velocity_scale"] = measured(fit.scale, "P2")
         cube["jump_apex"] = {**measured(fit.apex, "P2"), "confidence": "derived"}
         cube["jump_airtime_ticks"] = {**measured(fit.airtime, "P2"), "confidence": "derived"}
+
+
+async def probe_jump_by_speed(r: Runner, out: dict, cube: dict) -> None:
+    """P9: one press on a flat floor at each other speed (the jump is not the same).
+
+    A speed portal in column 1 sets the speed long before the press. Found by playtest
+    2026-11-09: at 0.5x the jump starts at vy 10.62 and gravity is 0.212, not 11.18 and
+    0.216 as at 1x.
+    """
+    runs = []
+    by_speed = cube.setdefault("by_speed", {})
+    for speed, object_id in SPEED_PORTALS:
+        if speed == "1x":
+            continue
+        x, y = cell(1, 0)
+        inputs = press(120)
+        async with probe_level(r.server, f"jump {speed}", [{"id": object_id, "x": x, "y": y}]):
+            result = await r.replay(inputs, 420)
+        fit = cal.fit_jump(result.get("trace") or {}, after_tick=110)
+        runs.append(run_record(inputs, result, speed=speed, portal={"id": object_id, "x": x,
+                                                                    "y": y},
+                               fit=fit.__dict__ if fit else None))
+        if not fit:
+            print(f"    {speed}: no jump found in the trace")
+            continue
+        print(f"    {speed}: vy0 {fit.jump_velocity}, gravity {fit.gravity}, scale "
+              f"{fit.scale}, apex {fit.apex}, airtime {fit.airtime}, residual {fit.residual}")
+        by_speed[speed] = {"jump_velocity": measured(fit.jump_velocity, "P9"),
+                           "gravity": measured(fit.gravity, "P9")}
+    out["P9_jump_by_speed"] = runs
+    save_fixture("cal_jump_speeds", "P9 single jump at each speed", runs)
 
 
 async def probe_hold(r: Runner, out: dict, cube: dict) -> None:
@@ -322,6 +354,7 @@ async def routine(server: SidecarServer) -> dict[str, Any]:
         ("P6", "pink orb", lambda: probe_orb(r, out, cube, "pink", 141, 6)),
         ("P7", "yellow pad", lambda: probe_pad(r, out, cube, "yellow", 35, -13.0)),
         ("P7", "pink pad", lambda: probe_pad(r, out, cube, "pink", 140, -13.0)),
+        ("P9", "jump at each speed", lambda: probe_jump_by_speed(r, out, cube)),
     ]
     try:
         for code, label, step in steps:

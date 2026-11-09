@@ -2,7 +2,8 @@
 
 Slot k occupies columns 100k to 100k+99. Each section below is drawn from the slot's
 column 0, so the string index is the column inside the slot: the runway is 0-9 (start
-position `@` at 2, a speed portal at 5), the section 10-89, the buffer 90-99 is left out.
+position `@` at 2, a speed portal at 5, 1x unless the slot draws another), the section
+10-89, the buffer 90-99 is left out.
 Rows are listed top first and the bottom one is row 0, on the ground. Short rows are
 padded with `.` on the right.
 
@@ -38,11 +39,32 @@ class Section:
         return "\n".join(lines)
 
 
+SPEED_PORTALS = "12345"
+PORTAL_COL = 5
+
+
 def _s(slot: int, title: str, *rows: str) -> Section:
     for row in rows:
         if len(row) > WIDTH:
             raise ValueError(f"slot {slot}: row longer than {WIDTH}: {row!r}")
-    return Section(slot, title, rows)
+    return Section(slot, title, _with_speed_portal(rows))
+
+
+def _with_speed_portal(rows: tuple[str, ...]) -> tuple[str, ...]:
+    """Every runway sets its speed: a 1x portal (`2`) unless it draws its own.
+
+    A start position starts at its own speed (1x by default), not the speed the level had
+    reached there, so without a portal a slot plays at 1x from its start position but at
+    the previous slot's speed when the level is played through.
+    """
+    if any(c in SPEED_PORTALS for row in rows for c in row[:10]):
+        return rows
+    if len(rows) < 2:
+        rows = ("", *rows)
+    above = rows[-2].ljust(PORTAL_COL + 1, ".")
+    assert above[PORTAL_COL] == ".", above
+    above = above[:PORTAL_COL] + "2" + above[PORTAL_COL + 1:]
+    return (*rows[:-2], above, rows[-1])
 
 
 #  Column ruler for reading the rows below (slot-relative):

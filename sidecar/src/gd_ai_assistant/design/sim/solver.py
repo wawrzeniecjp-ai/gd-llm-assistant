@@ -198,28 +198,48 @@ def _shift_survives(world: World, p: CubeParams, states: list[Cube], route: list
     return False
 
 
+def _window(world: World, p: CubeParams, states: list[Cube], route: list[int], i: int,
+            end_x: float) -> tuple[int, int]:
+    """The contiguous ticks press `i` could move to with the others fixed."""
+    tick = route[i]
+    others = set(route[:i] + route[i + 1:])
+    lo = hi = tick
+    for shift in range(1, WINDOW_REACH + 1):
+        moved = tick - shift
+        if moved < 0 or moved in others or not _shift_survives(
+                world, p, states, route, i, moved, end_x):
+            break
+        lo = moved
+    for shift in range(1, WINDOW_REACH + 1):
+        moved = tick + shift
+        if moved in others or not _shift_survives(world, p, states, route, i, moved, end_x):
+            break
+        hi = moved
+    return lo, hi
+
+
 def windows(world: World, p: CubeParams, start: Cube, route: list[int], end_x: float,
             max_ticks: int) -> list[tuple[int, int]]:
     """For each press, the contiguous ticks it could move to with the others fixed."""
     states = _reference(world, p, start, route, end_x, max_ticks)
-    out = []
-    for i, tick in enumerate(route):
-        others = set(route[:i] + route[i + 1:])
-        lo = hi = tick
-        for shift in range(1, WINDOW_REACH + 1):
-            moved = tick - shift
-            if moved < 0 or moved in others or not _shift_survives(
-                    world, p, states, route, i, moved, end_x):
-                break
-            lo = moved
-        for shift in range(1, WINDOW_REACH + 1):
-            moved = tick + shift
-            if moved in others or not _shift_survives(world, p, states, route, i, moved,
-                                                      end_x):
-                break
-            hi = moved
-        out.append((lo, hi))
-    return out
+    return [_window(world, p, states, route, i, end_x) for i in range(len(route))]
+
+
+def centre_route(world: World, p: CubeParams, start: Cube, route: list[int], end_x: float,
+                 max_ticks: int) -> list[int]:
+    """The route with every press moved to the middle of its timing window.
+
+    The search finds the latest press that works, which sits on the window's last tick:
+    the one where the simulator being a tick or a unit off matters most. Presses are
+    centred in order, each window measured with the earlier presses already centred, so
+    the route still finishes after every move (a window only holds ticks that do).
+    """
+    centred = list(route)
+    for i in range(len(centred)):
+        states = _reference(world, p, start, centred, end_x, max_ticks)
+        lo, hi = _window(world, p, states, centred, i, end_x)
+        centred[i] = (lo + hi) // 2
+    return centred
 
 
 def describe_route(world: World, p: CubeParams, start: Cube, solved: SolveResult,

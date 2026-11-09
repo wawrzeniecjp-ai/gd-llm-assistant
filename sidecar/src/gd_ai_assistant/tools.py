@@ -793,7 +793,7 @@ def _build() -> dict[str, Tool]:
 #: Local tools built on the level snapshot (LEVEL-DESIGN-SPEC.md 5, 13). The agent runs
 #: them itself; `place_grid` then sends ordinary `delete_objects`/`create_objects`.
 DESIGN_TOOLS = frozenset(
-    {"render_grid", "place_grid", "render_schematic", "verify_section"}
+    {"render_grid", "place_grid", "render_schematic", "verify_section", "playtest_verify"}
 )
 
 
@@ -954,6 +954,58 @@ def _design_tools() -> list[Tool]:
             mutates_objects=False,
             is_action=False,
             requires=("get_level_objects",),
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="playtest_verify",
+                description=(
+                    "Play a section in the real game: the route verify_section found is "
+                    "replayed in the editor's playtest, press for press, and the result "
+                    "says whether the game agrees. `confirmed`: the game survived the "
+                    "route, the strongest check there is. `failed_in_game`: the simulator "
+                    "was wrong here; say so, do not call the section verified. "
+                    "`not_played_*`: the solver found no route, so nothing was played. "
+                    "Use it ONLY when the user asked you to playtest or test in the game in "
+                    "this message: the user watches the editor play by itself, and it "
+                    "takes the section's length in real time. It cannot run in a turn that "
+                    "has already changed the level (finish the turn first). The replay "
+                    "starts from the nearest start position at or before x_range[0], or the "
+                    "level start; the user can press any key to take over, which cancels it."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["x_range"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "x_range": {**_RANGE, "description": "Level units, [start, end]."},
+                        "start": {
+                            "anyOf": [
+                                {"type": "string", "enum": ["auto", "level_start"]},
+                                {"type": "object", "required": ["start_pos"],
+                                 "additionalProperties": False,
+                                 "properties": {"start_pos": {"type": "integer"}}},
+                            ],
+                            "description": (
+                                "'auto' (default): the nearest start position at or before "
+                                "x_range[0], else the level start. Or 'level_start', or "
+                                "{\"start_pos\": uid}."
+                            ),
+                        },
+                        "edges": {
+                            "type": "boolean", "default": False,
+                            "description": (
+                                "Also replay each press at both ends of its timing window "
+                                "and one tick past each: checks the windows too. Four extra "
+                                "runs per press."
+                            ),
+                        },
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+            requires=("get_level_objects", "run_replay"),
         ),
         Tool(
             spec=ToolSpec(

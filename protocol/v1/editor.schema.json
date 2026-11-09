@@ -462,6 +462,17 @@
                 "trace_truncated": { "type": "boolean" },
                 "tick_rate_observed": { "type": "number" },
                 "time_scale": { "type": "number" },
+                "start": {
+                    "type": "object",
+                    "description": "Where the replay started: the level start, or the start position that was used (its uid and position, level units).",
+                    "properties": {
+                        "kind": { "enum": ["level_start", "start_pos"] },
+                        "uid": { "type": "integer" },
+                        "x": { "type": "number" },
+                        "y": { "type": "number" }
+                    },
+                    "required": ["kind"]
+                },
                 "diagnostics": { "type": "object", "description": "Spike S-L3 measurements; shape may change." }
             },
             "additionalProperties": false

@@ -125,8 +125,10 @@ def test_start_positions_do_not_block_verification() -> None:
 
 def test_tricky_columns_beaten_by_hand() -> None:
     """A section a strong player built and beat by hand (2026-11-08): possible, but only
-    just. At 0.5x, each column needs its press in a 4-tick window; one tick early lands
-    on the small spike after the block, one tick late touches the one before it.
+    just. At 0.5x, each column needs its press on one exact tick (4.2 ms); one tick
+    early lands on the small spike after the block, one tick late touches the one before
+    it. (With the 1x jump, before the 0.5x jump was measured on 2026-11-09, the windows
+    were 4 ticks; the game showed the 1x jump is wrong at 0.5x.)
 
     Small hitboxes, slow speed and a tight arc: if a change to gravity, jump strength or
     hitboxes turns this impossible, the change is wrong, whatever else it fixes.
@@ -141,7 +143,7 @@ def test_tricky_columns_beaten_by_hand() -> None:
     solved = solve(world, PARAMS, Cube(), 420)
     assert solved.result == "possible" and len(solved.route) == 2
     spans = windows(world, PARAMS, Cube(), solved.route, 420, solved.end_tick + 2)
-    assert [hi - lo + 1 for lo, hi in spans] == [4, 4]
+    assert [hi - lo + 1 for lo, hi in spans] == [1, 1]
 
     def first_column(press: int) -> bool:
         taps = [{"tick": press, "action": "press"}, {"tick": press + 1, "action": "release"}]
