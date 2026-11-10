@@ -89,3 +89,16 @@ def test_flat_floor_needs_no_input(speed) -> None:
 
 def test_constants_are_calibrated() -> None:
     assert PARAMS.calibrated
+
+
+def test_orb_and_pad_impulses_by_speed() -> None:
+    """P13 values per speed win; a speed without one falls back to the 1x impulse."""
+    from dataclasses import replace
+
+    params = replace(PARAMS, orb_by_speed={"2x": {"yellow": 20.0}},
+                     pad_by_speed={"0.5x": {"pink": 9.0}})
+    assert params.orb_for("2x", "yellow") == 20.0
+    assert params.orb_for("2x", "pink") == PARAMS.orb_impulse["pink"]
+    assert params.orb_for("3x", "yellow") == PARAMS.orb_impulse["yellow"]
+    assert params.pad_for("0.5x", "pink") == 9.0
+    assert params.pad_for("1x", "pink") == PARAMS.pad_impulse["pink"]

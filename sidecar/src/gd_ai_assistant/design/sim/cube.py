@@ -76,6 +76,17 @@ class CubeParams:
         default_factory=dict)
     snap_max_step: Mapping[str, float] = field(default_factory=dict)
 
+    #: Orb and pad impulses by speed (calibration P13); a speed missing here uses the 1x
+    #: `orb_impulse` / `pad_impulse`.
+    orb_by_speed: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
+    pad_by_speed: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
+
+    def orb_for(self, speed: str, color: str) -> float:
+        return self.orb_by_speed.get(speed, {}).get(color, self.orb_impulse[color])
+
+    def pad_for(self, speed: str, color: str) -> float:
+        return self.pad_by_speed.get(speed, {}).get(color, self.pad_impulse[color])
+
     def jump_for(self, speed: str) -> float:
         return self.jump_by_speed.get(speed, self.jump_velocity)
 
@@ -105,7 +116,14 @@ class CubeParams:
             calibrated &= measured.calibrated
             dx[speed] = f32(measured.value / 240.0)
         jumps, gravities = {}, {}
+        orbs: dict[str, dict[str, float]] = {}
+        pads: dict[str, dict[str, float]] = {}
         for speed in SPEEDS:
+            for kind, into in (("orb_impulse", orbs), ("pad_impulse", pads)):
+                for color in ("yellow", "pink"):
+                    value = constants.mode_value("cube", "by_speed", speed, kind, color)
+                    if value is not None and value.value is not None:
+                        into.setdefault(speed, {})[color] = value.value
             if speed == "1x":
                 continue
             jump = constants.mode_value("cube", "by_speed", speed, "jump_velocity")
@@ -147,6 +165,8 @@ class CubeParams:
             terminal_velocity=terminal.value if terminal and terminal.value else None,
             gravity_by_speed=gravities,
             snap_windows=windows,
+            orb_by_speed=orbs,
+            pad_by_speed=pads,
             snap_max_step=max_steps,
         )
 
@@ -300,7 +320,7 @@ def collide(cube: Cube, near: list[Body], p: CubeParams, tick: int, prev_y: floa
             return Death(tick, cube.x, cube.y, body.uid, "hazard")
         elif body.role is Role.PAD and body.uid not in cube.used:
             cube.used.add(body.uid)
-            cube.vy = p.pad_impulse[body.variant or "yellow"]
+            cube.vy = p.pad_for(cube.speed, body.variant or "yellow")
             cube.grounded = False
         elif body.role is Role.PORTAL_SPEED and body.variant:
             cube.speed = body.variant
@@ -317,11 +337,20 @@ def commands(cube: Cube, p: CubeParams, actions: Iterable[str]) -> None:
                 cube.vy, cube.grounded, cube.buffered = p.jump_for(cube.speed), False, False
                 return
         elif action == "release":
+            # A press buffered in the air still fires an orb first touched on the tick
+            # it is released (P13, every speed: a one-tick press one tick before the
+            # first touch fired, on the release tick).
+            _fire_orb(cube, p)
             cube.holding = cube.buffered = False
+    _fire_orb(cube, p)
+
+
+def _fire_orb(cube: Cube, p: CubeParams) -> None:
     if cube.buffered and cube.touching_orbs:
         orb = cube.touching_orbs[0]
         cube.used.add(orb.uid)
-        cube.vy, cube.grounded, cube.buffered = p.orb_impulse[orb.variant or "yellow"], False, False
+        cube.vy = p.orb_for(cube.speed, orb.variant or "yellow")
+        cube.grounded, cube.buffered = False, False
 
 
 def advance(cube: Cube, world: World, p: CubeParams, tick: int,

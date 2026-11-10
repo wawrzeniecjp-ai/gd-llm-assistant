@@ -1004,6 +1004,26 @@ top of a stacked column's middle block (a top covered by the block above) and ju
 from inside it, which made slot 12 possible for smaller inner hitboxes. Covered tops are
 no longer floors.
 
+P13 (calibration, 2026-11-10) measured yellow and pink orbs and pads at every speed, 200
+runs. A yellow orb gives exactly the jump speed of that speed, and a pink orb 0.72 of it.
+Pads do not depend on speed:
+
+| Speed | Yellow orb | Pink orb | Yellow pad | Pink pad | Orb reach (ticks) |
+|---|---|---|---|---|---|
+| 0.5x | 10.62 | 7.646 | 16.0 | 10.4 | 65 |
+| 1x | 11.18 | 8.05 | 16.0 | 10.4 | 53 |
+| 2x | 11.42 | 8.222 | 16.0 | 10.4 | 43 |
+| 3x | 11.23 | 8.086 | 16.0 | 10.4 | 36 |
+| 4x | 11.23 | 8.086 | 16.0 | 10.4 | 30 |
+
+(Orb reach is the number of press ticks that fired the orb on the probe's jump: the one
+the simulator found staying longest in the orb. A jump that crosses it differently gives a
+different count.)
+The simulator reads these from `modes.cube.by_speed`. One more rule came out of P13: a
+press buffered in the air still fires an orb that the cube first touches on the tick the
+press is released. A one-tick press one tick before the first touch fired at every speed.
+With that, every P13 run replays exactly as the game played it.
+
 ## 7.3 When the agent may replay
 
 - **Calibration**: run by the developer via `scripts/calibrate.py`, not by the agent.

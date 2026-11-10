@@ -149,6 +149,30 @@
                         "value": 0.212,
                         "source": "scripts/calibrate.py P9, 2026-11-09",
                         "confidence": "measured"
+                    },
+                    "orb_impulse": {
+                        "yellow": {
+                            "value": 10.62,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        },
+                        "pink": {
+                            "value": 7.646,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        }
+                    },
+                    "pad_impulse": {
+                        "yellow": {
+                            "value": 16.0,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        },
+                        "pink": {
+                            "value": 10.4,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        }
                     }
                 },
                 "2x": {
@@ -161,6 +185,30 @@
                         "value": 0.215,
                         "source": "scripts/calibrate.py P9, 2026-11-09",
                         "confidence": "measured"
+                    },
+                    "orb_impulse": {
+                        "yellow": {
+                            "value": 11.42,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        },
+                        "pink": {
+                            "value": 8.222,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        }
+                    },
+                    "pad_impulse": {
+                        "yellow": {
+                            "value": 16.0,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        },
+                        "pink": {
+                            "value": 10.4,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        }
                     }
                 },
                 "3x": {
@@ -173,6 +221,30 @@
                         "value": 0.216,
                         "source": "scripts/calibrate.py P9, 2026-11-09",
                         "confidence": "measured"
+                    },
+                    "orb_impulse": {
+                        "yellow": {
+                            "value": 11.23,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        },
+                        "pink": {
+                            "value": 8.086,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        }
+                    },
+                    "pad_impulse": {
+                        "yellow": {
+                            "value": 16.0,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        },
+                        "pink": {
+                            "value": 10.4,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        }
                     }
                 },
                 "4x": {
@@ -185,6 +257,56 @@
                         "value": 0.216,
                         "source": "scripts/calibrate.py P9, 2026-11-09",
                         "confidence": "measured"
+                    },
+                    "orb_impulse": {
+                        "yellow": {
+                            "value": 11.23,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        },
+                        "pink": {
+                            "value": 8.086,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        }
+                    },
+                    "pad_impulse": {
+                        "yellow": {
+                            "value": 16.0,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        },
+                        "pink": {
+                            "value": 10.4,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        }
+                    }
+                },
+                "1x": {
+                    "orb_impulse": {
+                        "yellow": {
+                            "value": 11.18,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        },
+                        "pink": {
+                            "value": 8.05,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        }
+                    },
+                    "pad_impulse": {
+                        "yellow": {
+                            "value": 16.0,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        },
+                        "pink": {
+                            "value": 10.4,
+                            "source": "scripts/calibrate.py P13, 2026-11-09",
+                            "confidence": "measured"
+                        }
                     }
                 }
             },

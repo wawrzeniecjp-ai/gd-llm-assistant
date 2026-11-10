@@ -22,6 +22,7 @@ cancels a run). Run from `sidecar/`, with `start-sidecar.bat` closed:
     uv run python scripts/calibrate.py P10          # landings near a block's edge
     uv run python scripts/calibrate.py P11          # what makes the stair landing differ
     uv run python scripts/calibrate.py P12          # jump snapping, every speed (~12 min)
+    uv run python scripts/calibrate.py P13          # orbs and pads, every speed (~6 min)
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ from gd_ai_assistant.design import calibration as cal
 from gd_ai_assistant.design.constants import _default_path as constants_path
 from gd_ai_assistant.design.constants import load_constants
 from gd_ai_assistant.design.level_model import load_level_model
-from gd_ai_assistant.design.roles import load_role_table
+from gd_ai_assistant.design.roles import Role, load_role_table
 from gd_ai_assistant.design.sim.cube import Cube, CubeParams, simulate
 from gd_ai_assistant.design.sim.world import world_from_objects
 from gd_ai_assistant.server import SidecarServer
@@ -514,6 +515,115 @@ async def probe_jump_snap(r: Runner, out: dict) -> None:
             print(f"      {speed:4} {kind:5}: {len(snapped)} of {len(mine)}")
 
 
+# P13: orbs and pads at every speed. P6/P7 measured them at 1x only, and the jump turned
+# out to differ by speed (P9), so their impulses may too. A speed portal in column 1, the
+# object in column 12. Pads: run over it. Orbs (two rows up): the simulator picks a jump
+# that passes through the orb, then a second press on every tick it expects the orb to
+# fire, plus one either side; the game's impulse is the orb's strength at that speed, and
+# which presses fire gives its reach.
+P13_COL = 12
+P13_OBJECTS = (("yellow orb", 36, 2, 0.0), ("pink orb", 141, 2, 0.0),
+               ("yellow pad", 35, 0, -13.0), ("pink pad", 140, 0, -13.0))
+
+
+def _airborne_impulses(trace: dict, after: int) -> list[tuple[int, float]]:
+    """Impulses that start in the air (an orb or a pad), not jumps off the ground."""
+    ticks, gs = trace.get("tick") or [], trace.get("grounded") or []
+    grounded_at = dict(zip(ticks, gs, strict=False))
+    return [(t, vy) for t, vy in cal.impulses(trace)
+            if t > after and not grounded_at.get(t - 1, 1)]
+
+
+def _p13_orb_plan(objects: list[dict], params: CubeParams) -> list[list[int]]:
+    """Replay-tick presses: a jump through the orb, then each candidate second press."""
+    world = world_from_objects(objects, load_role_table())
+    orb = next(b for b in world.bodies if b.role is Role.ORB)
+
+    def touching(presses: list[int], max_ticks: int) -> list[int]:
+        taps = [{"tick": t, "action": a} for r in presses for t, a in ((r, "press"),
+                                                                       (r + 1, "release"))]
+        sim = simulate(world, params, taps, max_ticks=max_ticks)
+        return [t for t, x, y in zip(sim.trace["tick"], sim.trace["x"], sim.trace["y"],
+                                     strict=True)
+                if orb.touches(Cube(x=x, y=y).box())]
+
+    best: tuple[int, int] | None = None
+    for first in range(2, 900):
+        hit = touching([first], first + 200)
+        if hit and (best is None or len(hit) > best[1]):
+            best = (first, len(hit))
+        elif best and not hit and first > best[0] + 40:
+            break
+    if best is None:
+        return []
+    first = best[0]
+    # Only presses while the first jump is still in the air: a later one jumps off the
+    # ground through the orb again, which is not the orb's reach.
+    lone = simulate(world, params, [{"tick": first, "action": "press"},
+                                    {"tick": first + 1, "action": "release"}],
+                    max_ticks=first + 300)
+    landed = next((lg.tick for lg in cal.landings(lone.trace) if lg.tick > first + 2),
+                  first + 200)
+    fires = []
+    for second in range(first + 3, landed):
+        taps = [{"tick": t, "action": a} for r in (first, second)
+                for t, a in ((r, "press"), (r + 1, "release"))]
+        sim = simulate(world, params, taps, max_ticks=second + 4)
+        if orb.uid in sim.final.used:
+            fires.append(second)
+    if not fires:
+        return []
+    # Every tick at both ends of the reach (where it starts and stops firing), every fourth
+    # in between: the impulse is the same throughout.
+    ends = set(range(fires[0] - 1, fires[0] + 3)) | set(range(fires[-1] - 2, fires[-1] + 2))
+    middle = set(range(fires[0] + 3, fires[-1] - 2, 4))
+    return [[first, t] for t in sorted(ends | middle)]
+
+
+async def probe_orbs_pads_by_speed(r: Runner, out: dict, cube: dict) -> None:
+    """P13: orb and pad impulses at every speed (see the note above P13_COL)."""
+    params = CubeParams.from_constants(load_constants())
+    runs = []
+    by_speed = cube.setdefault("by_speed", {})
+    for speed, portal_id in SPEED_PORTALS:
+        for name, object_id, row, y_offset in P13_OBJECTS:
+            color, kind = name.split()
+            px, py = cell(1, 0)
+            ox, oy = cell(P13_COL, row, y_offset)
+            objects = [{"id": portal_id, "x": px, "y": py}, {"id": object_id, "x": ox, "y": oy}]
+            plans = _p13_orb_plan(objects, params) if kind == "orb" else [[]]
+            if not plans:
+                print(f"    {speed} {name}: the simulator finds no jump through it; skipped")
+                continue
+            seen = []
+            async with probe_level(r.server, f"{name} {speed}", objects):
+                for presses in plans:
+                    inputs = [i for t in presses for i in press(t)]
+                    result = await r.replay(inputs, (presses[-1] if presses else 0) + 400)
+                    trace = result.get("trace") or {}
+                    if kind == "orb":
+                        later = _airborne_impulses(trace, presses[0] + 2)
+                    else:
+                        later = [i for i in cal.impulses(trace) if i[0] > 0]
+                    fired = later[0] if later else None
+                    if fired:
+                        seen.append(fired[1])
+                    runs.append(run_record(inputs, result, objects=objects, speed=speed,
+                                           object=name, press_tick=presses[-1] if presses
+                                           else None, fired=bool(fired),
+                                           impulse=fired[1] if fired else None))
+            fired_at = [rr["press_tick"] for rr in runs[-len(plans):] if rr["fired"]]
+            value = max(set(seen), key=seen.count) if seen else None
+            where = f", fired for presses {fired_at[0]}-{fired_at[-1]}" if kind == "orb" \
+                and fired_at else ""
+            print(f"    {speed} {name}: vy {value}{where} ({len(seen)} of {len(plans)} runs)")
+            if value is not None:
+                table = by_speed.setdefault(speed, {}).setdefault(f"{kind}_impulse", {})
+                table[color] = measured(value, "P13")
+    out["P13_orbs_pads"] = runs
+    save_fixture("cal_orbs_pads_speeds", "P13 orbs and pads at every speed", runs)
+
+
 async def probe_hold(r: Runner, out: dict, cube: dict) -> None:
     """P3: hold for a long time; does the cube jump again on landing, and when?"""
     inputs = press(60, hold=480)
@@ -673,6 +783,8 @@ async def routine(server: SidecarServer) -> dict[str, Any]:
         ("P11", "what makes the stair landing step further",
          lambda: probe_landing_cause(r, out)),
         ("P12", "jump snapping by speed and spacing", lambda: probe_jump_snap(r, out)),
+        ("P13", "orbs and pads at every speed",
+         lambda: probe_orbs_pads_by_speed(r, out, cube)),
     ]
     try:
         for code, label, step in steps:
