@@ -171,7 +171,7 @@ class CubeParams:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class Cube:
     x: float = 0.0
     y: float = HALF
@@ -180,7 +180,7 @@ class Cube:
     grounded: bool = True
     holding: bool = False
     buffered: bool = False
-    used: set[int] = field(default_factory=set)
+    used: frozenset[int] = frozenset()
     touching_orbs: list[Body] = field(default_factory=list)
     dead: bool = False
     was_grounded: bool = True
@@ -195,11 +195,11 @@ class Cube:
     def key(self) -> tuple:
         """What the solver deduplicates on (LEVEL-DESIGN-SPEC.md 6.8.2)."""
         return (round(self.y * 2) / 2, round(self.vy * 20) / 20, self.speed, self.grounded,
-                self.holding, self.buffered, frozenset(self.used), self.snap)
+                self.holding, self.buffered, self.used, self.snap)
 
     def copy(self) -> Cube:
         clone = Cube(self.x, self.y, self.vy, self.speed, self.grounded, self.holding,
-                     self.buffered, set(self.used), list(self.touching_orbs), self.dead,
+                     self.buffered, self.used, self.touching_orbs, self.dead,
                      self.was_grounded, self.snap, self.ground_x)
         return clone
 
@@ -319,7 +319,7 @@ def collide(cube: Cube, near: list[Body], p: CubeParams, tick: int, prev_y: floa
         elif body.role is Role.HAZARD:
             return Death(tick, cube.x, cube.y, body.uid, "hazard")
         elif body.role is Role.PAD and body.uid not in cube.used:
-            cube.used.add(body.uid)
+            cube.used = cube.used | {body.uid}
             cube.vy = p.pad_for(cube.speed, body.variant or "yellow")
             cube.grounded = False
         elif body.role is Role.PORTAL_SPEED and body.variant:
@@ -348,17 +348,19 @@ def commands(cube: Cube, p: CubeParams, actions: Iterable[str]) -> None:
 def _fire_orb(cube: Cube, p: CubeParams) -> None:
     if cube.buffered and cube.touching_orbs:
         orb = cube.touching_orbs[0]
-        cube.used.add(orb.uid)
+        cube.used = cube.used | {orb.uid}
         cube.vy = p.orb_for(cube.speed, orb.variant or "yellow")
         cube.grounded, cube.buffered = False, False
 
 
 def advance(cube: Cube, world: World, p: CubeParams, tick: int,
-            actions: Iterable[str] = ()) -> Death | None:
-    """One tick: move, collide, then the commands for `tick - 1`. Returns a death."""
+            actions: Iterable[str] = (), near: list[Body] | None = None) -> Death | None:
+    """One tick: move, collide, then the commands for `tick - 1`. Returns a death.
+    `near` is the broad-phase lookup for this cube's x and speed, when the caller has it."""
     prev_x, prev_y = cube.x, cube.y
     # One broad-phase lookup per tick, covering the cube before and after its move.
-    near = world.near(prev_x - HALF, prev_x + p.dx[cube.speed] + HALF)
+    if near is None:
+        near = world.near(prev_x - HALF, prev_x + p.dx[cube.speed] + HALF)
     move(cube, near, p)
     death = collide(cube, near, p, tick, prev_y, prev_x)
     if death is not None:

@@ -793,7 +793,8 @@ def _build() -> dict[str, Tool]:
 #: Local tools built on the level snapshot (LEVEL-DESIGN-SPEC.md 5, 13). The agent runs
 #: them itself; `place_grid` then sends ordinary `delete_objects`/`create_objects`.
 DESIGN_TOOLS = frozenset(
-    {"render_grid", "place_grid", "render_schematic", "verify_section", "playtest_verify"}
+    {"render_grid", "place_grid", "render_schematic", "verify_section", "simulate_inputs",
+     "playtest_verify"}
 )
 
 
@@ -947,6 +948,75 @@ def _design_tools() -> list[Tool]:
                             },
                             "additionalProperties": False,
                         },
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+            requires=("get_level_objects",),
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="simulate_inputs",
+                description=(
+                    "Play your own presses in the simulator, with the game's measured "
+                    "physics, and see what happens: where the cube goes, where it lands, "
+                    "and where and on what it dies. Use it to test a specific timing (for "
+                    "example a press a few units earlier than verify_section's route) or "
+                    "to explain why a section fails. Inputs are a press or release at a "
+                    "`tick` (240 per second, counted from the start) or at an `x` (the "
+                    "first tick the cube reaches that x). A press jumps if the cube is on "
+                    "the ground or touching an orb; holding keeps jumping on landing, so "
+                    "follow each press with a release unless you mean to hold. Returns "
+                    "the outcome (reached, death, max_ticks), events (presses, takeoffs, "
+                    "landings, orb/pad impulses, speed changes) and a sampled trace."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["until_x"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "until_x": {"type": "number",
+                                    "description": "Stop when the cube reaches this x."},
+                        "inputs": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["action"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "action": {"type": "string",
+                                               "enum": ["press", "release"]},
+                                    "tick": {"type": "integer", "minimum": 0},
+                                    "x": {"type": "number"},
+                                },
+                            },
+                        },
+                        "start_from": {
+                            "type": "string", "enum": ["level_start", "explicit"],
+                            "default": "level_start",
+                            "description": (
+                                "level_start plays from the beginning of the level; "
+                                "explicit starts at start.x in the given state, at tick 0."
+                            ),
+                        },
+                        "start": {
+                            "type": "object",
+                            "properties": {
+                                "x": {"type": "number"},
+                                "mode": {"type": "string", "default": "cube"},
+                                "speed": {"type": "string",
+                                          "enum": ["0.5x", "1x", "2x", "3x", "4x"]},
+                                "row": {"type": "integer", "minimum": 0},
+                                "vy": {"type": "number"},
+                                "gravity": {"type": "integer", "enum": [1, -1]},
+                                "mini": {"type": "boolean"},
+                            },
+                            "additionalProperties": False,
+                        },
+                        "sample_every": {"type": "integer", "minimum": 1, "default": 4,
+                                         "description": "Trace stride in ticks."},
                     },
                 },
             ),

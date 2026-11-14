@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from .cube import Cube, CubeParams, Death, advance, simulate
+from .cube import HALF, Cube, CubeParams, Death, advance, simulate
 from .world import World
 
 DEFAULT_BEAM = 2000
@@ -99,13 +99,21 @@ def _search(world: World, p: CubeParams, start: Cube, end_x: float, *, beam: int
         tick += 1
         seen: dict[tuple, Branch] = {}
         deaths = []
+        # Most branches share an x (same speed, same ticks): look the world up once per x.
+        lookups: dict[tuple[float, str], tuple[list, bool]] = {}
         for branch in frontier:
             cube = branch.cube
-            reach = cube.x + PRESS_HORIZON_TICKS * p.dx[cube.speed] + 30
-            may_press = (branch.release_at in (None, tick - 1)
-                         and world.obstacle_between(cube.x - 30, reach))
+            spot = (cube.x, cube.speed)
+            lookup = lookups.get(spot)
+            if lookup is None:
+                dx = p.dx[cube.speed]
+                lookup = lookups[spot] = (
+                    world.near(cube.x - HALF, cube.x + dx + HALF),
+                    world.obstacle_between(cube.x - 30, cube.x + PRESS_HORIZON_TICKS * dx + 30))
+            near, obstacle_ahead = lookup
+            may_press = branch.release_at in (None, tick - 1) and obstacle_ahead
             pre = cube.copy() if may_press else None
-            death = advance(cube, world, p, tick, _actions(branch, tick - 1, False))
+            death = advance(cube, world, p, tick, _actions(branch, tick - 1, False), near)
             if death is not None:
                 deaths.append(death)
                 continue
@@ -113,7 +121,7 @@ def _search(world: World, p: CubeParams, start: Cube, end_x: float, *, beam: int
             can_press = pre is not None and (
                 cube.touching_orbs or (cube.grounded and (tick - 1) % stride == 0))
             if can_press and advance(pre, world, p, tick,
-                                     _actions(branch, tick - 1, True)) is None:
+                                     _actions(branch, tick - 1, True), near) is None:
                 options.append((pre, True))
             for state, did_press in options:
                 child = Branch(

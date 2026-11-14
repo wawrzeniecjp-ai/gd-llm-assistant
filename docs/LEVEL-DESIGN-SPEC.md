@@ -756,6 +756,13 @@ Inputs may be given by `x` (converted to the first tick at or after that x) or b
 The result is a trace (sampled every 4 ticks, plus every event), the outcome, and the death
 location and cause object if any.
 
+**As built (M2, `sim/inputs.py`).** `until_x` is required; `start.x` gives an explicit start.
+An input by `x` is placed while the run plays (a jump snap or a speed portal moves later
+ticks), and `inputs_by_x` reports the tick each one got; inputs the run never reached are
+listed in `not_played`. Events are presses and releases, takeoffs, landings, orb and pad
+impulses and speed changes. The trace keeps at most 400 rows: a longer run doubles the
+stride (`sample_every` in the result) and keeps the ticks around every event.
+
 ## 6.8 The solver
 
 ### 6.8.1 Problem
@@ -809,6 +816,13 @@ declares the section `extreme`.
 
 If the budget is not met at M2, the step and collision functions are the hot path and may be
 vectorised or moved to a compiled extension. The public API does not change.
+
+**Measured (2026-11-14, `scripts/bench_solver.py`).** The ten possible M2 sections solved
+as one run from slot 1's start (997 columns, five speeds): 1.4 s, within the budget. It was
+3.5 s before two changes: the solver looks the world up once per x and speed in a tick
+rather than once per branch, and the cube's used orbs are a frozen set, so copying a branch
+and keying it no longer rebuild it. Each M2 slot alone, solve and windows, now takes
+30-390 ms (it was 150 ms-2 s).
 
 ## 6.9 Tool: `verify_section`
 

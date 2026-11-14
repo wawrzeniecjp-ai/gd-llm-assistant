@@ -250,6 +250,9 @@ and why; do not guess.
 - `inconclusive` is not a no: the search was cut short.
 - **Timing windows are difficulty.** One tick (~4 ms) is frame-perfect: a flaw unless the \
 user asked for an extreme level. Under ~25 ms is hard; 50 ms and up is comfortable.
+- `simulate_inputs` plays presses you choose, to test one timing or show why a run dies. \
+It does not search: a death there says only that those presses fail, never that the \
+section is impossible.
 
 **Testing in the game.** `playtest_verify` replays the route in the real editor playtest. \
 Use it only when the user asks you to playtest or test in the game, and never in a turn \

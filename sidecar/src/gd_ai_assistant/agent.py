@@ -37,6 +37,7 @@ from .design import render as render_module
 from .design.coords import Grid, GroundUnknownError
 from .design.level_model import LevelChangingError, SnapshotCache, SnapshotError
 from .design.roles import load_role_table
+from .design.sim import inputs as inputs_module
 from .design.sim import playtest as playtest_module
 from .design.sim import verify as verify_module
 from .providers.base import (
@@ -705,6 +706,10 @@ class ToolLoop:
 
         if name == "verify_section":
             result = verify_module.verify_section(model, args)
+            return result, "error" in result
+
+        if name == "simulate_inputs":
+            result = inputs_module.simulate_inputs(model, args)
             return result, "error" in result
 
         if name == "playtest_verify":
