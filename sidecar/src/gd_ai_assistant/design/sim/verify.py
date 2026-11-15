@@ -19,7 +19,12 @@ def _start_state(args: dict[str, Any], x0: float) -> tuple[Cube | None, float, s
     """(cube, start x, reason it cannot be simulated)."""
     start_from = args.get("start_from", "level_start")
     if start_from in ("level_start", "auto"):
-        return Cube(), 0.0, None
+        # The level's own start speed, which the agent reads from the level settings
+        # (LEVEL-DESIGN-SPEC.md 8.1); 1x when the mod does not report it.
+        speed = args.get("_level_start_speed") or "1x"
+        if speed not in SPEEDS:
+            speed = "1x"
+        return Cube(speed=speed), 0.0, None
     if start_from != "explicit":
         return None, 0.0, f"unknown start_from {start_from!r}"
     start = args.get("start") or {}
@@ -151,7 +156,8 @@ def verify_placement(model: LevelModel, creates: list[dict[str, Any]], deletes: 
 
 
 def route_overlay(model: LevelModel, x_end: float,
-                  constants: PhysicsConstants | None = None) -> dict[str, Any]:
+                  constants: PhysicsConstants | None = None,
+                  start_speed: str = "1x") -> dict[str, Any]:
     """The solver's route from the level start to `x_end`, as points to draw: the path,
     each press, and the x span its timing window covers (LEVEL-DESIGN-SPEC.md 13.2)."""
     try:
@@ -162,7 +168,7 @@ def route_overlay(model: LevelModel, x_end: float,
     blocked = world.unsupported_between(-60, x_end)
     if blocked:
         return {"result": "unverifiable", "reason": blocked[0]["reason"]}
-    start = Cube()
+    start = Cube(speed=start_speed if start_speed in SPEEDS else "1x")
     solved = solve(world, params, start, x_end)
     if solved.result != "possible":
         return {"result": solved.result, "furthest_x": solved.furthest_x}

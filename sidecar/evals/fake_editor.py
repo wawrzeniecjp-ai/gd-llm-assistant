@@ -131,6 +131,8 @@ class FakeEditor:
         self.colors: dict[int, tuple[int, int, int]] = {}
         self.settings: dict[str, Any] = {"background": 0, "ground": 0, "start_mode": 0}
         self.camera = {"x": 0.0, "y": 0.0, "zoom": 1.0}
+        #: `get_level_music` fields over the defaults; from a fixture's `music`.
+        self.music: dict[str, Any] = {}
         #: `describe_object_types` answers, keyed by id; from a roles fixture.
         self.describe = dict(describe or {})
         #: id -> frame, for `list_object_catalog`.
@@ -446,6 +448,15 @@ class FakeEditor:
 
     def _handle_get_level_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {"settings": copy.deepcopy(self.settings)}
+
+    def _handle_get_level_music(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """The fixture's song (LEVEL-DESIGN-SPEC.md 15.2): an official track by default."""
+        music = {"song_type": 0, "audio_track": int(self.settings.get("audio_track", 0)),
+                 "custom_song_id": None,
+                 "song_offset_s": float(self.settings.get("song_offset", 0.0)),
+                 "length_ms": None, "file_path": None, "guidelines": None}
+        music.update(self.music)
+        return music
 
     def _camera(self) -> dict[str, Any]:
         half_w = 285.0 / self.camera["zoom"]

@@ -56,10 +56,22 @@ struct LevelSettings {
     /// The song's display name, when the game can resolve one. Read-only, and reported
     /// so the model can confirm with the user which song is in use.
     std::optional<std::string> songName;
+
+    /// The speed the level starts at, as the simulator names it ("0.5x" .. "4x").
+    /// Read-only: the sidecar's timeline and the level-start simulation need it
+    /// (LEVEL-DESIGN-SPEC.md 8.1), and changing it is done with a speed portal.
+    std::optional<std::string> startSpeed;
 };
 
 /// Reads the current settings. Main thread only.
 geode::Result<LevelSettings> readLevelSettings();
+
+/// The level's song for `get_level_music` (LEVEL-DESIGN-SPEC.md 8.2). Main thread only.
+///
+/// Reports what the game already knows without loading audio: the catalogue and track,
+/// the offset, the name, and for an official track the file it plays from. `length_ms`
+/// and `guidelines` are null until spikes S-L7 and S-L6 find where they come from.
+geode::Result<matjson::Value> readLevelMusic();
 
 /// Applies `settings`, then asks the editor to refresh. Main thread only.
 ///

@@ -31,6 +31,8 @@ class Case:
     hard: dict[str, Any] = field(default_factory=dict)
     soft: dict[str, Any] = field(default_factory=dict)
     description: str = ""
+    #: A level plan to start from (its `music`, `concept`, ...), or None for no plan.
+    plan: dict[str, Any] | None = None
 
 
 def load_case(path: Path) -> Case:
@@ -47,6 +49,7 @@ def load_case(path: Path) -> Case:
         hard=dict(asserts.get("hard") or {}),
         soft=dict(asserts.get("soft") or {}),
         description=data.get("description", ""),
+        plan=data.get("plan"),
     )
 
 

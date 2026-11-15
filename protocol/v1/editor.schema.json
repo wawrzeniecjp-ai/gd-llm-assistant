@@ -635,6 +635,39 @@
             },
             "additionalProperties": false
         },
+        "getLevelMusicPayload": {
+            "x-direction": "s2m",
+            "type": "object",
+            "maxProperties": 0,
+            "additionalProperties": false
+        },
+        "levelMusicResult": {
+            "x-direction": "m2s",
+            "type": "object",
+            "description": "The level's song (LEVEL-DESIGN-SPEC.md 8.2). song_type is the catalogue: 0 the official tracks (audio_track indexes them), otherwise the custom song id. file_path and length_ms are reported when the game knows them; guidelines when the mod can read them (S-L6).",
+            "required": ["song_type", "song_offset_s"],
+            "properties": {
+                "song_type": { "type": "integer", "minimum": 0 },
+                "audio_track": { "type": "integer", "minimum": 0 },
+                "custom_song_id": { "type": ["integer", "null"] },
+                "song_name": { "type": "string", "maxLength": 256 },
+                "song_offset_s": { "type": "number" },
+                "length_ms": { "type": ["number", "null"], "minimum": 0 },
+                "file_path": { "type": ["string", "null"], "maxLength": 1024 },
+                "file_exists": { "type": "boolean" },
+                "guidelines": {
+                    "type": ["array", "null"],
+                    "maxItems": 10000,
+                    "items": {
+                        "type": "object",
+                        "required": ["ms"],
+                        "properties": { "ms": { "type": "number" }, "color": { "type": "number" } },
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "additionalProperties": false
+        },
         "getCameraPayload": {
             "x-direction": "s2m",
             "type": "object",
@@ -740,7 +773,15 @@
                 "reverse": { "type": "boolean" },
                 "rotate_gameplay": { "type": "boolean" },
                 "mirror": { "type": "boolean" },
-                "song_offset": { "type": "number" }
+                "song_offset": { "type": "number" },
+                "start_speed": {
+                    "type": "string",
+                    "enum": ["0.5x", "1x", "2x", "3x", "4x"],
+                    "description": "The speed the level starts at (LEVEL-DESIGN-SPEC.md 8.1). Read-only here: a speed portal is how the assistant changes speed."
+                },
+                "song_type": { "type": "integer" },
+                "audio_track": { "type": "integer" },
+                "song_name": { "type": "string" }
             },
             "additionalProperties": false
         },

@@ -33,6 +33,8 @@ from . import capture, properties_table, save_properties, tools
 from . import catalog as catalog_module
 from .agent_prompt import system_prompt
 from .design import grid_tools
+from .design import music as music_module
+from .design import plan as plan_module
 from .design import render as render_module
 from .design.coords import Grid, GroundUnknownError
 from .design.level_model import LevelChangingError, SnapshotCache, SnapshotError
@@ -40,6 +42,7 @@ from .design.roles import load_role_table
 from .design.sim import inputs as inputs_module
 from .design.sim import playtest as playtest_module
 from .design.sim import verify as verify_module
+from .design.timeline import Timeline
 from .providers.base import (
     AssistantTurn,
     Message,
@@ -252,8 +255,16 @@ class ToolLoop:
         max_retries: int = 3,
         retry_base_s: float = 1.0,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        plan_store: plan_module.PlanStore | None = None,
+        level_key: str | None = None,
+        level_name: str | None = None,
     ) -> None:
         self._link = link
+        # The level plan (LEVEL-DESIGN-SPEC.md 9): per level, kept by the sidecar.
+        self._plans = plan_store
+        self._level_key = level_key
+        self._level_name = level_name or level_key
+        self._settings: dict[str, Any] | None = None
         self._provider = provider
         self._catalog = catalog
         self._history = history
@@ -493,7 +504,7 @@ class ToolLoop:
         while True:
             try:
                 return await self._provider.complete(
-                    system=system_prompt(),
+                    system=system_prompt(self._plan_block()),
                     messages=self._with_pending_images(messages),
                     tools=tools.tool_specs(self._unsupported),
                 )
@@ -723,12 +734,20 @@ class ToolLoop:
             result = grid_tools.render_grid(model, grid, args)
             return result, "error" in result
 
+        if name in ("verify_section", "simulate_inputs", "beat_grid", "get_level_plan",
+                    "update_level_plan", "render_schematic", "place_grid"):
+            settings = await self._level_settings()
+            args = {**args, "_level_start_speed": settings.get("start_speed", "1x")}
         if name == "verify_section":
             result = verify_module.verify_section(model, args)
             return result, "error" in result
 
         if name == "simulate_inputs":
             result = inputs_module.simulate_inputs(model, args)
+            return result, "error" in result
+
+        if name in ("get_level_plan", "update_level_plan", "beat_grid"):
+            result = self._plan_tool(name, model, args)
             return result, "error" in result
 
         if name == "playtest_verify":
@@ -747,7 +766,8 @@ class ToolLoop:
                 route = None
                 if overlays & {"route", "windows"} and args.get("x_range"):
                     route = verify_module.route_overlay(
-                        model, max(float(v) for v in args["x_range"]))
+                        model, max(float(v) for v in args["x_range"]),
+                        start_speed=args.get("_level_start_speed", "1x"))
                 schematic = render_module.render_schematic(model, grid, args, route)
             except render_module.SchematicError as exc:
                 return {"error": str(exc)}, True
@@ -768,10 +788,14 @@ class ToolLoop:
             # too, and computed before the edit so a failure is reported either way.
             verification = verify_module.verify_placement(
                 model, plan.creates, plan.deletes, plan.block_x, plan.verify)
+        beats = (self._beat_report(model, args, plan.creates, verification)
+                 if args.get("snap_to_beats") else None)
         if plan.preview:
             preview = plan.preview_result()
             if verification is not None:
                 preview["verification"] = verification
+            if beats is not None:
+                preview["beats"] = beats
             return preview, False
         if not plan.creates and not plan.deletes:
             return {"created": 0, "deleted": 0, "notes": ["the grid is empty"]}, False
@@ -825,9 +849,40 @@ class ToolLoop:
                                   "created_uids": created}
         if verification is not None:
             result["verification"] = verification
+        if beats is not None:
+            result["beats"] = beats
         if plan.notes:
             result["notes"] = plan.notes
         return result, False
+
+    def _beat_report(self, model: Any, args: dict[str, Any], creates: list[dict[str, Any]],
+                     verification: dict[str, Any] | None) -> dict[str, Any]:
+        """`place_grid`'s `snap_to_beats` (LEVEL-DESIGN-SPEC.md 8.4.1): how far each
+        input-requiring thing in the block is from the nearest beat. A report only."""
+        music, timeline = self.music_context(model, args)
+        if music is None or timeline is None:
+            return {"error": "no bpm in the level plan, so there is no beat to compare with"}
+        spec = args.get("snap_to_beats") if isinstance(args.get("snap_to_beats"), dict) else {}
+        subdivision = int(spec.get("subdivision", 2))
+        roles = self._snapshot.roles
+        items = [{"what": "orb", "x": float(o["x"])} for o in creates
+                 if roles.role_of(int(o["id"])).value == "orb"]
+        route = (verification or {}).get("route") or []
+        items += [{"what": "press", "x": float(r["x"])} for r in route]
+        for item in items:
+            off = music_module.nearest_offset_ms(music, timeline.song_ms_at(item["x"]),
+                                                 subdivision)
+            item["off_beat_ms"] = round(off, 1)
+            item["on_beat"] = abs(off) <= music_module.BEAT_TOLERANCE_MS
+        report: dict[str, Any] = {"items": items, "subdivision": subdivision,
+                                  "tolerance_ms": music_module.BEAT_TOLERANCE_MS}
+        if any(roles.role_of(int(o["id"])).value == "portal_speed" for o in creates):
+            report["note"] = ("the block places a speed portal; times are from the level "
+                              "before it, so check again after placing")
+        if not route and verification is None:
+            report["note"] = ("only orbs are listed: pass `verify` too, to see the route's "
+                              "presses")
+        return report
 
     def _request_failed(self, request_type: str, response: Any) -> dict[str, Any]:
         """A failed mod request as a tool result, remembering unsupported requests.
@@ -1031,6 +1086,114 @@ class ToolLoop:
 
     # -- helpers ---------------------------------------------------------
 
+    # -- level plan, timeline, beats (LEVEL-DESIGN-SPEC.md 8, 9) ----------------------
+
+    async def _level_settings(self) -> dict[str, Any]:
+        """The level settings, read once per turn; {} when the mod cannot say."""
+        if self._settings is None:
+            self._settings = {}
+            try:
+                response = await self._link.request("get_level_settings", {})
+                if response.ok and isinstance(response.result, dict):
+                    self._settings = dict(response.result.get("settings") or {})
+            except Exception as exc:  # noqa: BLE001 - settings are an optional input
+                log.debug("could not read level settings: %s", exc)
+        return self._settings
+
+    def _load_plan(self) -> dict[str, Any] | None:
+        if self._plans is None or not self._level_key:
+            return None
+        try:
+            return self._plans.load(self._level_key)
+        except (OSError, ValueError) as exc:
+            log.warning("could not read the level plan: %s", exc)
+            return None
+
+    def _plan_block(self) -> str | None:
+        plan = self._load_plan()
+        return plan_module.render_block(plan) if plan else None
+
+    def _timeline(self, model: Any, args: dict[str, Any]) -> Timeline | None:
+        from .design.constants import load_constants
+        from .design.sim.cube import CubeParams, UncalibratedError
+
+        try:
+            params = CubeParams.from_constants(load_constants())
+        except UncalibratedError:
+            return None
+        offset = float((self._settings or {}).get("song_offset") or 0.0)
+        return Timeline.from_model(model, params, args.get("_level_start_speed", "1x"),
+                                   offset)
+
+    def music_context(self, model: Any, args: dict[str, Any]
+                      ) -> tuple[dict[str, Any] | None, Timeline | None]:
+        """The plan's music (when it has a bpm) and the timeline, for beat reports."""
+        plan = self._load_plan()
+        music = (plan or {}).get("music") or {}
+        if not music.get("bpm"):
+            return None, None
+        return music, self._timeline(model, args)
+
+    def _plan_tool(self, name: str, model: Any, args: dict[str, Any]) -> dict[str, Any]:
+        if self._plans is None or not self._level_key:
+            return {"error": "no level plan here: the sidecar does not know which level "
+                    "this is"}
+        plan = self._load_plan()
+        timeline = self._timeline(model, args)
+        if name == "get_level_plan":
+            if plan is None:
+                return {"plan": None, "note": "No plan yet. Start one with "
+                        "update_level_plan once the user has said what they want."}
+            return {"plan": plan_module.with_derived(plan, timeline, model, self._level_name),
+                    "timeline": timeline.describe() if timeline else None}
+        if name == "update_level_plan":
+            base = plan or plan_module.new_plan(self._level_key, self._level_name or "")
+            try:
+                updated = plan_module.apply_ops(base, args.get("ops") or [])
+                for section in updated["sections"]:
+                    self._stamp_verified(section, base, timeline, model)
+                self._plans.save(updated)
+            except plan_module.PlanError as exc:
+                return {"error": str(exc)}
+            except OSError as exc:
+                return {"error": f"could not write the plan: {exc}"}
+            return {"ok": True, "note": "Saved. The plan is not part of the level, and "
+                    "Revert does not undo it.",
+                    "plan": plan_module.with_derived(updated, timeline, model,
+                                                     self._level_name)}
+        # beat_grid
+        if plan is None or not (plan.get("music") or {}).get("bpm"):
+            return {"error": "no bpm in the level plan: ask the user for the song's bpm "
+                    "(never guess it from the song name), then set it with "
+                    "update_level_plan set_music"}
+        if timeline is None:
+            return {"error": "the timeline needs calibrated physics constants"}
+        x_range = args.get("x_range")
+        if not x_range or len(x_range) != 2:
+            return {"error": "give `x_range` as [start, end] in level units"}
+        try:
+            return music_module.beat_grid(plan["music"], timeline,
+                                          (float(x_range[0]), float(x_range[1])),
+                                          int(args.get("subdivision", 1)))
+        except music_module.MusicError as exc:
+            return {"error": str(exc)}
+
+    @staticmethod
+    def _stamp_verified(section: dict[str, Any], before: dict[str, Any],
+                        timeline: Timeline | None, model: Any) -> None:
+        """A section newly marked verified records its gameplay as it stands (9.3)."""
+        old = next((s for s in before.get("sections", []) if s["id"] == section["id"]), {})
+        now = (section.get("status") or {}).get("gameplay")
+        was = (old.get("status") or {}).get("gameplay")
+        if now != "verified" or (was == "verified" and section.get("verified")):
+            return
+        span = plan_module.section_x_range(section, timeline)
+        if span is None:
+            return
+        section["verified"] = {**(section.get("verified") or {}),
+                               "revision": model.revision,
+                               "hash": plan_module.gameplay_hash(model, span)}
+
     def _reset(self, turn_id: str, message_id: str) -> None:
         self._turn_id = turn_id
         self._message_id = message_id
@@ -1043,6 +1206,7 @@ class ToolLoop:
         self._pending_images = []
         self._playtests = 0
         self._user_text = ""
+        self._settings = None
         self._snapshot.invalidate()
 
     def _result(self, status: str, text: str, *, txn_id: str | None = None) -> TurnResult:

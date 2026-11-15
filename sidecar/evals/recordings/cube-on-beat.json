@@ -1,0 +1,5 @@
+{"turns": [
+ {"text": "", "tool_calls": [{"id": "r1", "name": "beat_grid", "arguments": {"x_range": [300, 1800]}}], "stop_reason": "tool_use", "usage": {"input_tokens": 100, "output_tokens": 10}},
+ {"text": "", "tool_calls": [{"id": "r2", "name": "place_grid", "arguments": {"grid": "@grid col=10 row=0 w=50 h=1\n...........^.........^..........^.........^.......", "verify": {"speed": "1x"}, "snap_to_beats": {"subdivision": 2}}}], "stop_reason": "tool_use", "usage": {"input_tokens": 120, "output_tokens": 30}},
+ {"text": "Four spikes, one per beat-and-a-bit; verified possible.", "tool_calls": [], "stop_reason": "end_turn", "usage": {"input_tokens": 140, "output_tokens": 20}}
+]}

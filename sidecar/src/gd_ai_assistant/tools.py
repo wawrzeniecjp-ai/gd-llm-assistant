@@ -795,7 +795,7 @@ def _build() -> dict[str, Tool]:
 #: them itself; `place_grid` then sends ordinary `delete_objects`/`create_objects`.
 DESIGN_TOOLS = frozenset(
     {"render_grid", "place_grid", "render_schematic", "verify_section", "simulate_inputs",
-     "playtest_verify"}
+     "playtest_verify", "get_level_plan", "update_level_plan", "beat_grid"}
 )
 
 
@@ -880,6 +880,17 @@ def _design_tools() -> list[Tool]:
                         "mode": {"type": "string", "enum": ["add", "replace"],
                                  "default": "add"},
                         "preview": {"type": "boolean", "default": False},
+                        "snap_to_beats": {
+                            "type": "object",
+                            "description": (
+                                "Report how far each orb, and each press of the verified "
+                                "route, is from the nearest beat (needs the plan's bpm). "
+                                "A report only: nothing is moved."
+                            ),
+                            "properties": {"subdivision": {"type": "integer", "minimum": 1,
+                                                           "maximum": 8, "default": 2}},
+                            "additionalProperties": False,
+                        },
                         "verify": {
                             "type": "object",
                             "description": (
@@ -1117,6 +1128,119 @@ def _design_tools() -> list[Tool]:
             mutates_objects=False,
             is_action=False,
             requires=("get_level_objects",),
+        ),
+        *_plan_tools(),
+    ]
+
+
+def _plan_tools() -> list[Tool]:
+    """The level plan, the beat grid and the song (LEVEL-DESIGN-SPEC.md 8, 9)."""
+    section_fields = (
+        "id, name, start_ms/end_ms (song time; x_range is derived from them), mode, "
+        "speed, gravity, mini, difficulty (1-10), intensity (0-1), style, status "
+        "{gameplay, deco, effects: todo|in_progress|built|verified|needs_fix}, notes"
+    )
+    return [
+        Tool(
+            spec=ToolSpec(
+                name="get_level_plan",
+                description=(
+                    "Read the level plan: the durable design record for this level "
+                    "(concept, target difficulty, music, sections with their status, "
+                    "decisions). Each section's x_range is derived from its song times "
+                    "through the speed portals, sections whose gameplay changed since "
+                    "they were verified are marked stale, and `progress` sums it up. "
+                    "Empty until something is written with update_level_plan."
+                ),
+                parameters={"type": "object", "additionalProperties": False,
+                            "properties": {}},
+            ),
+            protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+            requires=("get_level_objects",),
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="update_level_plan",
+                description=(
+                    "Change the level plan. It is design metadata kept by the assistant, "
+                    "not part of the level and not undone by Revert. Ops apply in order "
+                    "and one invalid op rejects the whole batch: set_field {path, value} "
+                    "(concept, target_difficulty, allow_replay, todo, ...), add_section "
+                    "{section, after?}, update_section {id, fields}, remove_section {id}, "
+                    "add_decision {text}, set_music {bpm, offset_ms, beats_per_bar, "
+                    "source, tempo_changes}, set_style {name, profile}. Section fields: "
+                    f"{section_fields}. Setting status.gameplay to verified records what "
+                    "the section looks like now, so a later change marks it stale. "
+                    "Record the user's decisions as you go; never guess a bpm."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["ops"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "ops": {
+                            "type": "array", "minItems": 1, "maxItems": 50,
+                            "items": {
+                                "type": "object",
+                                "required": ["op"],
+                                "properties": {"op": {"type": "string", "enum": [
+                                    "set_field", "add_section", "update_section",
+                                    "remove_section", "add_decision", "set_music",
+                                    "set_style"]}},
+                            },
+                        },
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+            requires=("get_level_objects",),
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="beat_grid",
+                description=(
+                    "Where the beats fall in the level: each beat (and subdivision) in "
+                    "x_range with its song time, x, column, bar and strength (bar, beat, "
+                    "sub), from the plan's bpm and the level's speed portals and song "
+                    "offset. Also how many columns one beat spans at the start speed. "
+                    "Use it to put jumps and orbs on the beat. Needs the bpm in the plan."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["x_range"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "x_range": {**_RANGE, "description": "Level units, [start, end]."},
+                        "subdivision": {"type": "integer", "minimum": 1, "maximum": 8,
+                                        "default": 1,
+                                        "description": "2 adds the half beats, 4 quarters."},
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+            requires=("get_level_objects",),
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="get_level_music",
+                description=(
+                    "The level's song: official track or custom song id, the song "
+                    "offset, its file and length when the game knows them, and the "
+                    "editor's music guidelines if it can read them. It does not tell "
+                    "you the bpm: ask the user for that."
+                ),
+                parameters={"type": "object", "additionalProperties": False,
+                            "properties": {}},
+            ),
+            protocol_type="get_level_music",
+            mutates_objects=False,
+            is_action=False,
         ),
     ]
 

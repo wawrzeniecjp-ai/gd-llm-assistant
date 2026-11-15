@@ -1,0 +1,26 @@
+id = "cube-on-beat"
+description = "M4's done-when: a cube section synced to the song (120 bpm in the plan)."
+fixture = "empty"
+prompt = """
+Build an easy 1x cube section from column 10 to column 60 where every jump is on the beat
+of the song. Check that it can be played.
+"""
+section = [0, 1950]
+
+[plan.music]
+bpm = 120
+offset_ms = 0
+beats_per_bar = 4
+source = "user"
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+# Presses within 35 ms of a half-beat (LEVEL-DESIGN-SPEC.md 14.2); done-when: 0.75 in 2/3.
+beat_alignment = { min = 0.75 }
+used_beat_grid = true
+frame_perfect = 0

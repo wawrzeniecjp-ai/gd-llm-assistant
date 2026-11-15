@@ -23,6 +23,7 @@ cancels a run). Run from `sidecar/`, with `start-sidecar.bat` closed:
     uv run python scripts/calibrate.py P11          # what makes the stair landing differ
     uv run python scripts/calibrate.py P12          # jump snapping, every speed (~12 min)
     uv run python scripts/calibrate.py P13          # orbs and pads, every speed (~6 min)
+    uv run python scripts/calibrate.py P14          # the timeline, five speed portals (~1 min)
 """
 
 from __future__ import annotations
@@ -624,6 +625,53 @@ async def probe_orbs_pads_by_speed(r: Runner, out: dict, cube: dict) -> None:
     save_fixture("cal_orbs_pads_speeds", "P13 orbs and pads at every speed", runs)
 
 
+# P14: the timeline (LEVEL-DESIGN-SPEC.md 8.1, M4's done-when). Five speed portals along a
+# flat floor, every speed, no input: where the game's cube is on each tick against where
+# `design/timeline.py` says it is. Done when every x is reached within one tick.
+P14_COURSE = [(20, "2x"), (50, "0.5x"), (70, "3x"), (110, "4x"), (160, "1x")]
+P14_END_X = 6000
+
+
+async def probe_timeline(r: Runner, out: dict) -> None:
+    """P14: the timeline against the game at five speed portals."""
+    import math
+
+    from gd_ai_assistant.design.sim.cube import HALF
+    from gd_ai_assistant.design.timeline import Timeline
+
+    ids = dict(SPEED_PORTALS)
+    objects = []
+    for col, speed in P14_COURSE:
+        x, y = cell(col, 1)
+        objects.append({"id": ids[speed], "x": x, "y": y})
+    params = CubeParams.from_constants(load_constants())
+    world = world_from_objects(objects, load_role_table())
+    timeline = Timeline.build([(b.box.x1 - HALF, b.variant, b.uid) for b in world.bodies],
+                              params)
+    async with probe_level(r.server, "timeline", objects):
+        result = await r.replay([], 4200)
+    trace = result.get("trace") or {}
+    errors = []
+    for x_probe in range(100, P14_END_X, 97):
+        tick = next((t for t, x in zip(trace.get("tick", []), trace.get("x", []), strict=True)
+                     if x >= x_probe), None)
+        if tick is None:
+            break
+        # Sample 1 is the level start's command phase, with no move.
+        predicted = math.ceil(timeline.ms_at(x_probe) * 0.24 + 1 - 1e-9)
+        errors.append((x_probe, tick - predicted))
+    worst = max((abs(e) for _, e in errors), default=None)
+    print(f"    {len(errors)} points; worst difference {worst} tick(s)"
+          + ("" if worst is not None and worst <= 1 else "  <-- MORE THAN ONE TICK"))
+    for x_probe, error in errors:
+        if abs(error) > 1:
+            print(f"      x {x_probe}: game {error:+d} ticks from the timeline")
+    out["P14_timeline"] = {"errors": errors, "worst": worst,
+                           "segments": timeline.describe()}
+    save_fixture("cal_timeline", "P14 timeline at five speed portals",
+                 [run_record([], result, objects=objects)])
+
+
 async def probe_hold(r: Runner, out: dict, cube: dict) -> None:
     """P3: hold for a long time; does the cube jump again on landing, and when?"""
     inputs = press(60, hold=480)
@@ -785,6 +833,7 @@ async def routine(server: SidecarServer) -> dict[str, Any]:
         ("P12", "jump snapping by speed and spacing", lambda: probe_jump_snap(r, out)),
         ("P13", "orbs and pads at every speed",
          lambda: probe_orbs_pads_by_speed(r, out, cube)),
+        ("P14", "the timeline at five speed portals", lambda: probe_timeline(r, out)),
     ]
     try:
         for code, label, step in steps:

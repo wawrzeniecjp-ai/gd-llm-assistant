@@ -900,6 +900,25 @@ arc::Future<> Bridge::handleFrame(std::string const& frame, net::WebSocket& sock
         co_return co_await sendResult(socket, requestId, editor::captureToJson(captured->unwrap()));
     }
 
+    if (type == "get_level_music") {
+        // The level's song (LEVEL-DESIGN-SPEC.md 8.2): read on the main thread, where the
+        // level and the file lookup live.
+        auto music = co_await async::waitForMainThread<geode::Result<matjson::Value>>(
+            [] { return editor::readLevelMusic(); }
+        );
+        if (!music) {
+            co_return co_await sendError(
+                socket, requestId, "THREAD_DISPATCH_FAILED",
+                "could not schedule work on the main thread"
+            );
+        }
+        if (!music->ok()) {
+            auto const [code, message] = splitCode(music->unwrapErr());
+            co_return co_await sendError(socket, requestId, code, message);
+        }
+        co_return co_await sendResult(socket, requestId, music->unwrap());
+    }
+
     if (type == "get_level_settings" || type == "set_level_settings") {
         // Level settings live on one object and the game applies them together, so they are
         // a single request rather than one per field (SPEC.md 7.5.5). A main-thread hop

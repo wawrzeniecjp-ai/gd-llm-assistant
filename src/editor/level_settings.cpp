@@ -4,8 +4,11 @@
 #include <Geode/binding/LevelEditorLayer.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/LevelSettingsObject.hpp>
+#include <Geode/binding/LevelTools.hpp>
 
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
 
 using namespace geode::prelude;
 
@@ -53,6 +56,14 @@ geode::Result<LevelSettings> readLevelSettings() {
     current.rotateGameplay = settings->m_rotateGameplay;
     current.mirrorMode = settings->m_mirrorMode;
     current.songOffset = settings->m_songOffset;
+    // `Speed`'s values: 0 normal (1x), 1 slow (0.5x), 2 fast, 3 faster, 4 fastest.
+    switch (static_cast<int>(settings->m_startSpeed)) {
+        case 1: current.startSpeed = "0.5x"; break;
+        case 2: current.startSpeed = "2x"; break;
+        case 3: current.startSpeed = "3x"; break;
+        case 4: current.startSpeed = "4x"; break;
+        default: current.startSpeed = "1x"; break;
+    }
     // The song lives on the level, not the settings object, even though the user picks
     // it in the settings window.
     if (auto* level = settings->m_level) {
@@ -194,7 +205,48 @@ matjson::Value levelSettingsToJson(LevelSettings const& settings) {
     if (settings.songType) result["song_type"] = *settings.songType;
     if (settings.audioTrack) result["audio_track"] = *settings.audioTrack;
     if (settings.songName) result["song_name"] = *settings.songName;
+    if (settings.startSpeed) result["start_speed"] = *settings.startSpeed;
     return result;
+}
+
+geode::Result<matjson::Value> readLevelMusic() {
+    auto* settings = settingsObject();
+    if (settings == nullptr) {
+        return Err("EDITOR_NOT_OPEN: no editor layer is active");
+    }
+    auto result = matjson::Value::object();
+    result["song_offset_s"] = static_cast<double>(settings->m_songOffset);
+    result["song_type"] = 0;
+    result["custom_song_id"] = matjson::Value(nullptr);
+    result["length_ms"] = matjson::Value(nullptr);
+    result["file_path"] = matjson::Value(nullptr);
+    result["guidelines"] = matjson::Value(nullptr);
+
+    auto* level = settings->m_level;
+    if (level == nullptr) {
+        return Ok(result);
+    }
+    // See `LevelSettings::songType`: `m_songID` is the catalogue, `m_audioTrack` the index.
+    result["song_type"] = level->m_songID;
+    result["audio_track"] = level->m_audioTrack;
+    std::string const name = level->getSongName();
+    if (!name.empty()) {
+        result["song_name"] = name;
+    }
+    if (level->m_songID == 0) {
+        // An official track plays from a file in the game's resources; its name comes
+        // from the game's own table, and the full path from the same lookup the game
+        // uses to open it.
+        std::string const file = LevelTools::getAudioFileName(level->m_audioTrack);
+        if (!file.empty()) {
+            std::string const full =
+                CCFileUtils::sharedFileUtils()->fullPathForFilename(file.c_str(), false);
+            result["file_path"] = full;
+            std::error_code error;
+            result["file_exists"] = std::filesystem::exists(full, error);
+        }
+    }
+    return Ok(result);
 }
 
 geode::Result<LevelSettings, std::string> parseLevelSettings(matjson::Value const& json) {

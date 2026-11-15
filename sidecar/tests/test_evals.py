@@ -37,6 +37,18 @@ def test_replayed_recordings_pass_and_write_a_report(tmp_path) -> None:
     assert "fix-wall" in (tmp_path / "report.html").read_text(encoding="utf-8")
 
 
+def test_a_case_plan_is_seeded_and_beat_alignment_measured(tmp_path) -> None:
+    """The on-beat case brings a 120 bpm plan; the recording uses beat_grid and places
+    four spikes, two of whose presses land within 35 ms of a half-beat."""
+    runner.main(["--replay", str(runner.ROOT / "recordings"), "--cases", "cube-on-beat",
+                 "--out", str(tmp_path)])
+    report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    metrics = report["runs"][0]["metrics"]
+    assert metrics["playable"] == "possible" and metrics["used_beat_grid"]
+    assert metrics["beat_alignment"] == 0.5 and len(metrics["beat_offsets_ms"]) == 4
+    assert report["runs"][0]["verdicts"]["soft:beat_alignment"]["outcome"] == "fail"
+
+
 def test_a_failed_hard_assertion_fails_the_run(tmp_path) -> None:
     """The fix-wall recording replayed as if it were the read-only question: it edits."""
     recordings = tmp_path / "rec"

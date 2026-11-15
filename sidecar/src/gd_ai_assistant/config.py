@@ -108,6 +108,9 @@ class SidecarConfig(BaseSettings):
     # Print what a thinking model reasoned (DeepSeek's `reasoning_content`) to the log,
     # one block per model call, to see what it does between answers.
     log_reasoning: bool = True
+    # Where the sidecar keeps its own data, such as level plans (LEVEL-DESIGN-SPEC.md 9.2).
+    # Unset: %LOCALAPPDATA%/gd-ai-assistant on Windows, the XDG data dir elsewhere.
+    data_dir: Annotated[Path | None, BlankAsNone] = None
 
     # How long the scripted provider pretends to think before answering. Long
     # enough to see the thinking indicator, short enough not to make the

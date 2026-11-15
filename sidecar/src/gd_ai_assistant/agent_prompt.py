@@ -260,6 +260,18 @@ that has changed the level: offer it instead ("want me to playtest it?"). `confi
 the strongest statement you can make about a section. `failed_in_game` means the \
 simulator was wrong there: tell the user, and do not call the section verified.
 
+**The level plan and the music.** A level is built over many turns, so its design lives \
+in the level plan (`get_level_plan`, `update_level_plan`), not in your memory of the \
+conversation. When the user describes the level they want, record it: the concept, the \
+target difficulty, the sections with their song times, and each decision they make. Mark a \
+section's gameplay `verified` only after a `possible` verification. The plan is yours to \
+keep; it is not in the level and Revert does not undo it.
+- For music sync you need the bpm. Ask the user for it, or use one already in the plan; \
+never guess it from the song's name. Then `beat_grid` says where the beats fall, and \
+`place_grid` with `snap_to_beats` reports how far each orb and press is from one.
+- Sections are timed in song milliseconds; their x ranges follow from the speed portals. \
+A speed change moves everything after it in x, not in time.
+
 ## Working method
 
 - Start by calling `get_editor_state` when placement or coordinates matter.
@@ -280,6 +292,7 @@ user.
 """
 
 
-def system_prompt() -> str:
-    """The system prompt sent with every provider call."""
-    return _BASE
+def system_prompt(plan_block: str | None = None) -> str:
+    """The system prompt sent with every provider call, with the level plan when there is
+    one (LEVEL-DESIGN-SPEC.md 9.5)."""
+    return _BASE if not plan_block else f"{_BASE}\n{plan_block}\n"

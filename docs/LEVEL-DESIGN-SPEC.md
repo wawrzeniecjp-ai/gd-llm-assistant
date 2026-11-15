@@ -1248,6 +1248,37 @@ When a plan exists, a compact rendering (≤ 600 tokens: concept, music, the sec
 status, the last 5 decisions) is added to the system prompt as a separate block under
 "Level plan". The full plan is available through `get_level_plan`.
 
+## 9.6 As built (M4, 2026-11-15)
+
+- `design/timeline.py`: the timeline is built from the simulator's own portal bodies, and
+  a speed change happens **on a tick**: the first tick whose move ends past the portal's
+  activation x, a whole number of the old speed's steps into the segment, because the new
+  speed applies from the next move. With that, the timeline matches the simulator to the
+  tick at five portals (every speed); placing the change exactly at the activation x was
+  off by just over a tick after a few portals. Calibration P14 checks the same course
+  against the game (`scripts/calibrate.py P14`, fixture `cal_timeline`).
+- The level's start speed now reaches the simulator: `get_level_settings` reports
+  `start_speed` (read-only, from `LevelSettingsObject::m_startSpeed`), and verification,
+  `simulate_inputs` and the route overlay start from it. Before, a level that starts at 2x
+  was simulated from 1x.
+- `get_level_music` reports the catalogue, track, name, offset and, for an official track,
+  the file the game plays it from. `length_ms` and `guidelines` are null until S-L7 and
+  S-L6; `set_guidelines` is not built.
+- `design/music.py`: the beat grid in song time (first beat at `music.offset_ms`, tempo
+  changes restart the spacing), and `alignment`: the fraction of route presses within
+  35 ms of a half-beat (`beat_alignment`, 14.2).
+- `design/plan.py`: storage as 9.2 under `data_dir` (new setting); ops as 9.4, validated
+  against a JSON schema of 9.3 as a whole after all ops apply; derived `x_range` from song
+  times; `verified` stamped by the sidecar with the revision and a hash of the section's
+  gameplay objects when a section's gameplay is first marked verified, so a later change
+  shows it `stale`; the prompt block is capped at 2400 characters.
+- `place_grid` `snap_to_beats {subdivision}` reports each orb in the block and each press
+  of its verified route with its offset from the nearest subdivision. Times come from the
+  level before the block, so a block that places a speed portal says to check again.
+- Evaluation: a case may bring a `[plan]` (seeded per run), and the `cube-on-beat` case is
+  M4's beat-alignment check. Done-when status: the timeline matches the simulator at five
+  portals; the game check (P14) and the 2-of-3-seeds eval are for the next live session.
+
 ---
 
 # 10. Pattern library

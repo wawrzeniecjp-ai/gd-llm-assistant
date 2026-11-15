@@ -80,6 +80,8 @@ def test_registry_covers_every_message_in_the_spec() -> None:
         "get_level_objects",
         # in-game replay, the simulator's ground truth (LEVEL-DESIGN-SPEC.md 7.2)
         "run_replay",
+        # the level's song (LEVEL-DESIGN-SPEC.md 8.2)
+        "get_level_music",
         # events, mod -> sidecar
         "editor_closed",
         "level_changed",

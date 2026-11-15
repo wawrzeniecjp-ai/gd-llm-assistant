@@ -35,6 +35,7 @@ from websockets.http11 import Response as HttpResponse
 from . import __version__, agent, catalog, protocol
 from .auth import load_or_create_token, token_matches
 from .config import SidecarConfig
+from .design.plan import PlanStore
 from .design.versions import data_version_warnings
 from .providers import Provider, ProviderUnavailable, create_provider
 
@@ -114,6 +115,8 @@ class SidecarServer:
         # One history per level session, replaced when the level key changes.
         self._history = agent.History(config.history_token_budget)
         self._history_key: str | None = None
+        # Level plans, one file per level key (LEVEL-DESIGN-SPEC.md 9.2).
+        self._plan_store = PlanStore(config.data_dir)
 
     # -- connection lifecycle -----------------------------------------
 
@@ -558,6 +561,8 @@ class SidecarServer:
                 turn_token_budget=self.config.turn_token_budget,
                 max_retries=self.config.provider_max_retries,
                 retry_base_s=self.config.provider_retry_base_s,
+                plan_store=self._plan_store,
+                level_key=self._history_key,
             )
             result = await loop.run(turn_id=turn_id, message_id=message_id, user_text=text)
 

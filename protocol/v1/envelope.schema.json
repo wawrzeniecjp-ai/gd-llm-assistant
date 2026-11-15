@@ -299,6 +299,16 @@
                     "required": ["direction", "payload", "result"],
                     "additionalProperties": false
                 },
+                "get_level_music": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "const": "s2m" },
+                        "payload": { "const": "editor.schema.json#/$defs/getLevelMusicPayload" },
+                        "result": { "const": "editor.schema.json#/$defs/levelMusicResult" }
+                    },
+                    "required": ["direction", "payload", "result"],
+                    "additionalProperties": false
+                },
                 "get_camera": {
                     "type": "object",
                     "properties": {

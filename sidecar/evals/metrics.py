@@ -14,8 +14,12 @@ from typing import Any
 
 from gd_ai_assistant import tools as tools_module
 from gd_ai_assistant.agent import TurnResult
+from gd_ai_assistant.design.constants import load_constants
+from gd_ai_assistant.design.music import alignment
 from gd_ai_assistant.design.roles import load_role_table
+from gd_ai_assistant.design.sim.cube import CubeParams
 from gd_ai_assistant.design.sim.verify import verify_section
+from gd_ai_assistant.design.timeline import Timeline
 
 from .cases import Case
 from .fake_editor import FakeEditor
@@ -38,7 +42,8 @@ def _verifies(event: ToolEvent) -> bool:
 
 
 def measure(case: Case, editor: FakeEditor, before: dict[int, tuple], results: list[TurnResult],
-            events: list[ToolEvent], elapsed_s: float) -> dict[str, Any]:
+            events: list[ToolEvent], elapsed_s: float,
+            plan: dict[str, Any] | None = None) -> dict[str, Any]:
     roles = load_role_table()
     after = {uid: (o.type_id, o.props["x"], o.props["y"]) for uid, o in editor.objects.items()}
     created = [after[uid] for uid in after.keys() - before.keys()]
@@ -73,17 +78,31 @@ def measure(case: Case, editor: FakeEditor, before: dict[int, tuple], results: l
         "colors_set": sum(1 for e in events
                           if e.name == "set_color_channel" and not e.error),
     }
-    for name in ("verify_section", "simulate_inputs", "place_grid", "render_grid"):
+    metrics["plan_written"] = any(e.name == "update_level_plan" and not e.error
+                                  for e in events)
+    for name in ("verify_section", "simulate_inputs", "place_grid", "render_grid",
+                 "beat_grid", "get_level_plan"):
         metrics[f"used_{name}"] = name in metrics["tools_used"]
 
     if case.section is not None:
-        check = verify_section(editor.level_model(),
-                               {"x_range": list(case.section), "budget_s": 20.0})
+        start_speed = editor.settings.get("start_speed", "1x")
+        model = editor.level_model()
+        check = verify_section(model, {"x_range": list(case.section), "budget_s": 20.0,
+                                       "_level_start_speed": start_speed})
         metrics["playable"] = check.get("result")
         difficulty = check.get("difficulty") or {}
         for key in ("min_window_ms", "inputs_per_second", "frame_perfect"):
             if difficulty.get(key) is not None:
                 metrics[key] = difficulty[key]
+        music_plan = (plan or {}).get("music") or {}
+        presses = [r["x"] for r in check.get("route") or []]
+        if music_plan.get("bpm") and presses:
+            timeline = Timeline.from_model(
+                model, CubeParams.from_constants(load_constants()), start_speed,
+                float(editor.settings.get("song_offset", 0.0)))
+            aligned = alignment(music_plan, timeline, presses)
+            metrics["beat_alignment"] = aligned["fraction"]
+            metrics["beat_offsets_ms"] = aligned["offsets_ms"]
     return metrics
 
 

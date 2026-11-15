@@ -30,6 +30,7 @@ from gd_ai_assistant import catalog
 from gd_ai_assistant.agent import History, ToolLoop, TurnResult
 from gd_ai_assistant.config import SidecarConfig
 from gd_ai_assistant.design.coords import Grid
+from gd_ai_assistant.design.plan import PlanStore, new_plan
 from gd_ai_assistant.design.render import SchematicError, render_schematic
 from gd_ai_assistant.providers import create_provider
 from gd_ai_assistant.providers.base import Provider
@@ -65,17 +66,28 @@ async def run_case(case: Case, provider: Provider, out: Path,
     before = {uid: (o.type_id, o.props["x"], o.props["y"]) for uid, o in editor.objects.items()}
     recorder = RecordingProvider(provider)
     history = History(token_budget=8000)
+    # A case's plan lives in the run's own folder, so runs never share one.
+    store = PlanStore(out / "data")
+    plan = None
+    if case.plan is not None:
+        plan = new_plan(case.id, f"eval {case.id}")
+        for key, value in case.plan.items():
+            plan[key] = {**plan[key], **value} if isinstance(plan.get(key), dict) else value
+        store.save(plan)
     results: list[TurnResult] = []
     began = time.perf_counter()
     for index, prompt in enumerate(case.prompts):
         loop = ToolLoop(link=editor, provider=recorder, catalog=catalog.load_catalog(),
                         history=history, max_tool_rounds=case.max_tool_rounds,
-                        turn_timeout_s=turn_timeout_s, max_retries=2, retry_base_s=2.0)
+                        turn_timeout_s=turn_timeout_s, max_retries=2, retry_base_s=2.0,
+                        plan_store=store, level_key=case.id,
+                        level_name=f"eval {case.id}")
         results.append(await loop.run(turn_id=f"t-{index + 1}", message_id=f"m-{index + 1}",
                                       user_text=prompt))
     elapsed = time.perf_counter() - began
 
-    metrics = measure(case, editor, before, results, recorder.recording.tools, elapsed)
+    metrics = measure(case, editor, before, results, recorder.recording.tools, elapsed,
+                      plan=store.load(case.id))
     verdicts = {}
     for kind, asserts in (("hard", case.hard), ("soft", case.soft)):
         for name, condition in asserts.items():
