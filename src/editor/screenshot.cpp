@@ -186,7 +186,10 @@ geode::Result<Capture> captureEditor(CaptureRequest const& request) {
 
     // The interface goes away for the render; `includeUi` puts it back when a caller
     // genuinely wants to see the editor's own state rather than the level.
-    SceneCleaner clean(request.includeUi);
+    // The constructor takes "hide the UI", the request says "include it": passing the
+    // request's flag unnegated hid the UI only when it was asked for (2026-11-14: the
+    // model said its screenshots were mostly toolbars).
+    SceneCleaner clean(!request.includeUi);
     // 1. The whole view, at window size.
     auto* full = cocos2d::CCRenderTexture::create(
         static_cast<int>(winSize.width), static_cast<int>(winSize.height)

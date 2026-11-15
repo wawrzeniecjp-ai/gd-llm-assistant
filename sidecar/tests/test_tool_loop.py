@@ -427,6 +427,18 @@ async def test_the_round_cap_ends_the_turn_incomplete() -> None:
     assert result.text  # it must say something, not return an empty message
 
 
+async def test_running_out_of_output_tokens_says_so() -> None:
+    """2026-11-14: a thinking model spent its 4096 tokens reasoning and returned nothing;
+    the panel said "Done." as if the turn had finished."""
+    link = FakeLink({"create_objects": {"created": [1, 2], "count": 2}})
+    cut = AssistantTurn(text="", stop_reason="max_tokens", usage=Usage(100, 4096))
+    provider = ScriptedProvider([create_turn(2), cut])
+    result = await make_loop(link, provider).run(turn_id="t-1", message_id="m1", user_text="go")
+
+    assert result.status == INCOMPLETE
+    assert "max_tokens" in result.text and "Edits made before that are kept" in result.text
+
+
 async def test_the_wall_clock_timeout_ends_the_turn_incomplete() -> None:
     link = FakeLink()
     result = await make_loop(link, SleepingProvider(), turn_timeout_s=0.05).run(

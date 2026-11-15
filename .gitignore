@@ -28,3 +28,4 @@ sessions/
 # --- Token file must never be committed (handshake secret) ---
 token
 
+sidecar/logs/

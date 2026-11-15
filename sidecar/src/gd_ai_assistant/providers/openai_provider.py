@@ -154,6 +154,15 @@ class OpenAIProvider(Provider):
         # `tool_calls` is the stop reason that means "keep going". Anything else
         # ends the turn, including `length`, which is worth surfacing because a
         # truncated turn looks like a model that stopped mid-sentence.
+        if not calls and not (message.content or "").strip():
+            # An empty answer ends the turn as a bare "Done." in the panel. Say what
+            # the endpoint did send: some (DeepSeek's thinking models) put their text
+            # in a separate `reasoning_content` field.
+            extra = getattr(message, "model_extra", None) or {}
+            reasoning = extra.get("reasoning_content") or ""
+            log.warning("%s returned no text and no tool calls (finish_reason %s, "
+                        "%d chars of reasoning_content%s)", self._model, choice.finish_reason,
+                        len(reasoning), f": {reasoning[-300:]!r}" if reasoning else "")
         if calls:
             stop = "tool_use"
         elif choice.finish_reason == "length":

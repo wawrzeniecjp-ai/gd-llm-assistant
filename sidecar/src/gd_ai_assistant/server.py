@@ -147,8 +147,10 @@ class SidecarServer:
 
         try:
             await self._serve_client(websocket)
-        except ConnectionClosed:
-            log.info("client disconnected")
+        except ConnectionClosed as exc:
+            # The close code says why: 1007 is a frame that was not valid UTF-8 (the
+            # panel's byte-wise text box can split a character), 1009 one too large.
+            log.info("client disconnected (%s)", exc)
         finally:
             async with self._client_lock:
                 if self._client is websocket:
@@ -198,7 +200,10 @@ class SidecarServer:
             await reader
         finally:
             reader.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            # An abnormal close (a keepalive timeout: GD minimised, its main thread
+            # paused) ends the reader with ConnectionClosedError. Not suppressing it
+            # skipped the cancel below, and the turn ran on without an editor.
+            with contextlib.suppress(asyncio.CancelledError, ConnectionClosed):
                 await reader
             # A turn outlives the read loop by design, so it is not stopped by
             # `reader` finishing. Left running, it would try to send `turn_started`
@@ -559,11 +564,12 @@ class SidecarServer:
             if result.text:
                 # Sent last as well as any interim text, so the panel's final bubble
                 # is the complete answer rather than whatever arrived mid-turn.
-                await self._send_event(
-                    websocket,
-                    "assistant_message",
-                    {"turn_id": turn_id, "message_id": message_id, "text": result.text},
-                )
+                with contextlib.suppress(ConnectionClosed):
+                    await self._send_event(
+                        websocket,
+                        "assistant_message",
+                        {"turn_id": turn_id, "message_id": message_id, "text": result.text},
+                    )
 
             await self._finish_turn(
                 websocket,

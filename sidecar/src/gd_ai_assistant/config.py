@@ -100,7 +100,10 @@ class SidecarConfig(BaseSettings):
     api_key: Annotated[str | None, BlankAsNone] = None
     model: Annotated[str | None, BlankAsNone] = None
     base_url: Annotated[str | None, BlankAsNone] = None
-    max_tokens: int = 4096
+    # Output tokens per model call. Thinking models (DeepSeek, OpenAI o-series) count their
+    # reasoning here too, and a GridText section can take thousands: 4096 cut a 60-column
+    # build off mid-thought (2026-11-14). 16384 is accepted by every supported provider.
+    max_tokens: int = 16384
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
 
     # How long the scripted provider pretends to think before answering. Long

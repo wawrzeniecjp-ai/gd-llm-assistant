@@ -4,18 +4,30 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import logging.handlers
 import sys
+from pathlib import Path
 
 from .config import SidecarConfig
 from .redact import redact
 
+#: The console's lines are also kept here (next to `.env`), so a test run can be read
+#: after the window is closed. Rotated at 5 MB, three files kept.
+LOG_FILE = Path("logs") / "sidecar.log"
+
 
 def _configure_logging(level: str) -> None:
-    logging.basicConfig(
-        level=level.upper(),
-        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-        stream=sys.stderr,
-    )
+    fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
+    try:
+        LOG_FILE.parent.mkdir(exist_ok=True)
+        handlers.append(logging.handlers.RotatingFileHandler(
+            LOG_FILE, maxBytes=5_000_000, backupCount=3, encoding="utf-8"))
+    except OSError as exc:  # a read-only folder must not stop the sidecar
+        print(f"cannot write {LOG_FILE}: {exc}", file=sys.stderr)
+    for handler in handlers:
+        handler.setFormatter(fmt)
+    logging.basicConfig(level=level.upper(), handlers=handlers)
 
 
 def main() -> int:

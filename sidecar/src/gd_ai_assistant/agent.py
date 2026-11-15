@@ -347,6 +347,10 @@ class ToolLoop:
         status = COMPLETED
         for _round in range(self._max_tool_rounds):
             turn = await self._complete(messages)
+            log.info("turn %s round %d: stop %s, %d chars of text, tools %s, tokens %d in / %d out",
+                     self._turn_id, _round + 1, turn.stop_reason, len(turn.text),
+                     [c.name for c in turn.tool_calls] or "none", turn.usage.input_tokens,
+                     turn.usage.output_tokens)
             self._usage = self._usage + Usage(
                 input_tokens=turn.usage.input_tokens,
                 output_tokens=turn.usage.output_tokens,
@@ -366,6 +370,18 @@ class ToolLoop:
                 await self._emit_assistant_text(turn.text)
 
             if not turn.wants_tools:
+                if turn.stop_reason == "max_tokens":
+                    # Cut off mid-answer, or mid-thought before acting: not a finished
+                    # turn, and the user needs to know which setting to raise.
+                    log.warning("turn %s ran out of output tokens", self._turn_id)
+                    status = INCOMPLETE
+                    cut = ("The model ran out of output space before it finished "
+                           "(max_tokens in sidecar/.env). "
+                           + ("Edits made before that are kept; review them. "
+                              if self._actions else "Nothing was changed. ")
+                           + "Raise max_tokens, or ask for a smaller step.")
+                    self._text = f"{self._text}\n\n{cut}" if self._text else cut
+                    await self._emit_assistant_text(self._text)
                 break
 
             messages.append(
@@ -378,6 +394,9 @@ class ToolLoop:
             stop = False
             for call in turn.tool_calls:
                 result, is_error = await self._execute(call)
+                log.info("turn %s tool %s(%s) -> %s", self._turn_id, call.name,
+                         _short(call.arguments), "error: " + _short(result) if is_error
+                         else "ok")
                 messages.append(
                     Message(
                         role="tool",
@@ -1059,6 +1078,12 @@ class ToolLoop:
         if status == INCOMPLETE:
             return "The turn stopped before finishing. Nothing further was changed."
         return "Done."
+
+
+def _short(value: Any, limit: int = 160) -> str:
+    """`value` as one log-friendly line, cut to `limit` characters."""
+    text = json.dumps(value, ensure_ascii=False, default=str)
+    return text if len(text) <= limit else text[:limit] + "..."
 
 
 def _describe(name: str, arguments: dict[str, Any], result: dict[str, Any]) -> ActionRecord:

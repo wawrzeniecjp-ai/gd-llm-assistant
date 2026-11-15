@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <string_view>
+#include <utility>
 
 #include "../editor/camera.hpp"
 #include "../editor/color_channel.hpp"
@@ -338,7 +340,49 @@ void Bridge::enqueueFrame(std::string frame) {
     // kPollInterval): it is also the worst-case send latency.
 }
 
+namespace {
+
+/// `text` with every invalid UTF-8 sequence replaced by U+FFFD.
+///
+/// GD's text input edits byte by byte, so a backspace or cursor move next to a
+/// pasted multi-byte character (a curly apostrophe, 3 bytes) can leave half of it.
+/// A WebSocket text frame must be valid UTF-8, and the sidecar's server drops the
+/// whole connection on one that is not (close code 1007): the message was lost
+/// with no error shown (2026-11-14).
+std::string validUtf8(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    std::size_t i = 0;
+    while (i < text.size()) {
+        auto const c = static_cast<unsigned char>(text[i]);
+        std::size_t len = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3
+                        : (c >> 3) == 0x1E ? 4 : 0;
+        bool ok = len > 0 && i + len <= text.size();
+        for (std::size_t k = 1; ok && k < len; ++k) {
+            ok = (static_cast<unsigned char>(text[i + k]) & 0xC0) == 0x80;
+        }
+        if (ok && len >= 2) {
+            // Reject overlong forms, surrogates and code points past U+10FFFF.
+            auto const c1 = static_cast<unsigned char>(text[i + 1]);
+            ok = !(c < 0xC2 && len == 2)
+                && !(c == 0xE0 && c1 < 0xA0) && !(c == 0xED && c1 >= 0xA0)
+                && !(c == 0xF0 && c1 < 0x90) && !(c == 0xF4 && c1 >= 0x90) && c <= 0xF4;
+        }
+        if (ok) {
+            out.append(text.substr(i, len));
+            i += len;
+        } else {
+            out += "\xEF\xBF\xBD";
+            ++i;
+        }
+    }
+    return out;
+}
+
+} // namespace
+
 void Bridge::sendUserMessage(std::string text) {
+    text = validUtf8(text);
     // Rendered immediately rather than echoed back by the sidecar: the user's
     // own message is not level content, so waiting for a round trip would add
     // latency for nothing and read as the UI being slow.
@@ -553,6 +597,28 @@ arc::Future<> Bridge::run(std::string url) {
                     break;
                 }
                 log::info("sidecar connection lost; reconnecting in {}s", backoffSecs);
+                // A turn cannot survive its connection: the sidecar cancels it, and its
+                // `turn_finished` has nowhere to go. Without this the panel stayed in
+                // its thinking state after reconnecting, and Stop sent cancels for a
+                // turn the sidecar no longer had (2026-11-14, GD minimised mid-turn).
+                std::string lostTurn;
+                {
+                    std::scoped_lock lock(m_turnMutex);
+                    lostTurn = std::exchange(m_activeTurnId, std::string{});
+                }
+                // The sidecar could not send `end_transaction` either. Left open, it
+                // would make every later replay refuse ("a transaction is open").
+                geode::queueInMainThread([] {
+                    editor::TransactionManager::get().abortOpen("sidecar connection lost");
+                });
+                if (!lostTurn.empty()) {
+                    log::warn("turn '{}' lost with the connection", lostTurn);
+                    ui::PanelHost::get().postTurnFinished("incomplete", {}, "");
+                    ui::PanelHost::get().postError(
+                        "The connection to the sidecar dropped mid-turn, so the turn "
+                        "stopped. Edits made before that stay in the level; check them."
+                    );
+                }
                 setConnectionStatus(
                     ui::Status::Reconnecting,
                     fmt::format("Connection lost. Reconnecting in {}s...", backoffSecs)

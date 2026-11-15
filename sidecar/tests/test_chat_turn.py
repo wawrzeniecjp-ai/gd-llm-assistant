@@ -351,6 +351,27 @@ async def test_editor_closed_mid_turn_is_cleaned_up(tmp_path) -> None:
         assert sidecar._turn_task is None  # noqa: SLF001
 
 
+async def test_a_dropped_connection_mid_turn_cancels_the_turn(tmp_path) -> None:
+    """2026-11-14: GD minimised, the keepalive timed out with no close frame, and the
+    turn ran on for minutes against an editor that was gone."""
+    async with (
+        running_sidecar(tmp_path, scripted_turn_delay_ms=5000) as (sidecar, url),
+        connect(url) as websocket,
+    ):
+        await do_handshake(websocket, sidecar.token)
+        await send_user_message(websocket, "slow")
+        started = decode(await asyncio.wait_for(websocket.recv(), timeout=5))
+        assert started["type"] == "turn_started"
+
+        websocket.transport.abort()          # gone, no close frame
+
+        for _ in range(200):
+            if sidecar._turn_task is None:  # noqa: SLF001 - asserting internal cleanup
+                break
+            await asyncio.sleep(0.01)
+        assert sidecar._turn_task is None  # noqa: SLF001
+
+
 # -- awkward input -------------------------------------------------------
 
 
