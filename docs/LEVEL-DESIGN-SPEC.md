@@ -1656,6 +1656,32 @@ portal transition, extending a pattern, recolouring, decorating (once M8 lands),
 - `--provider scripted` runs the harness in CI with recorded transcripts, to test the
   harness itself, not the model.
 
+**As built (M3, 2026-11-15).** Differences from the above:
+
+- Cases are TOML (`evals/cases/<id>.toml`, read with the standard library), not YAML.
+  A case has `prompt` or `prompts` (one per turn), an optional `section = [x0, x1]` that
+  `playable` and the difficulty metrics are measured over, and `assert.hard` /
+  `assert.soft` tables. A plain value must be equal; `{min}`, `{max}` or `{between}` bound
+  a number; `created_roles.<role>` and `tools_used.<tool>` reach into counts. A metric the
+  run could not measure fails as `n/a`. Every case that asserts `playable` also asserts
+  `edited = true`, because an empty level is already playable.
+- Metrics now: status, rounds, tokens, time, tool calls and errors, screenshots, objects
+  created / deleted / moved and created roles, `verified_after_last_edit` (R4: a
+  `verify_section`, `playtest_verify` or `place_grid` with `verify` at or after the last
+  edit), colours set, and from verifying the section: `playable`, `min_window_ms`,
+  `inputs_per_second`, `frame_perfect`. Beat alignment and violations wait for M4 and M7.
+- Fixtures are JSON objects as `{id, x, y, ...named properties}`, written by
+  `scripts/make_eval_fixtures.py`: an empty level, an impossible wall, a repeating
+  pattern, M2 slots 2 and 12 moved to the level start, and the tricky columns.
+- The fake editor answers `capture_screenshot` with a schematic of the camera's view; the
+  tool result says it is a schematic, not the game's graphics.
+- `--replay <folder>` plays recorded turns instead of a model (`evals/recordings/`, also
+  written by `--record-to`); the test suite replays two of them, which is the CI check of
+  the harness. There is no cost guard in dollars, since the harness does not know the
+  provider's prices: `--max-total-tokens` stops starting new runs past a token count.
+- Each run writes `transcript.json` and `section.png`; the report is `report.json`,
+  `report.html` and `summary.md` (scores only, the form `evals/BASELINE.md` takes).
+
 ## 15.6 LLM judge (optional, DEFAULT off)
 
 A case may set `judge: true`. A separate model call scores the final schematic against a

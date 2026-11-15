@@ -716,10 +716,11 @@ def _build() -> dict[str, Tool]:
                 name="get_color_channel",
                 description=(
                     "Read a colour channel from the level's colour page. Every object "
-                    "with the same `color_channel_1` id shows this one colour, so this "
-                    "tells you what colour a group of objects is, and which channel to "
-                    "name when the user asks for a colour change. Returns `exists: "
-                    "false` when nothing uses the id."
+                    "whose `color_channel_1` (base) or `color_channel_2` (detail) is "
+                    "this id shows this one colour, so this tells you what colour a "
+                    "group of objects is, and which channel to name when the user asks "
+                    "for a colour change. `exists: false` means the level has never "
+                    "set the channel: it shows white (255, 255, 255)."
                 ),
                 parameters={
                     "type": "object",

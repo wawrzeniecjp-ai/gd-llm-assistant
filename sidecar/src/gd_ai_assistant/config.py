@@ -105,6 +105,9 @@ class SidecarConfig(BaseSettings):
     # build off mid-thought (2026-11-14). 16384 is accepted by every supported provider.
     max_tokens: int = 16384
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    # Print what a thinking model reasoned (DeepSeek's `reasoning_content`) to the log,
+    # one block per model call, to see what it does between answers.
+    log_reasoning: bool = True
 
     # How long the scripted provider pretends to think before answering. Long
     # enough to see the thinking indicator, short enough not to make the

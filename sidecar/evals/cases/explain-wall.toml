@@ -1,0 +1,11 @@
+id = "explain-wall"
+description = "A question about an impossible part: answer it, change nothing."
+fixture = "wall-1x"
+prompt = "Why can't anyone beat the part around column 30? Don't change anything, just tell me."
+
+[assert.hard]
+status = "completed"
+edited = false
+
+[assert.soft]
+used_verify_section = true

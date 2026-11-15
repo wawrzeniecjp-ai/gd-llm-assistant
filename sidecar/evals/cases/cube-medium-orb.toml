@@ -1,0 +1,19 @@
+id = "cube-medium-orb"
+description = "A medium section that needs one yellow orb (the first live test's request)."
+fixture = "empty"
+prompt = """
+Build a 1x cube section from column 10 to column 60 with a few jumps, one yellow orb and a
+short stair. Make it medium difficulty and check it is playable.
+"""
+section = [0, 1950]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+"created_roles.orb" = { between = [1, 1] }
+min_window_ms = { between = [25, 100] }
+frame_perfect = 0

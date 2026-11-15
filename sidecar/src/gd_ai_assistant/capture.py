@@ -79,6 +79,11 @@ def describe_capture(result: dict) -> dict:
         "targets": targets,
         "region": region,
     }
+    if Path(str(result.get("path") or "")).name.startswith("schematic-"):
+        # The evaluation harness's fake editor draws a schematic instead of the game's
+        # graphics (LEVEL-DESIGN-SPEC.md 15.2); a model must not judge looks from it.
+        description["kind"] = ("a schematic: coloured boxes by role, not the game's "
+                               "graphics; judge layout from it, not looks")
     if targets:
         description["region_note"] = (
             f"cropped around {targets} selected object(s), padded; this is a detail view"

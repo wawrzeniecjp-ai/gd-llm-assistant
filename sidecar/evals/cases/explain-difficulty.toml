@@ -1,0 +1,11 @@
+id = "explain-difficulty"
+description = "How hard is a possible section: read-only, and it should measure."
+fixture = "slot2"
+prompt = "How hard is the section from column 0 to column 95? What is the tightest timing?"
+
+[assert.hard]
+status = "completed"
+edited = false
+
+[assert.soft]
+used_verify_section = true

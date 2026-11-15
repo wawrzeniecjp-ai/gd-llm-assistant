@@ -1,0 +1,20 @@
+id = "cube-hard-2x"
+description = "A hard 2x section: hard, but no frame-perfect jumps."
+fixture = "empty"
+prompt = """
+Build a hard 2x cube section from column 10 to column 80, with a speed portal at column 8
+that sets 2x. Hard but fair: no frame-perfect jumps. Check it.
+"""
+section = [0, 2550]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+"created_roles.portal_speed" = { min = 1 }
+frame_perfect = 0
+# Hard: the tightest press under 60 ms (the 2026-11-15 run made 104 ms, an easy section).
+min_window_ms = { between = [12, 60] }

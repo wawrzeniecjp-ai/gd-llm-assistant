@@ -1,0 +1,4 @@
+{"turns": [
+ {"text": "", "tool_calls": [{"id": "r1", "name": "verify_section", "arguments": {"x_range": [0, 1500]}}], "stop_reason": "tool_use", "usage": {"input_tokens": 100, "output_tokens": 10}},
+ {"text": "The wall at column 30 is five blocks high: no jump reaches over it, so every run dies there.", "tool_calls": [], "stop_reason": "end_turn", "usage": {"input_tokens": 130, "output_tokens": 25}}
+]}

@@ -1,0 +1,15 @@
+id = "fix-slot12"
+description = "M2 slot 12, a 3-block step: find why it is impossible and fix it."
+fixture = "slot12"
+prompt = "This section can't be beaten. Find out why and fix it, changing as little as possible."
+section = [0, 2850]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+objects_deleted = { max = 6 }
+objects_created = { max = 6 }

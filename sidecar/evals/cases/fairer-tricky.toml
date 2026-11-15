@@ -1,0 +1,17 @@
+id = "fairer-tricky"
+description = "The hand-built tricky columns need one-tick presses; make them fair."
+fixture = "tricky-columns"
+prompt = "This part needs frame-perfect jumps. Make it fair, but keep its idea."
+section = [0, 420]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+frame_perfect = 0
+min_window_ms = { min = 20 }
+# Keep its idea: 13 objects, so a fix should not delete most of them (2026-11-15: 8).
+objects_deleted = { max = 4 }

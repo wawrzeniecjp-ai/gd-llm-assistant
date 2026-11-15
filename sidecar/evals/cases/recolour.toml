@@ -1,0 +1,11 @@
+id = "recolour"
+description = "Change colours only; no object should move."
+fixture = "slot2"
+prompt = "Make the background dark blue and the ground dark purple."
+
+[assert.hard]
+status = "completed"
+edited = false
+
+[assert.soft]
+colors_set = { min = 2 }

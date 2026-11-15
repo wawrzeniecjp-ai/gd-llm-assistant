@@ -1,0 +1,16 @@
+id = "extend-pattern"
+description = "Continue a repeating pattern in the same rhythm."
+fixture = "pattern-1x"
+prompt = "Continue the pattern from column 70 to column 130, same rhythm. Keep it playable."
+section = [0, 4050]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+objects_created = { between = [10, 40] }
+objects_deleted = 0
+min_window_ms = { min = 40 }

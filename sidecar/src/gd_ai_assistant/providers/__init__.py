@@ -77,6 +77,7 @@ def create_provider(config: SidecarConfig) -> Provider:
             base_url=config.base_url,
             max_tokens=config.max_tokens,
             temperature=config.temperature,
+            log_reasoning=config.log_reasoning,
         )
 
     raise ProviderUnavailable(

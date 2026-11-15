@@ -12,9 +12,8 @@ struct ColorChannel {
     int red = 0;
     int green = 0;
     int blue = 0;
-    /// True when the channel exists. A channel that has never been used has no
-    /// `ColorAction`, which is why reading one back needs this flag rather than
-    /// reporting black.
+    /// True when the level stores a colour for the channel. A custom channel it does not
+    /// (one never set) is reported as white with this false: the game draws it white.
     bool exists = false;
 };
 

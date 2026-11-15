@@ -92,6 +92,7 @@ class OpenAIProvider(Provider):
         base_url: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.2,
+        log_reasoning: bool = False,
     ) -> None:
         import openai
 
@@ -105,6 +106,7 @@ class OpenAIProvider(Provider):
         self._model = model or "gpt-4o-mini"
         self._max_tokens = max_tokens
         self._temperature = temperature
+        self._log_reasoning = log_reasoning
         self.name = "openai_compatible" if base_url else "openai"
 
     async def complete(
@@ -154,12 +156,15 @@ class OpenAIProvider(Provider):
         # `tool_calls` is the stop reason that means "keep going". Anything else
         # ends the turn, including `length`, which is worth surfacing because a
         # truncated turn looks like a model that stopped mid-sentence.
+        # Thinking models (DeepSeek) return their reasoning beside the answer, in a field
+        # the SDK does not model; it is never sent back or shown in the panel.
+        extra = getattr(message, "model_extra", None) or {}
+        reasoning = extra.get("reasoning_content") or ""
+        if reasoning and self._log_reasoning:
+            log.info("reasoning (%d chars):\n%s", len(reasoning), _indent(reasoning))
         if not calls and not (message.content or "").strip():
             # An empty answer ends the turn as a bare "Done." in the panel. Say what
-            # the endpoint did send: some (DeepSeek's thinking models) put their text
-            # in a separate `reasoning_content` field.
-            extra = getattr(message, "model_extra", None) or {}
-            reasoning = extra.get("reasoning_content") or ""
+            # the endpoint did send, in case it put its text in the reasoning.
             log.warning("%s returned no text and no tool calls (finish_reason %s, "
                         "%d chars of reasoning_content%s)", self._model, choice.finish_reason,
                         len(reasoning), f": {reasoning[-300:]!r}" if reasoning else "")
@@ -181,6 +186,11 @@ class OpenAIProvider(Provider):
             stop_reason=stop,  # type: ignore[arg-type]
             usage=usage,
         )
+
+
+def _indent(text: str) -> str:
+    """`text` indented under its log line, so a block of reasoning reads as one entry."""
+    return "\n".join("    | " + line for line in text.strip().splitlines())
 
 
 def _parse_arguments(raw: str | None, tool_name: str) -> dict[str, Any]:

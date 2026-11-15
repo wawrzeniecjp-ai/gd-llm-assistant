@@ -1,0 +1,19 @@
+id = "cube-easy-empty"
+description = "Build a short easy section in an empty level, and check it."
+fixture = "empty"
+prompt = """
+Build an easy 1x cube section from column 10 to column 50: a few spikes and blocks,
+nothing tight. Check that it can be played.
+"""
+section = [0, 1650]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+objects_created = { between = [8, 200] }
+min_window_ms = { min = 40 }
+frame_perfect = 0

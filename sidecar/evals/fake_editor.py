@@ -13,8 +13,8 @@ reason; here either mistake fails loudly with the schema error.
 Requests without a registered schema (`list_object_types`) are answered in the shape
 the mod's job produces (`src/exec/editor_jobs.cpp`).
 
-What it does **not** model: the game's rendering (`capture_screenshot` is unsupported
-until the schematic renderer exists, M1), physics, and anything the role table does
+What it does **not** model: the game's rendering (`capture_screenshot` answers with a
+schematic of the camera's view, and says so), physics, and anything the role table does
 not know.
 """
 
@@ -146,6 +146,7 @@ class FakeEditor:
         self._txn_counter = itertools.count(1)
         self._last_txn: _Transaction | None = None
         self._validators: dict[str, Draft202012Validator] = {}
+        self._captures = itertools.count(1)
 
     # -- EditorLink -----------------------------------------------------------
 
@@ -455,6 +456,52 @@ class FakeEditor:
 
     def _handle_get_camera(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {"camera": self._camera()}
+
+    def level_model(self) -> Any:
+        """The level as the design tools would read it."""
+        from gd_ai_assistant.design.level_model import LevelModel, LevelObject
+        from gd_ai_assistant.design.roles import load_role_table
+
+        roles = load_role_table()
+        records = self._handle_get_level_objects({"limit": 10**9})["objects"]
+        return LevelModel([LevelObject.from_record(r, roles) for r in records],
+                          revision=self.revision)
+
+    def _handle_capture_screenshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """A schematic of what the camera shows (LEVEL-DESIGN-SPEC.md 15.2), written to a
+        PNG like the mod's capture. The path's name says it is a schematic; the agent's
+        description of the capture passes the name on."""
+        import tempfile
+        from pathlib import Path
+
+        from gd_ai_assistant.design.coords import Grid
+        from gd_ai_assistant.design.render import SchematicError, render_schematic
+
+        view = self._camera()["visible"]
+        if payload.get("region") == "selection":
+            chosen = [self.objects[uid] for uid in self.selection if uid in self.objects]
+            if not chosen:
+                raise _Refused("INVALID_REQUEST", "the selection holds no usable objects")
+            pad = float(payload.get("radius", 60.0))
+            xs = [o.props["x"] for o in chosen]
+            ys = [o.props["y"] for o in chosen]
+            view = {"x1": min(xs) - pad, "x2": max(xs) + pad,
+                    "y1": min(ys) - pad, "y2": max(ys) + pad}
+        try:
+            schematic = render_schematic(
+                self.level_model(), Grid.from_constants(),
+                {"x_range": [view["x1"], view["x2"]],
+                 "y_range": [max(view["y1"], 0.0), max(view["y2"], 90.0)],
+                 "layers": ["gameplay", "deco"], "px_per_cell": 24})
+        except SchematicError as exc:
+            raise _Refused("INVALID_REQUEST", f"cannot draw this view: {exc}") from exc
+        folder = Path(tempfile.gettempdir()) / "gd-ai-fake-captures"
+        folder.mkdir(exist_ok=True)
+        path = folder / f"schematic-{next(self._captures)}.png"
+        path.write_bytes(schematic.png)
+        targets = len(self.selection) if payload.get("region") == "selection" else 0
+        return {"path": str(path), "width": schematic.width, "height": schematic.height,
+                "targets": targets, "viewport": view}
 
     # -- writes -----------------------------------------------------------------------
 

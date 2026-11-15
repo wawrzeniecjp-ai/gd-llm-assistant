@@ -82,32 +82,6 @@ std::string savedEntryFor(int channelId) {
     );
 }
 
-} // namespace
-
-ColorChannel readColorChannel(int channelId) {
-    auto* manager = effectManager();
-    if (manager == nullptr) {
-        return ColorChannel { .id = channelId };
-    }
-    auto* action = manager->getColorAction(channelId);
-    auto const channel = describe(action, channelId);
-    // Temporary: pointer identity is the question being answered. If the pointer
-    // changes between a write and the next read, the manager is recreating actions and
-    // writing into one of them is pointless; if it is stable, the fields are the
-    // problem instead.
-    log::info(
-        "colour read {}: action={} from=({},{},{}) color=({},{},{}) exists={}",
-        channelId, static_cast<void*>(action),
-        action ? action->m_fromColor.r : -1, action ? action->m_fromColor.g : -1,
-        action ? action->m_fromColor.b : -1,
-        action ? action->m_color.r : -1, action ? action->m_color.g : -1,
-        action ? action->m_color.b : -1, channel.exists
-    );
-    return channel;
-}
-
-namespace {
-
 /// Reads a `k_v` value out of one `kS38` entry, or -1 when absent.
 ///
 /// The entry format is the level's own, measured from
@@ -117,53 +91,71 @@ namespace {
 ///
 /// So key 1 is red, 2 green, 3 blue and **6 is the channel id**. System channels are
 /// not a separate namespace: BG is 1000, ground 1001, ground line 1002, middleground
-/// 1004+, alongside the custom channels 1..999.
+/// 1013+, alongside the custom channels 1..999. Walked as pairs: a substring search
+/// for `3_` would also match a *value* 3 followed by the next key.
 int valueForKey(std::string_view entry, int key) {
-    auto const prefix = fmt::format("{}_{{", key);
-    auto at = entry.find(prefix);
-    // Anchored at either the start or just after a separator, so searching for
-    // key `6` cannot match the tail of `16`.
-    while (at != std::string_view::npos) {
-        if (at == 0 || entry[at - 1] == '_') {
-            break;
+    std::size_t at = 0;
+    bool isKey = true;
+    int current = -1;
+    while (at <= entry.size()) {
+        auto const end = std::min(entry.find('_', at), entry.size());
+        auto const token = entry.substr(at, end - at);
+        auto parsed = 0;
+        auto const [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), parsed);
+        bool const number = ec == std::errc() && ptr == token.data() + token.size()
+            && !token.empty();
+        if (isKey) {
+            current = number ? parsed : -1;
+        } else if (current == key) {
+            return number ? parsed : -1;
         }
-        at = entry.find(prefix, at + 1);
+        isKey = !isKey;
+        at = end + 1;
     }
-    if (at == std::string_view::npos) {
-        return -1;
-    }
-    auto const digitsAt = at + prefix.size();
-    auto const endAt = entry.find('_', digitsAt);
-    auto const digits = entry.substr(
-        digitsAt,
-        endAt == std::string_view::npos ? std::string_view::npos : endAt - digitsAt
-    );
-    auto parsed = 0;
-    auto const [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), parsed);
-    if (ec != std::errc() || ptr != digits.data() + digits.size()) {
-        return -1;
-    }
-    return parsed;
+    return -1;
 }
 
-/// Replaces a `k_v` value inside one entry, appending the pair when absent.
-std::string withValue(std::string const& entry, int key, int value) {
-    auto const prefix = fmt::format("{}_{{", key);
-    auto at = entry.find(prefix);
-    while (at != std::string::npos && at != 0 && entry[at - 1] != '_') {
-        at = entry.find(prefix, at + 1);
+} // namespace
+
+ColorChannel readColorChannel(int channelId) {
+    ColorChannel channel { .id = channelId };
+
+    // The level's stored entry is the truth. The live `ColorAction` is not, for two
+    // measured reasons (2026-11-15): `getColorAction` hands back pooled actions, so a
+    // channel the level never defined (999) came back with another channel's leftover
+    // colour (900's navy) while the game drew it white; and right after a write the
+    // live colour still showed the old value for a frame.
+    auto const entry = savedEntryFor(channelId);
+    if (!entry.empty()) {
+        auto const red = valueForKey(entry, 1);
+        auto const green = valueForKey(entry, 2);
+        auto const blue = valueForKey(entry, 3);
+        if (red >= 0 && green >= 0 && blue >= 0) {
+            channel.exists = true;
+            channel.red = red;
+            channel.green = green;
+            channel.blue = blue;
+            return channel;
+        }
     }
-    auto const replacement = fmt::format("{}_{}_", key, value);
-    if (at == std::string::npos) {
-        // Appended rather than ignored: the game's parser tolerates unknown keys and
-        // our absence of one must not silently drop the edit.
-        return entry + replacement;
+
+    if (channelId < 1000) {
+        // A custom channel with no entry has never been set: the game draws it white.
+        channel.red = channel.green = channel.blue = 255;
+        return channel;
     }
-    auto const digitsAt = at + prefix.size();
-    auto const endAt = entry.find('_', digitsAt);
-    auto const after = endAt == std::string::npos ? std::string() : entry.substr(endAt + 1);
-    return entry.substr(0, at) + replacement + after;
+
+    // A system channel the level does not store (object, 3D line, black, white,
+    // lighter...): the live action is the only source, and these are not pooled
+    // leftovers but channels the game keeps itself.
+    auto* manager = effectManager();
+    if (manager == nullptr) {
+        return channel;
+    }
+    return describe(manager->getColorAction(channelId), channelId);
 }
+
+namespace {
 
 } // namespace
 
@@ -282,7 +274,9 @@ geode::Result<ColorChannel> writeColorChannel(int channelId, int red, int green,
         );
     }
 
-    auto const written = describe(manager->getColorAction(channelId), channelId);
+    // Read back from the store, which the write just changed; the live action still
+    // shows the old colour until the next frame.
+    auto const written = readColorChannel(channelId);
     log::info(
         "colour channel {} set to ({}, {}, {}); reads back as ({}, {}, {})",
         channelId, clampedByte(red), clampedByte(green), clampedByte(blue),

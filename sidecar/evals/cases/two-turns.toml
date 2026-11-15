@@ -1,0 +1,18 @@
+id = "two-turns"
+description = "Build, then change it in a second message."
+fixture = "empty"
+prompts = [
+  "Build an easy 1x cube section from column 10 to column 40 and check it.",
+  "Now make the second half harder, but keep it playable.",
+]
+section = [0, 1500]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+min_window_ms = { min = 20 }
+frame_perfect = 0
