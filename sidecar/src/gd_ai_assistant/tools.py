@@ -926,8 +926,13 @@ def _design_tools() -> list[Tool]:
                     "Results: possible (with route, windows, difficulty and the exit "
                     "state), impossible (how far the furthest attempt got and what killed "
                     "it), inconclusive (search cut short; not a no), unverifiable (the "
-                    "stretch contains something not simulated yet: only the cube, solids, "
-                    "hazards, yellow/pink orbs and pads, and speed portals are). "
+                    "stretch contains something not simulated yet; `reason` says what. The "
+                    "cube with solids, hazards, yellow/pink/blue orbs and pads and speed, "
+                    "gravity, size and mode portals is simulated; so are ship, ball, ufo "
+                    "and wave, mini or not, with blocks, spikes, orbs and pads; not yet a "
+                    "mini cube's orbs, a mini cube squeezed under a low block, or robot, "
+                    "spider and swing). A ship or wave route has holds: "
+                    "`action` hold, `release_tick`, `release_window_ms`. "
                     "`deaths_without_input` says where a run with no presses dies: the "
                     "first obstacle. A window of one tick (~4 ms) is frame-perfect: too "
                     "hard for any normal level."
@@ -1116,8 +1121,10 @@ def _design_tools() -> list[Tool]:
                                 "grid", "route", "windows", "beats", "sections", "camera"]},
                             "description": "Default: grid. `route` draws the simulated "
                             "path from the level start with presses as dots; `windows` "
-                            "shows each press's timing window as a green bar. beats, "
-                            "sections and camera arrive later.",
+                            "shows each press's timing window as a green bar; `beats` "
+                            "draws the plan's bars (thick), beats (thin) and half-beats "
+                            "(ticks) in purple; `sections` labels the plan's sections "
+                            "along the top. camera arrives later.",
                         },
                         "px_per_cell": {"type": "integer", "minimum": 4, "maximum": 40,
                                         "default": 12},

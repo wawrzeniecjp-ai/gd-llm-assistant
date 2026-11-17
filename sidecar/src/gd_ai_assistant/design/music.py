@@ -12,9 +12,11 @@ from bisect import bisect_left
 from dataclasses import dataclass
 from typing import Any
 
-from .timeline import Timeline
+from .timeline import TICKS_PER_SECOND, Timeline
 
-#: A route press further than this from the nearest subdivision is off the beat (14.2).
+TICK_MS = 1000.0 / TICKS_PER_SECOND
+#: A press window whose centre is further than this from the nearest subdivision is
+#: off the beat (14.2).
 BEAT_TOLERANCE_MS = 35.0
 #: Beats listed at most in one `beat_grid` answer.
 MAX_BEATS = 400
@@ -115,12 +117,46 @@ def nearest_offset_ms(music: dict[str, Any], song_ms: float, subdivision: int = 
     return song_ms - best
 
 
-def alignment(music: dict[str, Any], timeline: Timeline, press_xs: list[float],
+def window_offset_ms(music: dict[str, Any], lo_ms: float, hi_ms: float,
+                     subdivision: int = 2) -> tuple[float, bool]:
+    """For a press window [lo_ms, hi_ms] (song time): the signed distance (ms) from the
+    window's centre to the nearest beat subdivision (positive: the window is late, so the
+    obstacle wants to move left), and whether that beat is inside the window at all."""
+    lo_ms, hi_ms = min(lo_ms, hi_ms), max(lo_ms, hi_ms)
+    centre = (lo_ms + hi_ms) / 2
+    off = nearest_offset_ms(music, centre, subdivision)
+    if not math.isfinite(off):
+        return off, False
+    return off, lo_ms - 1e-6 <= centre - off <= hi_ms + 1e-6
+
+
+def press_windows_ms(timeline: Timeline, route: list[dict[str, Any]]
+                     ) -> list[tuple[float, float]]:
+    """Each route press's timing window in song ms, from `verify_section`'s route items
+    (`tick`, `x` at that tick, `window_ticks`)."""
+    out = []
+    for item in route:
+        base = timeline.song_ms_at(float(item["x"]))
+        lo, hi = item.get("window_ticks") or (item["tick"], item["tick"])
+        out.append((base + (lo - item["tick"]) * TICK_MS, base + (hi - item["tick"]) * TICK_MS))
+    return out
+
+
+def alignment(music: dict[str, Any], windows: list[tuple[float, float]],
               subdivision: int = 2,
               tolerance_ms: float = BEAT_TOLERANCE_MS) -> dict[str, Any]:
-    """How many presses fall on the beat: the `beat_alignment` metric (14.2)."""
-    offsets = [nearest_offset_ms(music, timeline.song_ms_at(x), subdivision) for x in press_xs]
-    on = [o for o in offsets if abs(o) <= tolerance_ms]
+    """How many jumps can be pressed on the beat: the `beat_alignment` metric (14.2).
+
+    A jump counts when a beat subdivision is inside its press window (song ms, from
+    `press_windows_ms`) and within `tolerance_ms` of the window's centre: pressing on
+    the beat then clears it with room to spare either side. The window, not the solver's
+    one press: the solver presses at an edge. Not the whole window either: easy cube
+    windows are ~100 ms, so "a beat anywhere in the window" passes three in four spikes
+    placed at random at 120 bpm; the centre rule passes about one in four.
+    """
+    measured = [window_offset_ms(music, lo, hi, subdivision) for lo, hi in windows]
+    offsets = [off for off, _ in measured]
+    on = [off for off, inside in measured if inside and abs(off) <= tolerance_ms]
     return {"presses": len(offsets), "on_beat": len(on),
             "fraction": round(len(on) / len(offsets), 3) if offsets else None,
             "offsets_ms": [round(o, 1) for o in offsets], "tolerance_ms": tolerance_ms,

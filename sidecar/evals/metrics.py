@@ -15,7 +15,7 @@ from typing import Any
 from gd_ai_assistant import tools as tools_module
 from gd_ai_assistant.agent import TurnResult
 from gd_ai_assistant.design.constants import load_constants
-from gd_ai_assistant.design.music import alignment
+from gd_ai_assistant.design.music import alignment, press_windows_ms
 from gd_ai_assistant.design.roles import load_role_table
 from gd_ai_assistant.design.sim.cube import CubeParams
 from gd_ai_assistant.design.sim.verify import verify_section
@@ -95,12 +95,12 @@ def measure(case: Case, editor: FakeEditor, before: dict[int, tuple], results: l
             if difficulty.get(key) is not None:
                 metrics[key] = difficulty[key]
         music_plan = (plan or {}).get("music") or {}
-        presses = [r["x"] for r in check.get("route") or []]
-        if music_plan.get("bpm") and presses:
+        route = check.get("route") or []
+        if music_plan.get("bpm") and route:
             timeline = Timeline.from_model(
                 model, CubeParams.from_constants(load_constants()), start_speed,
                 float(editor.settings.get("song_offset", 0.0)))
-            aligned = alignment(music_plan, timeline, presses)
+            aligned = alignment(music_plan, press_windows_ms(timeline, route))
             metrics["beat_alignment"] = aligned["fraction"]
             metrics["beat_offsets_ms"] = aligned["offsets_ms"]
     return metrics

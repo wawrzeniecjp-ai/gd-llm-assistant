@@ -244,9 +244,16 @@ too). The rules:
 not verify, say so.
 - `impossible`: fix it (`furthest_x` and `frontier_causes` say where and what), or tell \
 the user plainly that it cannot be beaten.
-- `unverifiable`: the stretch holds something not simulated yet (only the cube, solids, \
-hazards, yellow/pink orbs and pads, and speed portals are). Say it could not be checked \
-and why; do not guess.
+- `unverifiable`: the stretch holds something not simulated yet. The cube (upright, \
+upside down, mini on flat ground and pads) with solids, hazards, yellow/pink/blue orbs \
+and pads, and speed, gravity, size and mode portals is. Ship, ball, ufo and wave are \
+too, mini or not, with blocks, spikes, orbs and pads, in any band and back to the \
+cube; not yet: a mini cube's orbs, a grounded mini cube squeezed under a low block, a \
+ship, ufo or ball meeting a block from below 4-6 deep (mini) or 6.7-10 deep, and robot, \
+spider and swing. The reason says which. The wave dies on any block it touches: it \
+never slides on one. A ship or wave route lists holds (`action` "hold", with `release_tick` and \
+a window for the release too); a dense flying stretch may come back `inconclusive`. \
+For `unverifiable`, say it could not be checked and why; do not guess.
 - `inconclusive` is not a no: the search was cut short.
 - **Timing windows are difficulty.** One tick (~4 ms) is frame-perfect: a flaw unless the \
 user asked for an extreme level. Under ~25 ms is hard; 50 ms and up is comfortable.

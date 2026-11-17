@@ -188,22 +188,36 @@ def outcome_of(result: dict[str, Any], *, landed_y: float | None = None) -> str:
     return "clear"
 
 
-def compact_trace(trace: Trace, every: int = 4) -> Trace:
+#: Player-state columns beyond the cube's, kept by `compact_trace(moded=True)`.
+MODE_COLUMNS = ("mode", "gravity", "mini")
+
+
+def compact_trace(trace: Trace, every: int = 4, *, moded: bool = False) -> Trace:
     """Every `every`-th sample plus every tick where grounded or vy changes sharply: the
-    golden form (LEVEL-DESIGN-SPEC.md 6.7, 7.5). Rounded to keep fixtures small."""
+    golden form (LEVEL-DESIGN-SPEC.md 6.7, 7.5). Rounded to keep fixtures small.
+
+    `moded` (Sim-2 probes) also keeps `mode`, `gravity` and `mini`, and every tick where
+    one of them changes."""
     rows = _rows(trace)
+    extra = [k for k in MODE_COLUMNS if moded and k in trace]
+    for row, values in zip(rows, zip(*(trace[k] for k in extra), strict=True)
+                           if extra else ((),) * len(rows), strict=True):
+        row.update(zip(extra, values, strict=True))
     keep: list[dict[str, Any]] = []
     for i, row in enumerate(rows):
         prev = rows[i - 1] if i else None
         event = prev is not None and (row["grounded"] != prev["grounded"]
-                                      or abs(row["vy"] - prev["vy"]) > IMPULSE_THRESHOLD)
+                                      or abs(row["vy"] - prev["vy"]) > IMPULSE_THRESHOLD
+                                      or any(row[k] != prev[k] for k in extra))
         if i % every == 0 or event or i == len(rows) - 1:
             keep.append(row)
-    out: Trace = {k: [] for k in ("tick", "x", "y", "vy", "grounded")}
+    out: Trace = {k: [] for k in ("tick", "x", "y", "vy", "grounded", *extra)}
     for row in keep:
         out["tick"].append(row["tick"])
         out["x"].append(round(row["x"], 3))
         out["y"].append(round(row["y"], 3))
         out["vy"].append(round(row["vy"], 4))
         out["grounded"].append(int(row["grounded"]))
+        for k in extra:
+            out[k].append(row[k])
     return out

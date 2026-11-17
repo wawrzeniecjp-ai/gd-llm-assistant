@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 
 import pytest
 
@@ -11,7 +12,7 @@ from evals.fake_editor import FakeEditor
 from gd_ai_assistant.design import music, plan
 from gd_ai_assistant.design.constants import load_constants
 from gd_ai_assistant.design.roles import load_role_table
-from gd_ai_assistant.design.sim.cube import CubeParams, simulate
+from gd_ai_assistant.design.sim.cube import HALF, CubeParams, simulate
 from gd_ai_assistant.design.sim.world import world_from_objects
 from gd_ai_assistant.design.timeline import Timeline
 
@@ -49,6 +50,24 @@ def test_timeline_matches_the_simulator_within_a_tick_at_five_portals() -> None:
         assert abs(tick - predicted) <= 1, (x_probe, tick, predicted)
 
 
+def test_timeline_matches_the_game_at_five_portals() -> None:
+    """Calibration P14: the game's own run over the five-portal course (fixture
+    cal_timeline, 2026-11-15). Every traced tick is within a tenth of a tick of the
+    timeline's x for that time."""
+    path = Path(__file__).parent / "fixtures" / "replays" / "cal_timeline.json"
+    run = json.loads(path.read_text(encoding="utf-8"))["runs"][0]
+    world = world_from_objects(run["objects"], ROLES)
+    timeline = Timeline.build([(b.box.x1 - HALF, b.variant, b.uid) for b in world.bodies],
+                              PARAMS)
+    assert [s.speed for s in timeline.segments] == ["1x", "2x", "0.5x", "3x", "4x", "1x"]
+    for tick, x in zip(run["trace"]["tick"], run["trace"]["x"], strict=True):
+        if tick == 0:
+            continue
+        # Sample 1 is the start's command phase, so tick t has moved t - 1 times.
+        predicted = timeline.x_at((tick - 1) * 1000 / 240)
+        assert abs(x - predicted) <= 0.1 * PARAMS.dx[timeline.speed_at(x)], (tick, x)
+
+
 def test_x_and_ms_are_inverse_and_follow_the_song_offset() -> None:
     _, model = _course_model()
     timeline = Timeline.from_model(model, PARAMS, start_speed="2x", song_offset_s=1.5)
@@ -76,13 +95,23 @@ def test_tempo_changes_restart_the_spacing_from_their_time() -> None:
     assert times == [0, 1000, 2000, 2500, 3000, 3500]
 
 
-def test_alignment_counts_presses_near_a_subdivision() -> None:
-    timeline = Timeline.build([], PARAMS)
+def test_alignment_wants_the_beat_near_the_middle_of_the_press_window() -> None:
     tune = {"bpm": 120.0, "offset_ms": 0.0}
-    on = timeline.x_at(500 + 10)          # 10 ms late
-    off = timeline.x_at(625)              # halfway between half-beats
-    result = music.alignment(tune, timeline, [on, off], subdivision=2)
-    assert result["on_beat"] == 1 and result["fraction"] == 0.5
+    windows = [(450.0, 560.0),            # centre 505: the beat at 500 is 5 ms early
+               (440.0, 520.0),            # centre 480: 20 ms before the beat at 500
+               (495.0, 600.0),            # centre 547.5: the beat is inside, but at the edge
+               (510.0, 530.0)]            # narrow, centre 520: the beat is outside it
+    result = music.alignment(tune, windows, subdivision=2)
+    assert result["offsets_ms"] == [5.0, -20.0, 47.5, 20.0]
+    assert result["on_beat"] == 2
+
+
+def test_press_windows_come_from_the_route_ticks() -> None:
+    timeline = Timeline.build([], PARAMS)
+    x = timeline.x_at(1000)
+    [(lo, hi)] = music.press_windows_ms(timeline, [{"tick": 241, "x": x,
+                                                    "window_ticks": [229, 241]}])
+    assert lo == pytest.approx(950) and hi == pytest.approx(1000)
 
 
 def test_no_bpm_is_an_error_that_says_to_ask() -> None:

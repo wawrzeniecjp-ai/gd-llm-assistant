@@ -110,7 +110,7 @@ def run_inputs(world: World, params: CubeParams, args: dict[str, Any]) -> dict[s
         if actions:
             events.append({"tick": t - 1, "event": "+".join(actions), "x": round(cube.x, 2)})
         if death is not None:
-            outcome = "death"
+            outcome = "unverifiable" if death.cause == "unverifiable" else "death"
             break
         if before[0] and not cube.grounded:
             events.append({"tick": t, "event": "takeoff", "x": round(cube.x, 2),
@@ -118,7 +118,7 @@ def run_inputs(world: World, params: CubeParams, args: dict[str, Any]) -> dict[s
         elif not before[0] and cube.grounded:
             events.append({"tick": t, "event": "landing", "x": round(cube.x, 2),
                            "y": round(cube.y, 2)})
-        elif not cube.grounded and cube.vy > before[1] + 1.0:
+        elif not cube.grounded and abs(cube.vy - before[1]) > 1.0 and cube.mode == "cube":
             events.append({"tick": t, "event": "impulse", "x": round(cube.x, 2),
                            "vy": round(cube.vy, 3)})
         if cube.speed != before[2]:
@@ -141,9 +141,12 @@ def run_inputs(world: World, params: CubeParams, args: dict[str, Any]) -> dict[s
     result: dict[str, Any] = {**base, "outcome": outcome, "ticks": t,
                               "final": {"x": round(cube.x, 2), "y": round(cube.y, 2),
                                         "vy": round(cube.vy, 3), "speed": cube.speed,
-                                        "grounded": cube.grounded},
+                                        "grounded": cube.grounded, "mode": cube.mode,
+                                        "gravity": cube.gravity, "mini": cube.mini},
                               "events": events, "trace": trace, "sample_every": stride}
-    if death is not None:
+    if death is not None and death.cause == "unverifiable":
+        result["unverifiable"] = [{"reason": death.reason, "x": round(death.x, 2)}]
+    elif death is not None:
         result["death"] = {"tick": death.tick, "x": round(death.x, 2), "y": round(death.y, 2),
                            "cause_uid": death.cause_uid, "cause": death.cause}
     if resolved:

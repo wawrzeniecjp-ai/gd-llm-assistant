@@ -32,7 +32,15 @@ from ..constants import PhysicsConstants, load_constants
 from ..level_model import LevelModel
 from ..roles import Role
 from .cube import HALF, Cube, CubeParams, UncalibratedError, simulate
-from .solver import WINDOW_REACH, centre_route, solve, windows
+from .solver import (
+    WINDOW_REACH,
+    centre_inputs,
+    input_events,
+    move_input,
+    release_windows,
+    solve,
+    windows,
+)
 from .world import World, world_from_model
 
 #: `request(type, payload, timeout=seconds)`: the server's `request`, or a fake.
@@ -65,12 +73,7 @@ class PlaytestError(Exception):
         self.code = code
 
 
-def _taps(presses: list[int], lead: int) -> list[dict[str, Any]]:
-    out = []
-    for t in sorted(presses):
-        out.append({"tick": t + lead, "action": "press"})
-        out.append({"tick": t + lead + 1, "action": "release"})
-    return out
+Releases = list[int] | None   # each press's release tick; None: all taps
 
 
 def pick_start(model: LevelModel, x0: float, spec: Any) -> dict[str, Any]:
@@ -141,7 +144,8 @@ def _reached(game: dict[str, Any], x1: float) -> bool:
 
 
 def _compare(world: World, p: CubeParams, start: Cube, presses: list[int], lead: int,
-             game: dict[str, Any], keep: bool = False) -> dict[str, Any]:
+             game: dict[str, Any], keep: bool = False,
+             releases: Releases = None) -> dict[str, Any]:
     """The game's trace against the simulator's, tick by tick.
 
     With `keep`, a comparison that disagrees, or a run that died, carries both traces as
@@ -151,8 +155,7 @@ def _compare(world: World, p: CubeParams, start: Cube, presses: list[int], lead:
     ticks = trace.get("tick") or []
     if not ticks:
         return {"compared_ticks": 0}
-    sim = simulate(world, p, [{"tick": t, "action": a} for r in presses
-                              for t, a in ((r, "press"), (r + 1, "release"))],
+    sim = simulate(world, p, input_events(presses, releases),
                    max_ticks=max(ticks) - lead + 2, start=start, start_tick=0)
     simulated = {t: (x, y, vy, g) for t, x, y, vy, g in zip(
         sim.trace["tick"], sim.trace["x"], sim.trace["y"], sim.trace["vy"],
@@ -204,10 +207,9 @@ def _rows(trace: dict[str, list[Any]], simulated: dict[int, tuple[float, ...]],
 
 
 def _end_tick(world: World, p: CubeParams, start: Cube, route: list[int], x1: float,
-              fallback: int) -> int:
+              fallback: int, releases: Releases = None) -> int:
     """The tick the route reaches `x1` (moving presses can move it, past a pad say)."""
-    sim = simulate(world, p, [{"tick": t, "action": a} for r in route
-                              for t, a in ((r, "press"), (r + 1, "release"))],
+    sim = simulate(world, p, input_events(route, releases),
                    max_ticks=fallback + 4 * WINDOW_REACH, until_x=x1, start=start,
                    start_tick=0, record=False)
     return sim.ticks if sim.outcome == "reached" else fallback
@@ -242,12 +244,13 @@ async def playtest_verify(request: Request, model: LevelModel, args: dict[str, A
     corrections: list[str] = []
     budget = int(args.get("max_replays", MAX_REPLAYS))
 
-    async def play(presses: list[int], end_tick: int) -> dict[str, Any]:
+    async def play(presses: list[int], end_tick: int,
+                   releases: Releases = None) -> dict[str, Any]:
         nonlocal replays
         if replays >= budget:
             raise PlaytestError("REPLAY_BUDGET", f"more than {budget} replays needed")
         replays += 1
-        return await _replay(request, start, _taps(presses, lead),
+        return await _replay(request, start, input_events(presses, releases, lead),
                              end_tick + lead + TAIL_TICKS)
 
     try:
@@ -259,9 +262,11 @@ async def playtest_verify(request: Request, model: LevelModel, args: dict[str, A
                         "note": "the solver found no route, so there is nothing to play; "
                                 "fix the section with verify_section first"}
             assert solved.end_tick is not None
-            route = centre_route(world, params, cube, solved.route, x1, solved.end_tick + 2)
-            end_tick = _end_tick(world, params, cube, route, x1, solved.end_tick)
-            game = await play(route, end_tick)
+            route, releases = centre_inputs(world, params, cube, solved.route,
+                                            solved.releases or None, x1,
+                                            solved.end_tick + 2)
+            end_tick = _end_tick(world, params, cube, route, x1, solved.end_tick, releases)
+            game = await play(route, end_tick, releases)
             trace = game.get("trace") or {}
             # Check the assumptions about the start against what the game did.
             observed_lead = _lead(trace)
@@ -288,13 +293,14 @@ async def playtest_verify(request: Request, model: LevelModel, args: dict[str, A
 
         reached = _reached(game, x1)
         keep = bool(args.get("traces"))
-        comparison = _compare(world, params, cube, route, lead, game, keep)
-        spans = windows(world, params, cube, route, x1, end_tick + 2)
+        comparison = _compare(world, params, cube, route, lead, game, keep, releases)
+        spans = windows(world, params, cube, route, x1, end_tick + 2, releases)
+        held = release_windows(world, params, cube, route, releases, x1, end_tick + 2)
         result: dict[str, Any] = {
             "result": "confirmed" if reached else "failed_in_game",
             "start": start,
-            "route": [{"tick": t, "game_tick": t + lead, "window_ticks": [lo, hi]}
-                      for t, (lo, hi) in zip(route, spans, strict=True)],
+            "route": [_played(t, r, lead, span, h)
+                      for t, r, span, h in zip(route, releases, spans, held, strict=True)],
             "game": {"outcome": game.get("outcome"), "ticks": game.get("ticks"),
                      "death": game.get("death")},
             "comparison": comparison,
@@ -307,13 +313,15 @@ async def playtest_verify(request: Request, model: LevelModel, args: dict[str, A
 
         if args.get("edges") and reached and route:
 
-            def compare(presses: list[int], played: dict[str, Any]) -> dict[str, Any]:
-                return _compare(world, params, cube, presses, lead, played, keep)
+            def compare(presses: list[int], played: dict[str, Any],
+                        moved_releases: Releases) -> dict[str, Any]:
+                return _compare(world, params, cube, presses, lead, played, keep,
+                                moved_releases)
 
             result["edges"] = []
             for index, (tick, (lo, hi)) in enumerate(zip(route, spans, strict=True)):
-                result["edges"].append(await _edges(play, compare, route, index, tick, lo,
-                                                    hi, end_tick, x1))
+                result["edges"].append(await _edges(play, compare, route, releases, index,
+                                                    tick, lo, hi, end_tick, x1))
             result["edges_agree"] = all(e["agrees"] for e in result["edges"])
     except PlaytestError as exc:
         return {"result": "error", "code": exc.code, "error": str(exc), "start": start,
@@ -323,11 +331,22 @@ async def playtest_verify(request: Request, model: LevelModel, args: dict[str, A
     return result
 
 
-async def _edges(play: Callable[[list[int], int], Awaitable[dict[str, Any]]],
-                 compare: Callable[[list[int], dict[str, Any]], dict[str, Any]],
-                 route: list[int], index: int, tick: int, lo: int, hi: int,
-                 end_tick: int, x1: float) -> dict[str, Any]:
-    """Replay one press at its window's ends and one tick past each.
+def _played(tick: int, release: int, lead: int, span: tuple[int, int],
+            held: tuple[int, int] | None) -> dict[str, Any]:
+    item: dict[str, Any] = {"tick": tick, "game_tick": tick + lead,
+                            "window_ticks": list(span)}
+    if held is not None:
+        item.update(action="hold", release_tick=release, game_release_tick=release + lead,
+                    release_window_ticks=list(held))
+    return item
+
+
+async def _edges(play: Callable[[list[int], int, Releases], Awaitable[dict[str, Any]]],
+                 compare: Callable[[list[int], dict[str, Any], Releases], dict[str, Any]],
+                 route: list[int], releases: list[int], index: int, tick: int, lo: int,
+                 hi: int, end_tick: int, x1: float) -> dict[str, Any]:
+    """Replay one press at its window's ends and one tick past each. A hold's press moves
+    with its release fixed.
 
     An end the window search stopped at because of its reach (WINDOW_REACH ticks), not
     because the route failed, is not an edge, so the tick past it is not expected to die.
@@ -337,19 +356,20 @@ async def _edges(play: Callable[[list[int], int], Awaitable[dict[str, Any]]],
     checks.append(("hi+1", hi + 1, None if hi >= tick + WINDOW_REACH else False))
     out: dict[str, Any] = {"press": index, "tick": tick, "window_ticks": [lo, hi],
                            "checks": [], "agrees": True}
-    others = set(route[:index] + route[index + 1:])
+    part = "tap" if releases[index] == tick + 1 else "press"
     for label, moved, expect in checks:
-        if expect is None or moved < 0 or moved in others:
+        candidate = move_input(route, releases, index, part, moved)
+        if expect is None or candidate is None:
             out["checks"].append({"at": label, "tick": moved, "skipped": True})
             continue
-        presses = sorted([*route[:index], moved, *route[index + 1:]])
-        game = await play(presses, end_tick + 4)
+        presses, moved_releases = candidate
+        game = await play(presses, end_tick + 4, moved_releases)
         survived = _reached(game, x1)
         check = {"at": label, "tick": moved, "expected": "survive" if expect else "die",
                  "game": "survived" if survived else "died", "agrees": survived == expect}
         if not survived and game.get("death"):
             check["death_x"] = round(float(game["death"].get("x", 0.0)), 1)
-        comparison = compare(presses, game)
+        comparison = compare(presses, game, moved_releases)
         check["max_dx"], check["max_dy"] = comparison.get("max_dx"), comparison.get("max_dy")
         if not check["agrees"] and "trace_rows" in comparison:
             check["trace_rows"] = comparison["trace_rows"]

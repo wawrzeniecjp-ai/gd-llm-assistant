@@ -4,10 +4,11 @@ A screenshot shows what the player sees; the schematic shows **structure**. It i
 from the level snapshot, so it works without the game (previews, evals), and every shape
 is a hitbox, not a sprite: what is drawn is what collides.
 
-M1 draws the objects and the `grid` overlay. `route`, `windows` and `camera` need the
-simulator (M2), `beats` the timeline (M4) and `sections` the plan (M4); asking for them
-returns a note saying so rather than an error, so a call written for later milestones
-still works.
+M1 draws the objects and the `grid` overlay; M2 added `route` and `windows` from the
+simulator, M4 `beats` (the plan's music on the timeline) and `sections` (the plan's
+sections). The caller computes those and passes them in, so this module only draws what
+it is given. `camera` is still to come; asking for it returns a note rather than an
+error, so a call written for a later milestone still works.
 """
 
 from __future__ import annotations
@@ -31,11 +32,9 @@ DEFAULT_PX_PER_CELL = 12
 _HEADROOM_ROWS = 2
 _TRIGGER_STRIP = 8  # px at the top of the image for trigger ticks
 
-OVERLAYS_NOW = frozenset({"grid", "route", "windows"})
+OVERLAYS_NOW = frozenset({"grid", "route", "windows", "beats", "sections"})
 OVERLAYS_LATER = {
-    "camera": "M2 (simulator)",
-    "beats": "M4 (timeline)",
-    "sections": "M4 (level plan)",
+    "camera": "a later milestone (camera simulation)",
 }
 
 _BACKGROUND = (250, 250, 248)
@@ -142,8 +141,14 @@ def _corners(obj: LevelObject, *, visual: bool = False) -> list[tuple[float, flo
 
 
 def render_schematic(model: LevelModel, grid: Grid, args: dict[str, Any],
-                     route: dict[str, Any] | None = None) -> Schematic:
-    """Draw the requested range. Raises `SchematicError` for a range it cannot draw."""
+                     route: dict[str, Any] | None = None,
+                     beats: list[dict[str, Any]] | None = None,
+                     sections: list[dict[str, Any]] | None = None) -> Schematic:
+    """Draw the requested range. Raises `SchematicError` for a range it cannot draw.
+
+    `beats` are `beat_grid` entries (`x`, `strength`); `sections` are `{id, name, x0,
+    x1}`. Either may be None when the plan cannot supply them; the caller adds the note.
+    """
     layers = args.get("layers") or ["gameplay", "deco"]
     unknown = [layer for layer in layers if layer not in LAYER_ROLES]
     if unknown:
@@ -238,6 +243,12 @@ def render_schematic(model: LevelModel, grid: Grid, args: dict[str, Any],
         if _draw_object(draw, obj, px, ppc, font):
             drawn[obj.role.value] = drawn.get(obj.role.value, 0) + 1
 
+    if "beats" in overlays and beats:
+        _draw_beats(draw, beats, px, height)
+        drawn["beats"] = sum(1 for b in beats if x0 <= b["x"] <= (c1 + 1) * CELL)
+    if "sections" in overlays and sections:
+        drawn["sections"] = _draw_sections(draw, sections, px, width, font)
+
     if route is not None and route.get("result") == "possible":
         _draw_route(draw, route, px, ppc, overlays, height, font)
         drawn["route_presses"] = len(route.get("presses", []))
@@ -306,6 +317,42 @@ def _draw_object(draw: ImageDraw.ImageDraw, obj: LevelObject, px, ppc: int, font
     else:
         draw.polygon(points, fill=(*colour, 255))
     return True
+
+
+_BEAT = (124, 77, 255)
+_SECTION_FILLS = ((124, 77, 255), (0, 150, 136))
+
+
+def _draw_beats(draw: ImageDraw.ImageDraw, beats: list[dict[str, Any]], px,
+                height: int) -> None:
+    """Bars as thick lines, beats as thin ones, half-beats as short ticks at the bottom."""
+    for beat in beats:
+        bx, _ = px(beat["x"], 0)
+        if beat["strength"] == "bar":
+            draw.line((bx, _TRIGGER_STRIP, bx, height), fill=(*_BEAT, 200), width=2)
+        elif beat["strength"] == "beat":
+            draw.line((bx, _TRIGGER_STRIP, bx, height), fill=(*_BEAT, 110), width=1)
+        else:
+            draw.line((bx, height - 14, bx, height), fill=(*_BEAT, 110), width=1)
+
+
+def _draw_sections(draw: ImageDraw.ImageDraw, sections: list[dict[str, Any]], px,
+                   width: int, font) -> int:
+    """Each section as a tinted band along the top with its name; returns how many show."""
+    shown = 0
+    top = _TRIGGER_STRIP + 12            # below the column numbers
+    for i, section in enumerate(sections):
+        a, _ = px(section["x0"], 0)
+        b, _ = px(section["x1"], 0)
+        if b < 0 or a > width:
+            continue
+        shown += 1
+        colour = _SECTION_FILLS[i % 2]
+        draw.rectangle((max(a, 0), top, min(b, width), top + 12), fill=(*colour, 40))
+        draw.line((a, top, a, top + 12), fill=(*colour, 255))
+        draw.text((max(a, 0) + 3, top + 1), str(section.get("name") or section.get("id")),
+                  fill=(*colour, 255), font=font)
+    return shown
 
 
 _ROUTE = (20, 20, 20)

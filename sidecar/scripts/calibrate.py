@@ -24,6 +24,10 @@ cancels a run). Run from `sidecar/`, with `start-sidecar.bat` closed:
     uv run python scripts/calibrate.py P12          # jump snapping, every speed (~12 min)
     uv run python scripts/calibrate.py P13          # orbs and pads, every speed (~6 min)
     uv run python scripts/calibrate.py P14          # the timeline, five speed portals (~1 min)
+    uv run python scripts/calibrate.py P15          # ship, ball, ufo, wave (~6 min)
+    uv run python scripts/calibrate.py P16          # upside down, blue orb/pad, mini (~2 min)
+    uv run python scripts/calibrate.py P17          # Sim-2 contacts and bands (~6 min)
+    uv run python scripts/calibrate.py P18          # flight orbs/pads, mini, wave in solids
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ from gd_ai_assistant.design.constants import _default_path as constants_path
 from gd_ai_assistant.design.constants import load_constants
 from gd_ai_assistant.design.level_model import load_level_model
 from gd_ai_assistant.design.roles import Role, load_role_table
+from gd_ai_assistant.design.sim.cube import HALF as HALF_SIM
 from gd_ai_assistant.design.sim.cube import Cube, CubeParams, simulate
 from gd_ai_assistant.design.sim.world import world_from_objects
 from gd_ai_assistant.server import SidecarServer
@@ -111,7 +116,8 @@ class Runner:
         return response.result or {}
 
 
-def run_record(inputs: list[dict[str, Any]], result: dict[str, Any], **extra: Any) -> dict:
+def run_record(inputs: list[dict[str, Any]], result: dict[str, Any], *, moded: bool = False,
+               **extra: Any) -> dict:
     trace = result.get("trace") or {}
     record: dict[str, Any] = {"inputs": inputs, **extra}
     if "error" in result:
@@ -124,9 +130,29 @@ def run_record(inputs: list[dict[str, Any]], result: dict[str, Any], **extra: An
         "death": result.get("death"),
         "takeoffs": cal.takeoffs(trace),
         "impulses": cal.impulses(trace),
-        "trace": cal.compact_trace(trace),
+        "trace": cal.compact_trace(trace, moded=moded),
     })
     return record
+
+
+RAW = ROOT / "build" / "calibration-raw"
+
+
+def save_raw(name: str, runs: list[dict[str, Any]]) -> None:
+    """Every sample of every run, for fitting a mode's physics offline (Sim-2). Large, so
+    it goes to build/, not the fixtures."""
+    RAW.mkdir(parents=True, exist_ok=True)
+    (RAW / f"{name}.json").write_text(json.dumps({"recorded": TODAY, "runs": runs}) + "\n",
+                                      encoding="utf-8")
+
+
+def _summary(trace: dict[str, Any]) -> str:
+    ys, vys = trace.get("y") or [0], trace.get("vy") or [0]
+    modes = list(dict.fromkeys(trace.get("mode") or []))
+    flips = sum(1 for a, b in zip(trace.get("gravity", []), trace.get("gravity", [])[1:],
+                                  strict=False) if a != b)
+    return (f"modes {'>'.join(modes)}, y {min(ys):.1f}..{max(ys):.1f}, "
+            f"vy {min(vys):.2f}..{max(vys):.2f}, gravity flips {flips}")
 
 
 def measured(value: float, probe: str) -> dict[str, Any]:
@@ -672,6 +698,407 @@ async def probe_timeline(r: Runner, out: dict) -> None:
                  [run_record([], result, objects=objects)])
 
 
+# -- Sim-2 exploration (M5) ---------------------------------------------------------------
+#
+# P15 and P16 do not fit anything: they record full traces of each new mode and feature
+# under simple inputs, so the physics can be read off the data offline rather than
+# guessed (LEVEL-DESIGN-SPEC.md 6.5: "not to be guessed"). Full traces go to
+# build/calibration-raw/, compact ones (with mode, gravity and mini) to the fixtures.
+
+MODE_PORTALS = {"ship": 13, "ball": 47, "ufo": 111, "wave": 660}
+GRAVITY_FLIP, GRAVITY_NORMAL, GRAVITY_TOGGLE = 11, 10, 2926
+SIZE_MINI, SIZE_NORMAL = 101, 99
+P15_START = 320                                  # first input, well after every portal
+P15_INPUTS: dict[str, tuple[list[dict[str, Any]], int]] = {
+    "idle": ([], 800),
+    "hold": (press(P15_START, hold=150), 900),
+    "taps": ([i for k in range(5) for i in press(P15_START + 60 * k)], 900),
+    "hold_long": (press(P15_START, hold=700), 1200),
+}
+#: (label, speed, mini, flipped, high portal, inputs)
+P15_VARIANTS = [
+    ("normal", "1x", False, False, False, ("hold", "taps", "hold_long")),
+    ("mini", "1x", True, False, False, ("hold", "taps")),
+    ("flipped", "1x", False, True, False, ("idle", "hold", "taps")),
+    *[(f"speed {s}", s, False, False, False, ("hold", "taps"))
+      for s in ("0.5x", "2x", "3x", "4x")],
+    ("high portal", "1x", False, False, True, ("idle", "hold_long")),
+]
+PAD_Y_OFFSET = -13.0                              # a pad on the floor, as P7
+
+
+def _high_portal_y() -> float:
+    """Where a cube launched by a yellow pad in column 3 is as it reaches column 6, to the
+    nearest half cell: the high portal sits there, so its mode's bounds are measured
+    away from the ground too."""
+    x, y = cell(3, 0, PAD_Y_OFFSET)
+    world = world_from_objects([{"id": 35, "x": x, "y": y}], load_role_table())
+    run = simulate(world, CubeParams.from_constants(load_constants()), [], max_ticks=400,
+                   until_x=cell(6, 0)[0])
+    return max(45.0, round(run.final.y / 15) * 15)
+
+
+def _p15_layout(mode: str, speed: str, mini: bool, flipped: bool, high: bool) -> list[dict]:
+    objects: list[dict[str, Any]] = []
+    ids = dict(SPEED_PORTALS)
+    if speed != "1x":
+        x, y = cell(2, 1)
+        objects.append({"id": ids[speed], "x": x, "y": y})
+    if mini:
+        x, y = cell(4, 1)
+        objects.append({"id": SIZE_MINI, "x": x, "y": y})
+    if high:
+        x, y = cell(3, 0, PAD_Y_OFFSET)
+        objects.append({"id": 35, "x": x, "y": y})
+        objects.append({"id": MODE_PORTALS[mode], "x": cell(6, 0)[0], "y": _high_portal_y()})
+    else:
+        x, y = cell(6, 1)
+        objects.append({"id": MODE_PORTALS[mode], "x": x, "y": y})
+    if flipped:
+        x, y = cell(9, 1)
+        objects.append({"id": GRAVITY_FLIP, "x": x, "y": y})
+    return objects
+
+
+async def probe_modes(r: Runner, out: dict) -> None:
+    """P15: ship, ball, ufo and wave under simple inputs: held, tapped, held long; mini,
+    upside down, at every speed, and through a portal high above the ground."""
+    runs, raw = [], []
+    for mode in MODE_PORTALS:
+        for label, speed, mini, flipped, high, inputs_wanted in P15_VARIANTS:
+            objects = _p15_layout(mode, speed, mini, flipped, high)
+            async with probe_level(r.server, f"{mode} {label}", objects):
+                for name in inputs_wanted:
+                    inputs, max_ticks = P15_INPUTS[name]
+                    result = await r.replay(inputs, max_ticks)
+                    meta = {"mode": mode, "variant": label, "speed": speed, "mini": mini,
+                            "flipped": flipped, "high": high, "inputs_name": name}
+                    runs.append(run_record(inputs, result, moded=True, objects=objects,
+                                           **meta))
+                    raw.append({**meta, "inputs": inputs, "objects": objects,
+                                "outcome": result.get("outcome"), "death": result.get("death"),
+                                "trace": result.get("trace")})
+                    print(f"    {mode:4} {label:11} {name:9}: {result.get('outcome')} at "
+                          f"{result.get('ticks')}; {_summary(result.get('trace') or {})}")
+    out["P15_modes"] = [{k: v for k, v in run.items() if k != "trace"} for run in runs]
+    save_fixture("cal_modes", "P15 ship, ball, ufo and wave under simple inputs", runs)
+    save_raw("P15", raw)
+
+
+P16_CEILING = [(c, 7) for c in range(4, 46)]     # a roof, so a flipped cube lands on it
+
+
+def _roof() -> list[dict[str, Any]]:
+    return [{"id": 1, "x": cell(c, row)[0], "y": cell(c, row)[1]} for c, row in P16_CEILING]
+
+
+async def probe_gravity(r: Runner, out: dict) -> None:
+    """P16: the cube upside down (gravity portals, blue pad, blue orb) and mini."""
+    taps = press(P15_START) + press(P15_START + 100)
+    gx, gy = cell(6, 1)
+    cases: list[tuple[str, list[dict], list[list[dict]], int]] = [
+        ("gravity portals", _roof() + [{"id": GRAVITY_FLIP, "x": gx, "y": gy},
+                                       {"id": GRAVITY_NORMAL, "x": cell(30, 6)[0],
+                                        "y": cell(30, 6)[1]}], [taps], 900),
+        ("toggle portal", _roof() + [{"id": GRAVITY_TOGGLE, "x": gx, "y": gy}], [[]], 500),
+        ("blue pad", _roof() + [{"id": 67, "x": cell(COL, 0, PAD_Y_OFFSET)[0],
+                                 "y": cell(COL, 0, PAD_Y_OFFSET)[1]}], [taps], 700),
+        ("blue orb", _roof() + [{"id": 84, "x": cell(COL, 2)[0], "y": cell(COL, 2)[1]}],
+         [press(ORB_FIRST_PRESS) + press(t) for t in range(150, 231, 8)]
+         + [press(ORB_FIRST_PRESS, hold=110)], 600),
+        ("mini", [{"id": SIZE_MINI, "x": gx, "y": gy},
+                  {"id": 35, "x": cell(30, 0, PAD_Y_OFFSET)[0],
+                   "y": cell(30, 0, PAD_Y_OFFSET)[1]},
+                  {"id": 36, "x": cell(40, 2)[0], "y": cell(40, 2)[1]}],
+         [press(P15_START), press(P15_START, hold=200), []], 1100),
+    ]
+    runs, raw = [], []
+    for label, objects, input_sets, max_ticks in cases:
+        async with probe_level(r.server, label, objects):
+            for inputs in input_sets:
+                result = await r.replay(inputs, max_ticks)
+                runs.append(run_record(inputs, result, moded=True, objects=objects,
+                                       variant=label))
+                raw.append({"variant": label, "inputs": inputs, "objects": objects,
+                            "outcome": result.get("outcome"), "death": result.get("death"),
+                            "trace": result.get("trace")})
+                first = inputs[-2]["tick"] if len(inputs) >= 2 else None
+                print(f"    {label:15} last press {first}: {result.get('outcome')} at "
+                      f"{result.get('ticks')}; {_summary(result.get('trace') or {})}")
+    out["P16_gravity"] = [{k: v for k, v in run.items() if k != "trace"} for run in runs]
+    save_fixture("cal_gravity", "P16 cube upside down, blue pad and orb, mini", runs)
+    save_raw("P16", raw)
+
+
+# P17 (M5): what Sim-2 still reports as unverifiable. The simulator itself (now flying
+# ship, ball, ufo and wave) aims each run, so a portal sits where the player will be.
+
+CUBE_PORTAL = 12
+#: Inputs that leave each mode moving when it reaches column 12 (P17 A).
+P17_RETURN_INPUTS = {
+    "ship": [press(140, hold=60)],                  # rising, then slowing
+    "ship falling": [press(140, hold=40)],          # up, released, falling by column 12
+    "ball": [press(240)],                           # flipped, falling up
+    "ufo": [press(250)],                            # just jumped
+    "wave": [press(140, hold=200)],                 # climbing
+}
+#: When a ship holding from tick 140 lets go; the simulator puts it at column 20 at
+#: these heights, rising or falling (P17 B).
+P17_BAND_RELEASES = (260, 275, 290, 440)    # portal at y ~143, 192, 238, 284
+P17_BAND_MODES = ("ufo", "wave", "ball")
+#: P17 C/D: a spike or a block above a player gliding on the floor, its bottom this far
+#: from the player's top (outer box); the wave's top is taken at its rest + 10.
+P17_CLEARANCES = {"ship": range(-6, 5), "ufo": range(-6, 5), "ball": range(-6, 5),
+                  "wave": range(-14, 3, 2)}
+P17_BLOCK_CLEARANCES = range(-6, 3, 2)
+
+
+def _sim_y_at(objects: list[dict], inputs: list[dict], x: float) -> float | None:
+    """Where the simulator puts the player as it reaches `x`, or None if it cannot."""
+    world = world_from_objects(objects, load_role_table())
+    run = simulate(world, CubeParams.from_constants(load_constants()), inputs,
+                   max_ticks=3000, until_x=x)
+    return run.final.y if run.outcome == "reached" else None
+
+
+async def _record(r: Runner, runs: list, raw: list, label: str, objects: list[dict],
+                  inputs: list[dict], max_ticks: int, **meta: Any) -> None:
+    async with probe_level(r.server, label, objects):
+        result = await r.replay(inputs, max_ticks)
+    runs.append(run_record(inputs, result, moded=True, objects=objects, variant=label,
+                           **meta))
+    raw.append({"variant": label, **meta, "inputs": inputs, "objects": objects,
+                "outcome": result.get("outcome"), "death": result.get("death"),
+                "trace": result.get("trace")})
+    death = result.get("death") or {}
+    print(f"    {label:28}: {result.get('outcome')} at {result.get('ticks')}"
+          + (f" (x {death.get('x', 0):.1f}, y {death.get('y', 0):.1f})" if death else "")
+          + f"; {_summary(result.get('trace') or {})}")
+
+
+async def probe_contacts(r: Runner, out: dict) -> None:
+    """P17: back to the cube from each mode (A); mode portals above the ground (B); a
+    spike (C) and a block (D) just above each mode gliding on the floor."""
+    runs: list[dict] = []
+    raw: list[dict] = []
+    mx, my = cell(6, 1)
+    # A: the cube portal at column 12, centred where the simulator puts the player.
+    portal_x = cell(12, 0)[0]
+    for name, inputs_list in P17_RETURN_INPUTS.items():
+        mode = name.split()[0]
+        base = [{"id": MODE_PORTALS[mode], "x": mx, "y": my}]
+        inputs = inputs_list[0] if len(inputs_list) == 1 else inputs_list
+        y = _sim_y_at(base, inputs, portal_x - 17 - HALF_SIM)
+        if y is None:
+            print(f"    {name}: the simulator could not reach column 12; skipped")
+            continue
+        objects = [*base, {"id": CUBE_PORTAL, "x": portal_x, "y": round(y, 1)}]
+        await _record(r, runs, raw, f"A {name} to cube", objects, inputs, 700, part="A",
+                      mode=mode)
+    # B: a ship climbs, lets go, and falls past a portal of another mode in column 20.
+    bx = cell(20, 0)[0]
+    ship = [{"id": MODE_PORTALS["ship"], "x": mx, "y": my}]
+    for release in P17_BAND_RELEASES:
+        inputs = [{"tick": 140, "action": "press"}, {"tick": release, "action": "release"}]
+        y = _sim_y_at(ship, inputs, bx - 17 - HALF_SIM)
+        if y is None:
+            continue
+        for target in P17_BAND_MODES:
+            objects = [*ship, {"id": MODE_PORTALS[target], "x": bx, "y": round(y, 1)}]
+            await _record(r, runs, raw, f"B {target} portal at y {y:.0f}", objects,
+                          inputs, 1000, part="B", mode=target, portal_y=round(y, 1))
+    # C and D: on the floor in each mode, something just above at column 14.
+    sx = cell(14, 0)[0]
+    for mode, clearances in P17_CLEARANCES.items():
+        top = 10.0 + 10.0 if mode == "wave" else 15.0 + 15.0
+        base = [{"id": MODE_PORTALS[mode], "x": mx, "y": my}]
+        for d in clearances:
+            spike = {"id": 8, "x": sx, "y": top + d + 6.0}      # hitbox 6 below centre
+            await _record(r, runs, raw, f"C {mode} spike {d:+d}", [*base, spike], [], 400,
+                          part="C", mode=mode, clearance=d)
+        for d in P17_BLOCK_CLEARANCES:
+            block = {"id": 1, "x": sx, "y": top + d + 15.0}
+            await _record(r, runs, raw, f"D {mode} block {d:+d}", [*base, block], [], 400,
+                          part="D", mode=mode, clearance=d)
+    out["P17_contacts"] = [{k: v for k, v in run.items() if k != "trace"} for run in runs]
+    save_fixture("cal_contacts", "P17 back to the cube, bands, spikes and blocks above", runs)
+    save_raw("P17", raw)
+
+
+# P18 (M5): the rest of what Sim-2 reports as unverifiable: orbs and pads in the flight
+# modes (A, B), a mini player meeting spikes and blocks (C, D, E), and the wave meeting
+# a block's face or corner (F). As in P17, the simulator aims each run from the layout
+# without the object being measured, which it can already fly.
+
+ORB_IDS = {"yellow": 36, "pink": 141, "blue": 84}
+PAD_IDS = {"yellow": 35, "pink": 140, "blue": 67}
+FLIGHT_MODES = ("ship", "ufo", "ball", "wave")
+P18_COL = 14                                  # the measured object's column
+P18_PAD_SPEEDS = ("1x", "2x")
+#: Mini: the player's top (outer box) gliding on the floor; the wave's, as in P17, at
+#: twice its half size.
+P18_MINI_TOP = {"cube": 18.0, "ship": 18.0, "ufo": 18.0, "ball": 18.0, "wave": 12.0}
+P18_MINI_CLEARANCES = {"cube": range(-6, 5, 2), "ship": range(-6, 5), "ufo": range(-6, 5),
+                       "ball": range(-6, 5), "wave": range(-10, 3, 2)}
+P18_MINI_BLOCK_CLEARANCES = range(-6, 3, 2)
+#: F: the wave climbs from this tick (well after its portal); its centre crosses a
+#: block's face this far either side of the block's corner (about 1.3 units a tick).
+P18_WAVE_CLIMB = 200
+P18_CORNER_REACH = 24.0
+P18_CORNER_OFFSETS = range(-24, 25, 4)
+
+
+def _p18_base(mode: str, mini: bool = False, speed: str = "1x") -> list[dict[str, Any]]:
+    """A speed portal (column 2), mini (4) and the mode (6), each only when needed."""
+    objects: list[dict[str, Any]] = []
+    if speed != "1x":
+        x, y = cell(2, 1)
+        objects.append({"id": dict(SPEED_PORTALS)[speed], "x": x, "y": y})
+    if mini:
+        x, y = cell(4, 1)
+        objects.append({"id": SIZE_MINI, "x": x, "y": y})
+    if mode != "cube":
+        x, y = cell(6, 1)
+        objects.append({"id": MODE_PORTALS[mode], "x": x, "y": y})
+    return objects
+
+
+def _sim_run(objects: list[dict], inputs: list[dict], max_ticks: int = 3000):
+    world = world_from_objects(objects, load_role_table())
+    return simulate(world, CubeParams.from_constants(load_constants()), inputs,
+                    max_ticks=max_ticks)
+
+
+def _sim_tick_at(objects: list[dict], inputs: list[dict], x: float) -> int | None:
+    """The tick the simulator's player reaches `x`, or None if it cannot."""
+    world = world_from_objects(objects, load_role_table())
+    run = simulate(world, CubeParams.from_constants(load_constants()), inputs,
+                   max_ticks=3000, until_x=x)
+    return run.ticks if run.outcome == "reached" else None
+
+
+def _crossing(objects: list[dict], inputs: list[dict], y: float, after: int,
+              rising: bool) -> float | None:
+    """Where (x) the simulated player's centre first crosses height `y` after a tick."""
+    trace = _sim_run(objects, inputs, max_ticks=after + 400).trace
+    pairs = list(zip(trace["tick"], trace["x"], trace["y"], strict=True))
+    for (t0, x0, y0), (_t1, x1, y1) in zip(pairs, pairs[1:], strict=False):
+        if t0 < after:
+            continue
+        if (y0 < y <= y1) if rising else (y0 > y >= y1):
+            return x0 + (x1 - x0) * (y - y0) / (y1 - y0)
+    return None
+
+
+def _orb_span(base: list[dict], mini: bool) -> tuple[int, int] | None:
+    """The ticks the player's box first and last overlaps an orb in column P18_COL."""
+    half = 15.0 * (0.6 if mini else 1.0)
+    x = cell(P18_COL, 0)[0]
+    first = _sim_tick_at(base, [], x - 15 - half)
+    last = _sim_tick_at(base, [], x + 15 + half)
+    return (first, last) if first is not None and last is not None else None
+
+
+async def probe_flight_contacts(r: Runner, out: dict) -> None:
+    """P18: pads (A) and orbs (B) in the flight modes, full size and mini; a mini player
+    gliding under a spike (C) or a block (D); the mini cube jumping a spike and onto a
+    block (E); the wave into a wall, onto a block's top and under a block's bottom (F)."""
+    runs: list[dict] = []
+    raw: list[dict] = []
+    ox, oy = cell(P18_COL, 0)
+    px, py = cell(P18_COL, 0, PAD_Y_OFFSET)
+    # A: each pad on the floor, no input.
+    for mode in FLIGHT_MODES:
+        for color, pad_id in PAD_IDS.items():
+            for speed in P18_PAD_SPEEDS:
+                objects = [*_p18_base(mode, speed=speed), {"id": pad_id, "x": px, "y": py}]
+                await _record(r, runs, raw, f"A {mode} {color} pad {speed}", objects, [], 500,
+                              part="A", mode=mode, color=color, speed=speed)
+        objects = [*_p18_base(mode, mini=True), {"id": PAD_IDS["yellow"], "x": px, "y": py}]
+        await _record(r, runs, raw, f"A mini {mode} yellow pad", objects, [], 500,
+                      part="A", mode=mode, color="yellow", mini=True)
+    # B: an orb on the floor, pressed at a sweep of ticks while the player passes it
+    # (yellow), in the middle (pink, blue), held through it, and pressed just before.
+    for mode in FLIGHT_MODES:
+        for mini in (False, True):
+            base = _p18_base(mode, mini=mini)
+            span = _orb_span(base, mini)
+            if span is None:
+                print(f"    B {mode}: the simulator could not reach the orb; skipped")
+                continue
+            first, last = span
+            middle = (first + last) // 2
+            sweeps: list[tuple[str, list[dict], dict]] = []
+            for color in ("yellow", "pink", "blue") if not mini else ("yellow",):
+                ticks = range(first - 4, last + 5, 4) if color == "yellow" and not mini \
+                    else (middle,)
+                sweeps += [(color, press(t), {"press_tick": t}) for t in ticks]
+            if not mini:
+                sweeps += [("yellow", press(first - 6, hold=last - first + 12),
+                            {"buffering": "held_through"}),
+                           ("yellow", press(first - 4), {"buffering": "pressed_before"})]
+            for color, inputs, meta in sweeps:
+                objects = [*base, {"id": ORB_IDS[color], "x": ox, "y": oy}]
+                label = (f"B {'mini ' if mini else ''}{mode} {color} orb "
+                         + str(meta.get("press_tick", meta.get("buffering"))))
+                await _record(r, runs, raw, label, objects, inputs, 500, part="B", mode=mode,
+                              color=color, mini=mini, touch=[first, last], **meta)
+    # C and D: mini, gliding on the floor, a spike or a block just above (as P17 C, D).
+    sx = cell(P18_COL, 0)[0]
+    for mode, clearances in P18_MINI_CLEARANCES.items():
+        top = P18_MINI_TOP[mode]
+        base = _p18_base(mode, mini=True)
+        for d in clearances:
+            spike = {"id": 8, "x": sx, "y": top + d + 6.0}      # hitbox 6 below centre
+            await _record(r, runs, raw, f"C mini {mode} spike {d:+d}", [*base, spike], [],
+                          400, part="C", mode=mode, mini=True, clearance=d)
+        for d in P18_MINI_BLOCK_CLEARANCES:
+            block = {"id": 1, "x": sx, "y": top + d + 15.0}
+            await _record(r, runs, raw, f"D mini {mode} block {d:+d}", [*base, block], [],
+                          400, part="D", mode=mode, mini=True, clearance=d)
+    # E: the mini cube jumps a ground spike and onto a one-block step (as P5, P4).
+    base = _p18_base("cube", mini=True)
+    reach = _sim_tick_at(base, [], sx - 15 - 9)
+    if reach is not None:
+        # A mini jump is in the air about 80 ticks (1.3 units a tick at 1x).
+        for kind, object_id in (("spike", 8), ("block", 1)):
+            objects = [*base, {"id": object_id, "x": sx, "y": 15.0}]
+            for t in range(reach - 96, reach + 5, 4):
+                await _record(r, runs, raw, f"E mini cube {kind} press {t}", objects,
+                              press(t), 400, part="E", mode="cube", mini=True, kind=kind,
+                              press_tick=t)
+    # F: the wave into a wall; falling onto a step whose left edge is at column 20; and
+    # climbing under a ceiling starting there, crossing the face near the corner.
+    wave = _p18_base("wave")
+    wall = [{"id": 1, "x": sx, "y": cell(P18_COL, row)[1]} for row in range(3)]
+    await _record(r, runs, raw, "F wave into a wall", [*wave, *wall], [], 400, part="F",
+                  mode="wave", kind="wall")
+    edge = 30.0 * 20
+    step_top = [{"id": 1, "x": cell(c, 1)[0], "y": cell(c, 1)[1]} for c in range(20, 40)]
+    ceiling = [{"id": 1, "x": cell(c, 4)[0], "y": cell(c, 4)[1]} for c in range(20, 40)]
+    at_edge = _sim_tick_at(wave, [], edge) or 0
+    for kind, blocks, y, rising in (("step", step_top, 60.0, False),
+                                    ("ceiling", ceiling, 120.0, True)):
+        found: list[tuple[float, list[dict]]] = []
+        for t in range(P18_WAVE_CLIMB + 10, at_edge):
+            inputs = (press(P18_WAVE_CLIMB, hold=t - P18_WAVE_CLIMB) if not rising
+                      else press(t, hold=600))
+            x = _crossing(wave, inputs, y, t, rising=rising)
+            if x is not None and abs(x - edge) <= P18_CORNER_REACH + 3:
+                found.append((x - edge, inputs))
+        chosen = {min(found, key=lambda f, d=d: abs(f[0] - d))[0]: None
+                  for d in P18_CORNER_OFFSETS} if found else {}
+        for offset, inputs in found:
+            if offset in chosen:
+                await _record(r, runs, raw, f"F wave {kind}, crossing {offset:+.0f}",
+                              [*wave, *blocks], inputs, at_edge + 300, part="F",
+                              mode="wave", kind=kind, offset=round(offset, 1))
+    out["P18_flight"] = [{k: v for k, v in run.items() if k != "trace"} for run in runs]
+    save_fixture("cal_flight", "P18 flight orbs and pads, mini contacts, the wave in solids",
+                 runs)
+    save_raw("P18", raw)
+
+
 async def probe_hold(r: Runner, out: dict, cube: dict) -> None:
     """P3: hold for a long time; does the cube jump again on landing, and when?"""
     inputs = press(60, hold=480)
@@ -834,6 +1261,13 @@ async def routine(server: SidecarServer) -> dict[str, Any]:
         ("P13", "orbs and pads at every speed",
          lambda: probe_orbs_pads_by_speed(r, out, cube)),
         ("P14", "the timeline at five speed portals", lambda: probe_timeline(r, out)),
+        ("P15", "ship, ball, ufo and wave (Sim-2 exploration)", lambda: probe_modes(r, out)),
+        ("P16", "upside down, blue pad and orb, mini (Sim-2 exploration)",
+         lambda: probe_gravity(r, out)),
+        ("P17", "back to the cube, mode bands, spikes and blocks (Sim-2)",
+         lambda: probe_contacts(r, out)),
+        ("P18", "flight orbs and pads, mini contacts, the wave in solids (Sim-2)",
+         lambda: probe_flight_contacts(r, out)),
     ]
     try:
         for code, label, step in steps:

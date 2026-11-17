@@ -4,8 +4,17 @@ from __future__ import annotations
 
 from gd_ai_assistant.design.constants import load_constants
 from gd_ai_assistant.design.roles import load_role_table
-from gd_ai_assistant.design.sim.cube import Cube, CubeParams
-from gd_ai_assistant.design.sim.solver import describe_route, solve, windows
+from gd_ai_assistant.design.sim.cube import Cube, CubeParams, simulate
+from gd_ai_assistant.design.sim.solver import (
+    SolveResult,
+    centre_inputs,
+    commands,
+    describe_route,
+    input_events,
+    release_windows,
+    solve,
+    windows,
+)
 from gd_ai_assistant.design.sim.world import World, world_from_objects
 
 ROLES = load_role_table()
@@ -101,10 +110,92 @@ def test_verify_impossible_says_how_far_and_what_killed() -> None:
 
 
 def test_verify_refuses_unsupported_content() -> None:
-    ship = [{"id": 13, "x": 255, "y": 45}]
-    result = _verify(ship, {"x_range": [0, 600]})
+    robot = [{"id": 745, "x": 255, "y": 45}]           # Sim-3
+    result = _verify(robot, {"x_range": [0, 600]})
     assert result["result"] == "unverifiable"
-    assert "not simulated" in result["unverifiable"][0]["reason"]
+    assert "Sim-3" in result["unverifiable"][0]["reason"]
+
+
+def test_a_ship_holds_over_a_spike() -> None:
+    ship = [{"id": 13, "x": 255, "y": 45}]
+    flown = _verify(ship, {"x_range": [0, 900]})
+    assert flown["result"] == "possible" and flown["exit"]["mode"] == "ship"
+    spiked = _verify([*ship, {"id": 8, "x": 615, "y": 15}], {"x_range": [0, 900]})
+    assert spiked["result"] == "possible", spiked
+    (hold,) = spiked["route"]
+    assert hold["action"] == "hold" and hold["release_tick"] > hold["tick"]
+    assert hold["hold_ms"] > 0 and hold["release_window_ms"] > 0
+    # A column of orbs it must fly through (P18: orbs fire only on a press).
+    column = [{"id": 36, "x": 615, "y": 30 * r + 15} for r in range(10)]
+    assert _verify([*ship, *column], {"x_range": [0, 900]})["result"] == "possible"
+
+
+def _flight(mode_id: int, obstacles: list[dict]) -> tuple[World, SolveResult]:
+    world = _world([{"id": mode_id, "x": 255, "y": 45}, *obstacles])
+    return world, solve(world, PARAMS, Cube(), 1000)
+
+
+def _spike(col: int, row: int = 0) -> dict:
+    return {"id": 8, "x": 30 * col + 15, "y": 30 * row + 15}
+
+
+def _block(col: int, row: int) -> dict:
+    return {"id": 1, "x": 30 * col + 15, "y": 30 * row + 15}
+
+
+def test_hold_routes_replay_to_the_end() -> None:
+    """Ship through a tunnel, wave over a row of spikes: each route, played as inputs,
+    reaches the end, and centring it keeps it finishing."""
+    tunnel = [*[_spike(c) for c in range(18, 28)], *[_block(c, 4) for c in range(18, 28)]]
+    for mode_id, obstacles in ((13, tunnel), (660, [_spike(c) for c in range(18, 24)])):
+        world, solved = _flight(mode_id, obstacles)
+        assert solved.result == "possible", (mode_id, solved.reason)
+        assert len(solved.releases) == len(solved.route)
+        assert any(r > t + 1 for t, r in zip(solved.route, solved.releases, strict=True))
+        assert solved.end_tick is not None
+        run = simulate(world, PARAMS, input_events(solved.route, solved.releases),
+                       max_ticks=solved.end_tick + 2, until_x=1000, start=Cube(),
+                       start_tick=0)
+        assert run.outcome == "reached"
+        route, releases = centre_inputs(world, PARAMS, Cube(), solved.route,
+                                        solved.releases, 1000, solved.end_tick + 2)
+        run = simulate(world, PARAMS, input_events(route, releases),
+                       max_ticks=solved.end_tick + 4 * 24, until_x=1000, start=Cube(),
+                       start_tick=0)
+        assert run.outcome == "reached"
+
+
+def test_a_ufo_presses_in_the_air() -> None:
+    world, solved = _flight(111, [_spike(20), _spike(20, 1), _spike(20, 2)])
+    assert solved.result == "possible" and len(solved.route) >= 2
+    assert solved.releases == [t + 1 for t in solved.route]
+    wall = [_block(20, r) for r in range(10)]
+    assert _flight(111, wall)[1].result == "impossible"
+
+
+def test_a_hold_has_a_press_and_a_release_window() -> None:
+    world, solved = _flight(13, [_spike(20)])
+    assert solved.result == "possible" and solved.end_tick is not None
+    limit = solved.end_tick + 2
+    (press,) = windows(world, PARAMS, Cube(), solved.route, 1000, limit, solved.releases)
+    (release,) = release_windows(world, PARAMS, Cube(), solved.route, solved.releases,
+                                 1000, limit)
+    assert press[0] <= solved.route[0] <= press[1]
+    assert release is not None and release[0] <= solved.releases[0] <= release[1]
+    assert release_windows(world, PARAMS, Cube(), [5], [6], 1000, limit) == [None]
+
+
+def test_commands_release_before_pressing_on_the_same_tick() -> None:
+    assert commands([3, 10], [10, 11]) == {3: ["press"], 10: ["release", "press"],
+                                           11: ["release"]}
+    assert input_events([3], None, offset=2) == [{"tick": 5, "action": "press"},
+                                                  {"tick": 6, "action": "release"}]
+
+
+def test_a_ball_flips_over_a_spike() -> None:
+    ball = [{"id": 47, "x": 255, "y": 45}]
+    result = _verify([*ball, {"id": 8, "x": 615, "y": 15}], {"x_range": [0, 900]})
+    assert result["result"] == "possible" and result["exit"]["mode"] == "ball"
 
 
 def test_verify_explicit_start_mid_level() -> None:

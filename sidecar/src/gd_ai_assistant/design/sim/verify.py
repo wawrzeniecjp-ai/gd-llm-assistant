@@ -8,7 +8,7 @@ from typing import Any
 from ..constants import SPEEDS, PhysicsConstants, load_constants
 from ..level_model import LevelModel
 from .cube import HALF, Cube, CubeParams, UncalibratedError, simulate
-from .solver import describe_route, solve
+from .solver import describe_route, input_events, solve
 from .world import World, world_from_model
 
 #: Most unsupported objects listed in a result; the rest are counted.
@@ -62,14 +62,18 @@ def verify(world: World, params: CubeParams, args: dict[str, Any]) -> dict[str, 
             **base, "result": "unverifiable",
             "unverifiable": blocked[:_MAX_LISTED],
             "unverifiable_count": len(blocked),
-            "note": "Sim-1 simulates the cube with solids, hazards, yellow/pink orbs and "
-                    "pads, and speed portals. Anything else in the span stops it.",
+            "note": "The simulator plays the cube with solids, hazards, yellow, pink and "
+                    "blue orbs and pads, and speed, gravity, size and mode portals; ship, "
+                    "ball, ufo and wave, mini or not, with blocks, spikes, orbs and pads. "
+                    "A mini cube's orbs, a mini cube squeezed under a low block, a flying "
+                    "player meeting a block from below deeper than measured, and Sim-3's "
+                    "modes are not calibrated yet and stop it.",
         }
 
     idle = simulate(world, params, [], max_ticks=10**6, until_x=x1, start=cube,
                     start_tick=0, record=False)
     deaths_without_input = []
-    if idle.death is not None:
+    if idle.death is not None and idle.death.cause != "unverifiable":
         deaths_without_input.append({"x": round(idle.death.x, 1),
                                      "cause_uid": idle.death.cause_uid})
 
@@ -88,8 +92,14 @@ def verify(world: World, params: CubeParams, args: dict[str, Any]) -> dict[str, 
         final = solved.final
         assert final is not None
         result["exit"] = {"x": round(final.x, 1), "y": round(final.y, 2),
-                          "vy": round(final.vy, 3), "mode": "cube", "speed": final.speed,
-                          "gravity": 1, "mini": False, "grounded": final.grounded}
+                          "vy": round(final.vy, 3), "mode": final.mode, "speed": final.speed,
+                          "gravity": final.gravity, "mini": final.mini,
+                          "grounded": final.grounded}
+    elif solved.result == "unverifiable":
+        first = solved.frontier_deaths[0] if solved.frontier_deaths else None
+        result["unverifiable"] = [{"reason": solved.reason or "not simulated",
+                                   **({"x": round(first.x, 1)} if first else {})}]
+        result["furthest_x"] = round(solved.furthest_x, 1)
     else:
         result["furthest_x"] = round(solved.furthest_x, 1)
         causes = sorted({d.cause_uid for d in solved.frontier_deaths if d.cause_uid})
@@ -173,9 +183,8 @@ def route_overlay(model: LevelModel, x_end: float,
     if solved.result != "possible":
         return {"result": solved.result, "furthest_x": solved.furthest_x}
     described = describe_route(world, params, start, solved, x_end)
-    taps = [{"tick": t, "action": a} for r in solved.route
-            for t, a in ((r, "press"), (r + 1, "release"))]
-    run = simulate(world, params, taps, max_ticks=(solved.end_tick or 0) + 2,
+    run = simulate(world, params, input_events(solved.route, solved.releases or None),
+                   max_ticks=(solved.end_tick or 0) + 2,
                    until_x=x_end, start=start, start_tick=0)
     xs = dict(zip(run.trace["tick"], run.trace["x"], strict=True))
     ys = dict(zip(run.trace["tick"], run.trace["y"], strict=True))

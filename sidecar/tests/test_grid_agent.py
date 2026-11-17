@@ -110,11 +110,21 @@ async def test_render_schematic_attaches_an_image() -> None:
 async def test_schematic_reports_later_overlays_as_unavailable() -> None:
     editor = FakeEditor()
     provider = ScriptProvider([
-        call("render_schematic", {"x_range": [0, 300], "overlays": ["grid", "beats"]}),
+        call("render_schematic", {"x_range": [0, 300], "overlays": ["grid", "camera"]}),
         text(),
     ])
     await make_loop(editor, provider).run(turn_id="t1", message_id="m1", user_text="look")
-    assert any("M4" in note for note in _tool_result(provider)["notes"])
+    assert any("camera" in note for note in _tool_result(provider)["notes"])
+
+
+async def test_schematic_beats_without_a_bpm_say_why() -> None:
+    editor = FakeEditor()
+    provider = ScriptProvider([
+        call("render_schematic", {"x_range": [0, 300], "overlays": ["beats"]}),
+        text(),
+    ])
+    await make_loop(editor, provider).run(turn_id="t1", message_id="m1", user_text="look")
+    assert any("no bpm" in note for note in _tool_result(provider)["notes"])
 
 
 async def test_verify_section_through_the_agent() -> None:

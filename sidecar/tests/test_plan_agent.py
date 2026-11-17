@@ -112,3 +112,23 @@ async def test_level_music_through_the_agent() -> None:
     provider = ScriptProvider([call("get_level_music", {}), text()])
     await _loop(editor, provider, None).run(turn_id="t1", message_id="m1", user_text="song?")
     assert _results(provider)[0]["audio_track"] == 3
+
+
+async def test_the_schematic_draws_the_plan_beats_and_sections(tmp_path) -> None:
+    store = PlanStore(tmp_path)
+    ops = [{"op": "set_music", "bpm": 120, "offset_ms": 0, "source": "user"},
+           {"op": "add_section", "section": {"id": "s1", "name": "Intro", "start_ms": 0,
+                                             "end_ms": 2000}},
+           {"op": "add_section", "section": {"id": "s2", "name": "Drop", "start_ms": 2000,
+                                             "end_ms": 4000}}]
+    provider = ScriptProvider([
+        call("update_level_plan", {"ops": ops}),
+        call("render_schematic", {"x_range": [0, 900], "overlays": ["grid", "beats",
+                                                                    "sections"]}, "c2"),
+        text()])
+    await _loop(FakeEditor(), provider, store).run(turn_id="t1", message_id="m1",
+                                                  user_text="show me")
+    drawn = _results(provider)[1]
+    # 900 units at 1x (~311.6 u/s) is ~2.89 s: half-beats at 0, 250, ... 2750 ms.
+    assert drawn["drawn"]["beats"] == 12 and drawn["drawn"]["sections"] == 2
+    assert not drawn.get("notes")

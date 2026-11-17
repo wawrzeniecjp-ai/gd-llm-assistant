@@ -866,6 +866,143 @@ the frontier, so the model knows where to look.
 - Property tests: a flat floor with no hazards is `possible` with zero inputs, at every
   speed and mode where that applies. A wall is `impossible`.
 
+## 6.10.1 Sim-2 as built (M5, 2026-11-15/16, in progress)
+
+P15 (ship, ball, ufo and wave: held, tapped, held long; mini, upside down, every speed, a
+portal above the ground; 72 runs) and P16 (the cube upside down, gravity and toggle
+portals, blue pad and orb, mini; 19 runs) were exploration probes: full traces, no
+fitting, the physics read off them afterwards. Every one of the 91 runs now replays in
+the simulator within the golden tolerances, with the 718 Sim-1 goldens unchanged.
+
+- vy in the trace is in world terms (positive up) in either gravity.
+- **Ship:** per tick, held: +0.108 while falling, +0.086 otherwise; released: -0.103
+  while rising, -0.069 otherwise; capped at +8 / -6.4. "Falling" is
+  `gravity * (vy - 1.916) < 0` (1.916 = 2 x the game's 0.958199), the same threshold
+  upright and upside down in world vy. The same at every speed.
+- **Ufo:** a press jumps on the next move to 6.871 (every speed), replacing vy, with no
+  gravity that tick, in the air too; held, once. Otherwise -0.129 rising, -0.086
+  falling, capped at -6.4.
+- **Ball:** a grounded press flips gravity at once, at 0.3 of the cube's jump at that
+  speed, towards the new floor; in the air nothing, and nothing kept. Gravity 0.129,
+  capped at 15.
+- **Wave:** vy = ±4 x the speed's dx, y moving vy x 0.25 (45°; mini 0.5, twice as
+  steep). It rests at half-height 10 (mini 6) but touches objects with a box of 5
+  (P15: upside down it met a gravity portal 3 ticks after the others; P17 pinned it).
+- **Mini:** half-size x 0.6; cube jump, pads and the ball's flip x 0.8; gravity
+  unchanged. The mini ship and ufo have their own measured rates (close to, not exactly,
+  normal / 0.85): 0.101 / 0.127 / 0.122 / 0.081, caps 9.412 / 7.529; ufo jump 6.648,
+  0.152 / 0.101.
+- **Changing mode:** the move happens with the old mode, then the portal. Ship, ufo and
+  wave each halve vy on the way in and again on the way out; the cube and the ball keep
+  it (P17: ship to cube x0.5, ship to ufo x0.25, ship to ball x0.5, ball to cube x1).
+  Back in the cube, gravity stays as it was: a ball upside down becomes a cube falling up.
+- **Bands:** 300 high (ball 240). The floor is the portal's centre less half the band,
+  rounded down to 30, never below the ground (P17: portals at 143, 192, 238, 284 gave
+  floors 0, 30, 60, 120; the ball 0, 60, 90, 150).
+- **Contacts (P17, full size):** ship, ufo and ball touch spikes with the outer box (15)
+  and the wave with a box of 5; hazards kill on exact contact (a spike's bottom level
+  with the ship's top killed it; this holds for the cube too and changed no Sim-1
+  golden). A block the ship, ufo or ball overlaps is a floor if it came from above and a
+  ceiling if from below, within the cube's landing tolerance: gliding on the ground under
+  a block 2-6 into it, each was pushed down below the ground to the block's bottom, and
+  back up once past it. A solid in the inner box kills, as for the cube (derived). A
+  block 1 into the wave's box did nothing; deeper is not measured.
+- **Gravity portals** flip and halve vy; the toggle portal flips. Portals are handled
+  before solids: a cube flipped while standing on a block takes one tick of gravity into
+  it, then flips before landing undoes it. **Blue** pads and orbs flip gravity and send
+  the cube towards its new floor at 0.4 of the yellow one (6.4, 4.472), whatever its vy.
+- Accelerations are per-tick measured values, each over hundreds of ticks; they are not
+  exact multiples of one gravity unit (tried: the ufo drifted half a unit in 230 ticks).
+
+P17 (2026-11-16; back to the cube from each mode, mode portals above the ground, a spike
+and a block above each mode gliding on the floor; 79 runs) replays in full too: 888
+goldens.
+
+Not known yet after P17, so the simulator stopped with `unverifiable`: a flight mode
+near an orb or pad; the wave more than 1 into a solid; a mini player near a solid,
+hazard, orb or flying pad. P18 below measured all of these.
+
+**Hold search (2026-11-16).** The solver now plays every Sim-2 mode (6.8.2):
+- The ship and wave hold and release.
+- The UFO taps in the air.
+- The ball flips on the ground.
+
+A route is its press ticks plus a release tick for each; a tap releases on the next
+tick. A hold's press and release each get a window (6.8.3). In `verify_section` it is
+`action: "hold"` with `release_tick`, `hold_ms`, `release_window_ticks` and
+`release_window_ms`, and `playtest_verify` plays the holds too.
+
+As built:
+- **Decisions:** flight decisions come every 8 ticks in the coarse pass and every 2 in
+  the full pass (cube jumps: 4 and 1).
+- **Merging states:** the search merges flying states within 2 units of y and 0.5 of
+  vy. The cube's key is finer, and timing windows still compare against it.
+- **Coarse pass:** it keeps at most 300 branches. When it has to cut, it first keeps
+  the simplest branch in each band of 15 units of height, per mode, hold state and
+  direction. Keeping the simplest overall had left a flying frontier at a single
+  height, and a ship over one spike took 8 s.
+- **Timings:** each of these solved in 0.1-1.7 s:
+  - a ship over spikes and through a 3-block tunnel;
+  - a wave over a row of spikes;
+  - a UFO over a column of three spikes (two presses);
+  - a ball over a spike.
+- **Walls:** a full-height wall is `impossible` for the UFO, but `inconclusive` (beam
+  overflow) for the ship, whose states outnumber the beam.
+
+**P18 (2026-11-16, fitted 2026-11-17).** `scripts/calibrate.py P18`, 254 runs, records
+what Sim-2 still reported as unverifiable. The fixture is `cal_flight.json`. The golden
+test skips a run the simulator calls unverifiable, after matching it up to that point.
+Each run is aimed by the simulator, using the layout without the object being measured.
+The object sits in column 14.
+- **A, pads:** yellow, pink and blue pads on the floor under the ship, UFO, ball and
+  wave, at 1x and 2x, with no input; a yellow pad under each mini mode.
+- **B, orbs:** an orb on the floor in each flight mode.
+  - Yellow: pressed every 4 ticks across the span where the player's box overlaps the
+    orb, held through it, and pressed just before it.
+  - Pink and blue: pressed mid-span.
+  - Mini: yellow only, pressed mid-span.
+- **C, D, mini under objects:** each mode (the cube included) glides on the floor,
+  mini, under a spike or a block, as P17 C and D.
+- **E, mini cube jumps:** presses every 4 ticks over a ground spike, then onto a
+  one-block step, as P5 and P4.
+- **F, the wave in solids:** the wave runs into a 3-block wall. It falls onto a step,
+  then climbs under a ceiling, each starting at column 20. Its centre crosses the
+  face 24 units either side of the corner, in steps of about 4.
+
+P18 results, now in the simulator; 253 of the 254 runs replay as goldens (1149 in all):
+- **Pads in flight:** each mode has its own impulse, the same at 1x and 2x.
+  - Ship: yellow 16, pink 5.6. UFO: 16 and 6.4. Ball: 9.6 and 6.72.
+  - Blue is 0.4 times the mode's yellow, towards the flipped floor. Mini is x0.8.
+  - The ufo, like the ship, is capped at vy 8 going up (mini 9.412): a yellow pad's 16
+    is 8 on the next tick.
+  - The wave's path ignores yellow and pink pads; a blue one flips its gravity. Its pad
+    contact counts an exact edge (its box of 5 ends on a floor pad's top).
+- **Orbs in flight:** they fire only on a press while touching. No buffering: held
+  into the orb, or pressed just before it, nothing fires.
+  - The press fires the orb instead of the mode's own press: no ufo jump, no ball flip.
+  - Ship and UFO: yellow 11.18 (the cube's), pink 4.137 and 4.696. Ball: 7.826 and 6.026.
+  - Blue and mini as for pads. The wave ignores yellow and pink orbs and flips on blue.
+- **Mini contacts:**
+  - Every box scales by 0.6. The inner box too: a mini cube jumping past a step's corner
+    lived where an unscaled one would have died.
+  - Spikes kill on contact as at full size: the outer box of 9; the wave's contact box
+    of 3.
+  - A block above a flying player, met from below, pushes it down when 4 into its outer
+    box, and kills it at 6, reported at the position before the move.
+  - With P17's full-size push at 6, this gives `ceiling_push` 6.67 and `ceiling_kill`
+    10, times 0.6 mini (derived). In between is unverifiable.
+  - A grounded mini cube runs on under a block 4 into it. At 6 the game pushes it below
+    the ground; this is not simulated, and deeper than 4 is unverifiable.
+- **The wave in solids:** it never slides on a block. It died at every wall, step and
+  ceiling, on the face and at the corner. A solid overlapping a box of 1.2 around its
+  centre kills it (deaths allow 0.7-1.5; 16 of the 28 die on the game's tick, the rest
+  one tick early, within the golden tolerance).
+- **Still unverifiable:**
+  - a mini cube's orbs;
+  - a grounded mini cube under a block more than 4 into it;
+  - a ship, UFO or ball meeting a block from below between the push and kill depths;
+  - robot, spider and swing (Sim-3).
+
 ## 6.11 Deferred: slopes, platformer, moving objects
 
 Slopes need a separate collision response and their own probes. Platformer mode makes
@@ -1265,19 +1402,31 @@ status, the last 5 decisions) is added to the system prompt as a separate block 
   the file the game plays it from. `length_ms` and `guidelines` are null until S-L7 and
   S-L6; `set_guidelines` is not built.
 - `design/music.py`: the beat grid in song time (first beat at `music.offset_ms`, tempo
-  changes restart the spacing), and `alignment`: the fraction of route presses within
-  35 ms of a half-beat (`beat_alignment`, 14.2).
+  changes restart the spacing), and `alignment` (`beat_alignment`, 14.2): the fraction of
+  jumps whose **press window** has a half-beat inside it and within 35 ms of its centre.
+  Measured first on the solver's one press per jump, the first live eval scored 0 on
+  levels the model had built with every window centred on a beat: the solver presses at
+  the window's edge, ~50 ms from the centre. "A beat anywhere in the window" was too lax
+  the other way: easy cube windows are 100-112 ms, so spikes at random column phases
+  score 0.75 at 120 bpm; the centre rule scores about 0.28 at random.
 - `design/plan.py`: storage as 9.2 under `data_dir` (new setting); ops as 9.4, validated
   against a JSON schema of 9.3 as a whole after all ops apply; derived `x_range` from song
   times; `verified` stamped by the sidecar with the revision and a hash of the section's
   gameplay objects when a section's gameplay is first marked verified, so a later change
   shows it `stale`; the prompt block is capped at 2400 characters.
-- `place_grid` `snap_to_beats {subdivision}` reports each orb in the block and each press
-  of its verified route with its offset from the nearest subdivision. Times come from the
+- `place_grid` `snap_to_beats {subdivision}` reports each orb in the block with its offset
+  from the nearest subdivision, and each press of its verified route with its window in
+  song ms and the offset of the window's centre (the same rule as `beat_alignment`). Times come from the
   level before the block, so a block that places a speed portal says to check again.
+- `render_schematic` draws `beats` (bars thick, beats thin, half-beats as ticks at the
+  bottom, from the plan's bpm) and `sections` (tinted bands with names, below the column
+  numbers); without a bpm or sections it says so in `notes`.
 - Evaluation: a case may bring a `[plan]` (seeded per run), and the `cube-on-beat` case is
-  M4's beat-alignment check. Done-when status: the timeline matches the simulator at five
-  portals; the game check (P14) and the 2-of-3-seeds eval are for the next live session.
+  M4's beat-alignment check; its recording is a real deepseek-flash run.
+- **Done-when, met 2026-11-15.** P14 in the game: the replay matches the timeline within
+  0.06 tick and the simulator within 0.001 units over 4200 ticks and five portals.
+  `cube-on-beat`, 3 seeds (deepseek-flash): every hard assertion passes and
+  `beat_alignment` is 1.0 in 3 of 3 (centre offsets under 1 ms, ~4 ms, ~31 ms).
 
 ---
 
@@ -1547,7 +1696,8 @@ draw what no screenshot can: the route, the timing windows, the beats, the secti
   (plan sections shaded and labelled), `camera` (the player's visible rectangle at selected
   presses, for blind-jump review).
 - **As built (M1):** only the `grid` overlay draws; the others return a note naming the
-  milestone that brings them. A hazard is drawn as its sprite outline (faint) with its
+  milestone that brings them. M2 added `route` and `windows`, M4 `beats` and `sections`
+  (9.6); `camera` still returns a note. A hazard is drawn as its sprite outline (faint) with its
   hitbox solid inside, because a spike's deadly area is a fraction of its art.
 - Max image size 1600×600 px. Wider ranges reduce `px_per_cell` automatically, with a floor
   of 4. Below that the call errors and asks for a narrower range.

@@ -768,7 +768,11 @@ class ToolLoop:
                     route = verify_module.route_overlay(
                         model, max(float(v) for v in args["x_range"]),
                         start_speed=args.get("_level_start_speed", "1x"))
-                schematic = render_module.render_schematic(model, grid, args, route)
+                beats, sections, notes = self._schematic_plan_overlays(model, args,
+                                                                        overlays)
+                schematic = render_module.render_schematic(model, grid, args, route,
+                                                           beats, sections)
+                schematic.notes.extend(notes)
             except render_module.SchematicError as exc:
                 return {"error": str(exc)}, True
             if len(schematic.png) > capture.MAX_FILE_BYTES:
@@ -865,17 +869,28 @@ class ToolLoop:
         spec = args.get("snap_to_beats") if isinstance(args.get("snap_to_beats"), dict) else {}
         subdivision = int(spec.get("subdivision", 2))
         roles = self._snapshot.roles
-        items = [{"what": "orb", "x": float(o["x"])} for o in creates
-                 if roles.role_of(int(o["id"])).value == "orb"]
+        tolerance = music_module.BEAT_TOLERANCE_MS
+        items: list[dict[str, Any]] = []
+        for o in creates:
+            if roles.role_of(int(o["id"])).value == "orb":
+                off = music_module.nearest_offset_ms(
+                    music, timeline.song_ms_at(float(o["x"])), subdivision)
+                items.append({"what": "orb", "x": float(o["x"]), "off_beat_ms": round(off, 1),
+                              "on_beat": abs(off) <= tolerance})
         route = (verification or {}).get("route") or []
-        items += [{"what": "press", "x": float(r["x"])} for r in route]
-        for item in items:
-            off = music_module.nearest_offset_ms(music, timeline.song_ms_at(item["x"]),
-                                                 subdivision)
-            item["off_beat_ms"] = round(off, 1)
-            item["on_beat"] = abs(off) <= music_module.BEAT_TOLERANCE_MS
-        report: dict[str, Any] = {"items": items, "subdivision": subdivision,
-                                  "tolerance_ms": music_module.BEAT_TOLERANCE_MS}
+        for r, (lo, hi) in zip(route, music_module.press_windows_ms(timeline, route),
+                               strict=True):
+            off, inside = music_module.window_offset_ms(music, lo, hi, subdivision)
+            items.append({"what": "press", "x": float(r["x"]),
+                          "window_song_ms": [round(lo), round(hi)],
+                          "off_beat_ms": round(off, 1),
+                          "on_beat": inside and abs(off) <= tolerance})
+        report: dict[str, Any] = {
+            "items": items, "subdivision": subdivision, "tolerance_ms": tolerance,
+            "how": "for a press, off_beat_ms is from the centre of its timing window to the "
+                   "nearest beat subdivision; on the beat means that beat is inside the "
+                   "window and within the tolerance of its centre. Positive: the window is "
+                   "late, so move the obstacle left"}
         if any(roles.role_of(int(o["id"])).value == "portal_speed" for o in creates):
             report["note"] = ("the block places a speed portal; times are from the level "
                               "before it, so check again after placing")
@@ -1133,6 +1148,39 @@ class ToolLoop:
         if not music.get("bpm"):
             return None, None
         return music, self._timeline(model, args)
+
+    def _schematic_plan_overlays(self, model: Any, args: dict[str, Any], overlays: set[str]
+                                 ) -> tuple[list[dict[str, Any]] | None,
+                                            list[dict[str, Any]] | None, list[str]]:
+        """`render_schematic`'s `beats` and `sections` overlays, from the level plan."""
+        beats: list[dict[str, Any]] | None = None
+        sections: list[dict[str, Any]] | None = None
+        notes: list[str] = []
+        if not overlays & {"beats", "sections"} or not args.get("x_range"):
+            return beats, sections, notes
+        lo, hi = sorted(float(v) for v in args["x_range"])
+        if "beats" in overlays:
+            music, timeline = self.music_context(model, args)
+            if music is None or timeline is None:
+                notes.append("no beats drawn: the level plan has no bpm (ask the user)")
+            else:
+                try:
+                    beats = music_module.beat_grid(music, timeline, (lo, hi),
+                                                   subdivision=2)["beats"]
+                except music_module.MusicError as exc:
+                    notes.append(f"no beats drawn: {exc}")
+        if "sections" in overlays:
+            plan = self._load_plan() if self._plans is not None else None
+            timeline = self._timeline(model, args)
+            sections = []
+            for section in (plan or {}).get("sections") or []:
+                span = plan_module.section_x_range(section, timeline)
+                if span is not None:
+                    sections.append({"id": section.get("id"), "name": section.get("name"),
+                                     "x0": span[0], "x1": span[1]})
+            if not sections:
+                notes.append("no sections drawn: the level plan has none")
+        return beats, sections, notes
 
     def _plan_tool(self, name: str, model: Any, args: dict[str, Any]) -> dict[str, Any]:
         if self._plans is None or not self._level_key:

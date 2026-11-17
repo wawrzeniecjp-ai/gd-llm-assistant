@@ -188,3 +188,18 @@ def test_traces_are_not_kept_when_the_game_agrees() -> None:
                                            "traces": True})
     assert result["comparison"]["agrees"]
     assert "trace_rows" not in result["comparison"]
+
+
+def test_a_ship_hold_is_played_and_confirmed() -> None:
+    objects = [{"id": 13, "x": 255, "y": 45}, {"id": 8, "x": 615, "y": 15}]
+    game = FakeGame(objects)
+    result = _run(game, objects, {"x_range": [0, 900], "start": "level_start",
+                                  "edges": True})
+    assert result["result"] == "confirmed", result
+    (hold,) = result["route"]
+    assert hold["action"] == "hold"
+    assert hold["game_release_tick"] == hold["release_tick"] + LEAD
+    played = game.calls[0]["inputs"]
+    assert {"tick": hold["game_tick"], "action": "press"} in played
+    assert {"tick": hold["game_release_tick"], "action": "release"} in played
+    assert result["edges_agree"], result["edges"]

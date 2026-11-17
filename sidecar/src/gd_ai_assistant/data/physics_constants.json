@@ -1,7 +1,7 @@
 {
     "schema": 1,
     "game_version": "2.2091",
-    "calibrated_at": "2026-11-09",
+    "calibrated_at": "2026-11-16",
     "note": "LEVEL-DESIGN-SPEC.md 6.3. Every leaf is {value, source, confidence}. confidence is measured | derived | guess. A null value means 'not known yet', and code that needs it must refuse rather than assume. Replaced by scripts/calibrate.py (M2).",
     "tick_rate": {
         "value": 240,
@@ -449,6 +449,337 @@
                         "confidence": "measured"
                     }
                 }
+            },
+            "entry_vy": {
+                "value": 1.0,
+                "source": "scripts/calibrate.py P17, 2026-11-16: back to the cube from the ship, ufo and wave vy is halved (their own 0.5), from the ball kept; each mode's factor applies on leaving it and on entering it (ship to ufo x0.25, ship to ball x0.5)",
+                "confidence": "measured"
+            }
+        },
+        "player": {
+            "falling_below": {
+                "value": 1.916398,
+                "source": "scripts/calibrate.py P15, 2026-11-15; ship and ufo change acceleration at world vy 2 x 0.958199, in both gravities",
+                "confidence": "measured"
+            },
+            "mini_scale": {
+                "value": 0.6,
+                "source": "scripts/calibrate.py P15/P16, 2026-11-15; a mini player rests at y 9 (wave 6)",
+                "confidence": "measured"
+            },
+            "mini_impulse": {
+                "value": 0.8,
+                "source": "scripts/calibrate.py P16, 2026-11-15; mini cube jump 8.944, yellow pad 12.8, ball flip 2.683: 0.8 of the normal ones",
+                "confidence": "measured"
+            },
+            "blue": {
+                "value": 0.4,
+                "source": "scripts/calibrate.py P16, 2026-11-15; blue orb 4.472 and blue pad 6.4: 0.4 of yellow, towards the new floor",
+                "confidence": "measured"
+            },
+            "gravity_portal_vy": {
+                "value": 0.5,
+                "source": "scripts/calibrate.py P16, 2026-11-15; vy halved on a gravity flip",
+                "confidence": "measured"
+            },
+            "ceiling_push": {
+                "value": 6.67,
+                "confidence": "derived",
+                "source": "scripts/calibrate.py P18, 2026-11-16: gliding under a block from below, a ship, ufo or ball was pushed down when the block reached 6 into its outer box (P17) and a mini one at 4, while a mini one died at 6; this is 4 / mini_scale, times mini_scale for a mini player"
+            },
+            "ceiling_kill": {
+                "value": 10.0,
+                "confidence": "derived",
+                "source": "scripts/calibrate.py P18, 2026-11-16: 6 / mini_scale, from the mini deaths; deeper than ceiling_push and less deep than this is not known"
+            },
+            "mini_cube_squeeze": {
+                "value": 4.0,
+                "confidence": "measured",
+                "source": "scripts/calibrate.py P18, 2026-11-16: a grounded mini cube under a block 4 into its outer box ran on unchanged; at 6 it was pushed down below the ground (not simulated: deeper than this is unverifiable)"
+            }
+        },
+        "ship": {
+            "hold_rising": {
+                "value": 0.086,
+                "source": "scripts/calibrate.py P15, 2026-11-15; per tick held, rising (598 ticks)",
+                "confidence": "measured"
+            },
+            "hold_falling": {
+                "value": 0.108,
+                "source": "scripts/calibrate.py P15, 2026-11-15; per tick held while falling (168 ticks)",
+                "confidence": "measured"
+            },
+            "release_rising": {
+                "value": 0.103,
+                "source": "scripts/calibrate.py P15, 2026-11-15; per tick released while rising (448 ticks)",
+                "confidence": "measured"
+            },
+            "release_falling": {
+                "value": 0.069,
+                "source": "scripts/calibrate.py P15, 2026-11-15; per tick released while falling (1245 ticks)",
+                "confidence": "measured"
+            },
+            "max_up": {
+                "value": 8.0,
+                "source": "scripts/calibrate.py P15, 2026-11-15",
+                "confidence": "measured"
+            },
+            "max_down": {
+                "value": 6.4,
+                "source": "scripts/calibrate.py P15, 2026-11-15",
+                "confidence": "measured"
+            },
+            "bounds": {
+                "value": 300.0,
+                "source": "scripts/calibrate.py P15, 2026-11-15; floor to ceiling; portals centred at y 45 and 135 both put the floor on the ground; P17, 2026-11-16: the floor is the portal's centre less half this, rounded down to 30, not below the ground",
+                "confidence": "measured"
+            },
+            "entry_vy": {
+                "value": 0.5,
+                "source": "scripts/calibrate.py P15, 2026-11-15 (from the cube); P17, 2026-11-16: also applied on leaving the mode",
+                "confidence": "measured"
+            },
+            "mini": {
+                "hold_rising": {
+                    "value": 0.101,
+                    "source": "scripts/calibrate.py P15, 2026-11-15",
+                    "confidence": "measured"
+                },
+                "hold_falling": {
+                    "value": 0.127,
+                    "source": "scripts/calibrate.py P15, 2026-11-15",
+                    "confidence": "measured"
+                },
+                "release_rising": {
+                    "value": 0.122,
+                    "source": "scripts/calibrate.py P15, 2026-11-15",
+                    "confidence": "measured"
+                },
+                "release_falling": {
+                    "value": 0.081,
+                    "source": "scripts/calibrate.py P15, 2026-11-15",
+                    "confidence": "measured"
+                },
+                "max_up": {
+                    "value": 9.412,
+                    "source": "scripts/calibrate.py P15, 2026-11-15",
+                    "confidence": "measured"
+                },
+                "max_down": {
+                    "value": 7.529,
+                    "source": "scripts/calibrate.py P15, 2026-11-15",
+                    "confidence": "measured"
+                }
+            },
+            "orb_impulse": {
+                "yellow": {
+                    "value": 11.18,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; pressed while touching; blue is the player's blue x this yellow; mini x mini_impulse",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 4.137,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; pressed while touching; blue is the player's blue x this yellow; mini x mini_impulse",
+                    "confidence": "measured"
+                }
+            },
+            "pad_impulse": {
+                "yellow": {
+                    "value": 16.0,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; the same at 1x and 2x",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 5.6,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; the same at 1x and 2x",
+                    "confidence": "measured"
+                }
+            }
+        },
+        "ufo": {
+            "jump": {
+                "value": 6.871,
+                "source": "scripts/calibrate.py P15, 2026-11-15; every speed",
+                "confidence": "measured"
+            },
+            "rising": {
+                "value": 0.129,
+                "source": "scripts/calibrate.py P15, 2026-11-15; per tick (1602 ticks)",
+                "confidence": "measured"
+            },
+            "falling": {
+                "value": 0.086,
+                "source": "scripts/calibrate.py P15, 2026-11-15; per tick (1946 ticks)",
+                "confidence": "measured"
+            },
+            "max_down": {
+                "value": 6.4,
+                "source": "scripts/calibrate.py P15, 2026-11-15",
+                "confidence": "measured"
+            },
+            "bounds": {
+                "value": 300.0,
+                "source": "scripts/calibrate.py P15, 2026-11-15; P17, 2026-11-16: the floor is the portal's centre less half this, rounded down to 30, not below the ground",
+                "confidence": "measured"
+            },
+            "entry_vy": {
+                "value": 0.5,
+                "source": "scripts/calibrate.py P15, 2026-11-15 (from the cube); P17, 2026-11-16: also applied on leaving the mode",
+                "confidence": "measured"
+            },
+            "mini": {
+                "jump": {
+                    "value": 6.648,
+                    "source": "scripts/calibrate.py P15, 2026-11-15",
+                    "confidence": "measured"
+                },
+                "rising": {
+                    "value": 0.152,
+                    "source": "scripts/calibrate.py P15, 2026-11-15",
+                    "confidence": "measured"
+                },
+                "falling": {
+                    "value": 0.101,
+                    "source": "scripts/calibrate.py P15, 2026-11-15",
+                    "confidence": "measured"
+                },
+                "max_down": {
+                    "value": 7.529,
+                    "source": "scripts/calibrate.py P15, 2026-11-15",
+                    "confidence": "measured"
+                },
+                "max_up": {
+                    "value": 9.412,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; a yellow pad's 12.8 was 9.412 on the next tick",
+                    "confidence": "measured"
+                }
+            },
+            "orb_impulse": {
+                "yellow": {
+                    "value": 11.18,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; pressed while touching; blue is the player's blue x this yellow; mini x mini_impulse",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 4.696,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; pressed while touching; blue is the player's blue x this yellow; mini x mini_impulse",
+                    "confidence": "measured"
+                }
+            },
+            "pad_impulse": {
+                "yellow": {
+                    "value": 16.0,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; the same at 1x and 2x",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 6.4,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; the same at 1x and 2x",
+                    "confidence": "measured"
+                }
+            },
+            "max_up": {
+                "value": 8.0,
+                "source": "scripts/calibrate.py P18, 2026-11-16; a yellow pad's 16 was 8 on the next tick",
+                "confidence": "measured"
+            }
+        },
+        "ball": {
+            "gravity": {
+                "value": 0.129,
+                "source": "scripts/calibrate.py P15, 2026-11-15; per tick, mini too (2904 ticks)",
+                "confidence": "measured"
+            },
+            "flip": {
+                "value": 0.3,
+                "source": "scripts/calibrate.py P15, 2026-11-15; a grounded press flips at 0.3 of the cube's jump at that speed",
+                "confidence": "measured"
+            },
+            "max_speed": {
+                "value": 15.0,
+                "source": "scripts/calibrate.py P15, 2026-11-15",
+                "confidence": "measured"
+            },
+            "bounds": {
+                "value": 240.0,
+                "source": "scripts/calibrate.py P15, 2026-11-15; P17, 2026-11-16: the floor is the portal's centre less half this, rounded down to 30, not below the ground",
+                "confidence": "measured"
+            },
+            "entry_vy": {
+                "value": 1.0,
+                "source": "scripts/calibrate.py P15, 2026-11-15; P17, 2026-11-16: vy kept entering and leaving the ball",
+                "confidence": "measured"
+            },
+            "orb_impulse": {
+                "yellow": {
+                    "value": 7.826,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; pressed while touching; blue is the player's blue x this yellow; mini x mini_impulse",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 6.026,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; pressed while touching; blue is the player's blue x this yellow; mini x mini_impulse",
+                    "confidence": "measured"
+                }
+            },
+            "pad_impulse": {
+                "yellow": {
+                    "value": 9.6,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; the same at 1x and 2x",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 6.72,
+                    "source": "scripts/calibrate.py P18, 2026-11-16; the same at 1x and 2x",
+                    "confidence": "measured"
+                }
+            }
+        },
+        "wave": {
+            "slope": {
+                "value": 4.0,
+                "source": "scripts/calibrate.py P15, 2026-11-15; vy is 4 x the speed's dx per tick, every speed",
+                "confidence": "measured"
+            },
+            "y_scale": {
+                "value": 0.25,
+                "source": "scripts/calibrate.py P15, 2026-11-15; y moves vy x 0.25: 45 degrees",
+                "confidence": "measured"
+            },
+            "mini_y_scale": {
+                "value": 0.5,
+                "source": "scripts/calibrate.py P15, 2026-11-15; mini: twice as steep",
+                "confidence": "measured"
+            },
+            "half": {
+                "value": 10.0,
+                "source": "scripts/calibrate.py P15, 2026-11-15; the wave rests at y 10",
+                "confidence": "measured"
+            },
+            "bounds": {
+                "value": 300.0,
+                "source": "scripts/calibrate.py P15, 2026-11-15; P17, 2026-11-16: the floor is the portal's centre less half this, rounded down to 30, not below the ground",
+                "confidence": "measured"
+            },
+            "entry_vy": {
+                "value": 0.5,
+                "source": "scripts/calibrate.py P15, 2026-11-15 (from the cube); P17, 2026-11-16: also applied on leaving the mode",
+                "confidence": "measured"
+            },
+            "contact_half": {
+                "value": 5.0,
+                "source": "scripts/calibrate.py P17, 2026-11-16: the wave touched a cube portal's edge at x+4.88 and not before, and died to a spike at x+5.00 (P15 bounded it 3.76-5.06); gliding at y 10, a spike whose bottom was 14 killed and one at 16 did not",
+                "confidence": "measured"
+            },
+            "solid_half": {
+                "value": 1.2,
+                "source": "scripts/calibrate.py P18, 2026-11-16; the wave died to every solid it met (a wall, a step's top and side, a ceiling's bottom and side), never sliding; deaths bound the box to (0.95, 1.5], taken mid-range; the mini wave's fits unscaled",
+                "confidence": "measured"
+            },
+            "orbs_and_pads": {
+                "value": 0,
+                "source": "scripts/calibrate.py P18, 2026-11-16; yellow and pink orbs and pads leave the wave's path unchanged; blue ones flip its gravity",
+                "confidence": "measured"
             }
         }
     }

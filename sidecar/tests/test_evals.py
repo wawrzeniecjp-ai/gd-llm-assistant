@@ -38,15 +38,18 @@ def test_replayed_recordings_pass_and_write_a_report(tmp_path) -> None:
 
 
 def test_a_case_plan_is_seeded_and_beat_alignment_measured(tmp_path) -> None:
-    """The on-beat case brings a 120 bpm plan; the recording uses beat_grid and places
-    four spikes, two of whose presses land within 35 ms of a half-beat."""
+    """The on-beat case brings a 120 bpm plan. The recording (deepseek-flash, a real run)
+    reads the plan, uses beat_grid and places five spikes whose press windows are centred
+    on beats -- though the solver's own press in each sits ~50 ms late, which the metric
+    must not count against it."""
     runner.main(["--replay", str(runner.ROOT / "recordings"), "--cases", "cube-on-beat",
                  "--out", str(tmp_path)])
     report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
     metrics = report["runs"][0]["metrics"]
     assert metrics["playable"] == "possible" and metrics["used_beat_grid"]
-    assert metrics["beat_alignment"] == 0.5 and len(metrics["beat_offsets_ms"]) == 4
-    assert report["runs"][0]["verdicts"]["soft:beat_alignment"]["outcome"] == "fail"
+    assert metrics["beat_alignment"] == 1.0 and len(metrics["beat_offsets_ms"]) == 5
+    assert all(abs(o) < 1 for o in metrics["beat_offsets_ms"])
+    assert report["runs"][0]["verdicts"]["soft:beat_alignment"]["outcome"] == "pass"
 
 
 def test_a_failed_hard_assertion_fails_the_run(tmp_path) -> None:

@@ -11,11 +11,13 @@ from typing import Any
 from ..level_model import LevelModel
 from ..roles import Hitbox, Role, RoleEntry, RoleTable
 
-#: Roles Sim-1 knows how to simulate; any other gameplay role in a span makes it
-#: unverifiable.
-SIM1_ROLES = frozenset({Role.SOLID, Role.HAZARD, Role.ORB, Role.PAD, Role.PORTAL_SPEED})
-SIM1_ORBS = frozenset({"yellow", "pink"})
-SIM1_PADS = frozenset({"yellow", "pink"})
+#: Roles the simulator knows (Sim-1, plus Sim-2's gravity, mode and size portals); any
+#: other gameplay role in a span makes it unverifiable. What a Sim-2 feature meets that
+#: is not calibrated yet (a ship touching a block, say) is found while simulating.
+SIM1_ROLES = frozenset({Role.SOLID, Role.HAZARD, Role.ORB, Role.PAD, Role.PORTAL_SPEED,
+                        Role.PORTAL_GRAVITY, Role.PORTAL_MODE, Role.PORTAL_SIZE})
+SIM1_ORBS = frozenset({"yellow", "pink", "blue"})
+SIM1_PADS = frozenset({"yellow", "pink", "blue"})
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,18 @@ class Body:
             ny = min(max(self.cy, player.y1), player.y2)
             return math.hypot(self.cx - nx, self.cy - ny) < self.radius
         return self.box.overlaps(player)
+
+    def hits(self, player: Box) -> bool:
+        """`touches`, counting an edge exactly on the player's: hazards kill on contact
+        (P17: a spike whose bottom was exactly at the ship's top killed it, while a block
+        there did not push it)."""
+        if self.radius > 0:
+            nx = min(max(self.cx, player.x1), player.x2)
+            ny = min(max(self.cy, player.y1), player.y2)
+            return math.hypot(self.cx - nx, self.cy - ny) <= self.radius
+        b = self.box
+        return b.x1 <= player.x2 and player.x1 <= b.x2 and \
+            b.y1 <= player.y2 and player.y1 <= b.y2
 
 
 def _box(x: float, y: float, hb: Hitbox, rotation: float, sx: float, sy: float,
