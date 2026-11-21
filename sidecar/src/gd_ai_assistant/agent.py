@@ -285,6 +285,7 @@ class ToolLoop:
         self._objects_used = 0
         self._text = ""
         self._user_text = ""
+        self._stopped_by = ""
         self._playtests = 0
 
         # Object ids that changed because a save-string write rebuilt the object.
@@ -319,12 +320,12 @@ class ToolLoop:
                 return await self._drive(user_text)
         except TimeoutError:
             log.warning("turn %s hit the %ss wall-clock limit", turn_id, self._timeout_s)
-            await self._end_transaction()
-            return self._result(
-                INCOMPLETE,
-                self._text
-                or f"Stopped after {self._timeout_s}s. Some of the work may not have been done.",
-            )
+            txn_id = await self._end_transaction()
+            self._text = self._text or (
+                f"Stopped after {self._timeout_s:g}s. Some of the work may not have been done.")
+            self._stopped_by = f"the {self._timeout_s:g} s time limit (turn_timeout_s)"
+            self._record(INCOMPLETE)
+            return self._result(INCOMPLETE, self._text, txn_id=txn_id)
         except asyncio.CancelledError:
             # The cleanup has to survive the cancellation that caused it, so it
             # runs shielded in its own task: without that, the `end_transaction`
@@ -371,6 +372,7 @@ class ToolLoop:
             if self._token_budget is not None and self._usage.total_tokens > self._token_budget:
                 log.warning("turn %s exceeded the token budget", self._turn_id)
                 status = INCOMPLETE
+                self._stopped_by = "the token budget (turn_token_budget)"
                 break
 
             if turn.text:
@@ -386,6 +388,7 @@ class ToolLoop:
                     # turn, and the user needs to know which setting to raise.
                     log.warning("turn %s ran out of output tokens", self._turn_id)
                     status = INCOMPLETE
+                    self._stopped_by = "the output limit (max_tokens)"
                     cut = ("The model ran out of output space before it finished "
                            "(max_tokens in sidecar/.env). "
                            + ("Edits made before that are kept; review them. "
@@ -418,6 +421,7 @@ class ToolLoop:
                 )
                 if result.get("_limit_reached"):
                     status = INCOMPLETE
+                    self._stopped_by = "a per-turn limit reported by a tool"
                     stop = True
             if stop:
                 break
@@ -426,6 +430,7 @@ class ToolLoop:
             # the round cap was reached with the model still asking for tools.
             log.warning("turn %s hit the %s-round cap", self._turn_id, self._max_tool_rounds)
             status = INCOMPLETE
+            self._stopped_by = f"the {self._max_tool_rounds}-round cap (max_tool_rounds)"
             self._text = self._text or (
                 f"Stopped after {self._max_tool_rounds} rounds of tool calls. "
                 "The level may be partly edited; review it before continuing."
@@ -435,12 +440,29 @@ class ToolLoop:
         if not self._text:
             self._text = self._summarise_silently(status)
 
-        # Only a completed turn becomes history. An interrupted one would be
-        # repeated as fact on the next turn, and its edits may have been reverted.
-        if status == COMPLETED:
-            self._history.append(user_text, self._text)
-
+        self._record(status)
         return self._result(status, self._text, txn_id=txn_id)
+
+    def _record(self, status: str) -> None:
+        """Add this turn to history.
+
+        A stopped turn is recorded too, marked as unfinished. Leaving it out (the
+        first rule here) meant that "continue" after a round cap or the time limit
+        reached a model with no idea what it was continuing (2026-11-17). Marked, it
+        is not mistaken for finished work, and its edits are kept, so "partly edited"
+        is the truth; an undo afterwards is announced by `mark_level_changed`.
+        A provider failure is still not recorded: nothing ran that a later turn
+        could build on, and the user's request is still on screen to resend.
+        """
+        if status == COMPLETED:
+            self._history.append(self._user_text, self._text)
+        elif status == INCOMPLETE:
+            edits = ("Edits made before the stop were kept; check the level before "
+                     "continuing." if self._actions else "Nothing was changed.")
+            why = self._stopped_by or "a limit"
+            note = f"[This turn stopped before it finished, at {why}. {edits}]"
+            self._history.append(self._user_text,
+                                 f"{self._text}\n\n{note}" if self._text else note)
 
     async def _ensure_catalog(self) -> None:
         """Read the game's own object table, once per sidecar process.
@@ -1254,6 +1276,7 @@ class ToolLoop:
         self._pending_images = []
         self._playtests = 0
         self._user_text = ""
+        self._stopped_by = ""
         self._settings = None
         self._snapshot.invalidate()
 

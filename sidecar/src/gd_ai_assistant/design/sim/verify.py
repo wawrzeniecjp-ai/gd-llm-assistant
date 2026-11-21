@@ -8,7 +8,7 @@ from typing import Any
 from ..constants import SPEEDS, PhysicsConstants, load_constants
 from ..level_model import LevelModel
 from .cube import HALF, Cube, CubeParams, UncalibratedError, simulate
-from .solver import describe_route, input_events, solve
+from .solver import describe_forgiving, input_events, solve
 from .world import World, world_from_model
 
 #: Most unsupported objects listed in a result; the rest are counted.
@@ -81,7 +81,9 @@ def verify(world: World, params: CubeParams, args: dict[str, Any]) -> dict[str, 
     result: dict[str, Any] = {**base, "result": solved.result,
                               "deaths_without_input": deaths_without_input}
     if solved.result == "possible":
-        described = describe_route(world, params, cube, solved, x1)
+        # A tight ship or wave route is compared with one that keeps its distance: the
+        # windows a player flying it would have.
+        solved, described = describe_forgiving(world, params, cube, solved, x1)
         if args.get("start_from", "level_start") != "explicit":
             # From the level start, only the presses inside the asked-for range matter
             # to the caller; the approach is summarised.
@@ -182,7 +184,7 @@ def route_overlay(model: LevelModel, x_end: float,
     solved = solve(world, params, start, x_end)
     if solved.result != "possible":
         return {"result": solved.result, "furthest_x": solved.furthest_x}
-    described = describe_route(world, params, start, solved, x_end)
+    solved, described = describe_forgiving(world, params, start, solved, x_end)
     run = simulate(world, params, input_events(solved.route, solved.releases or None),
                    max_ticks=(solved.end_tick or 0) + 2,
                    until_x=x_end, start=start, start_tick=0)

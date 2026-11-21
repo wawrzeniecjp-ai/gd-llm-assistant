@@ -1,0 +1,21 @@
+id = "ufo-orbs"
+description = "M5: a UFO section using an orb and a pad (flight orbs and pads, P18)."
+fixture = "empty"
+prompt = """
+Build a 1x UFO section from column 10 to column 55 with some tall spike columns to hop over,
+one yellow orb and one yellow pad. End it back on the cube and check it is playable.
+"""
+section = [0, 1800]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+"portals_created.ufo" = { between = [1, 1] }
+"created_roles.orb" = { min = 1 }
+"created_roles.pad" = { min = 1 }
+exit_mode = "cube"
+frame_perfect = 0

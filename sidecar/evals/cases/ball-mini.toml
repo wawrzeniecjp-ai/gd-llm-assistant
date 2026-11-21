@@ -1,0 +1,22 @@
+id = "ball-mini"
+description = "M5: a mini ball section with spikes on the floor and the ceiling."
+fixture = "empty"
+prompt = """
+Make a mini ball section at 1x from column 10 to column 50: spikes on both the floor and
+a ceiling so the player has to flip between them. Go back to normal size and the cube at
+the end, and check it can be beaten.
+"""
+section = [0, 1650]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+"portals_created.ball" = { between = [1, 1] }
+"portals_created.mini" = { between = [1, 1] }
+"portals_created.normal" = { min = 1 }
+exit_mode = "cube"
+frame_perfect = 0

@@ -204,6 +204,10 @@ class CubeParams:
     pad_by_speed: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
     #: Sim-2 (None: not calibrated, so mode, gravity and size portals are unverifiable).
     flight: FlightParams | None = None
+    #: Not physics: a margin the ship and the wave keep from what kills them (hazards; the
+    #: wave's solids too), used by the solver to find a forgiving route. It only adds
+    #: deaths, so a route that survives with it survives without. 0 in the game's physics.
+    clearance: float = 0.0
 
     def orb_for(self, speed: str, color: str) -> float:
         return self.orb_by_speed.get(speed, {}).get(color, self.orb_impulse[color])
@@ -662,8 +666,9 @@ def _collide_flight(cube: Cube, near: list[Body], p: CubeParams, tick: int, prev
     fp = p.flight
     assert fp is not None
     outer = cube.box(half)
+    clear = p.clearance if cube.mode in ("ship", "wave") else 0.0
     if cube.mode == "wave":
-        body_box = cube.box(fp.wave["solid_half"])
+        body_box = cube.box(fp.wave["solid_half"] + clear)
         for body in near:
             if body.role is Role.SOLID and body.box.overlaps(body_box):
                 return Death(tick, cube.x, cube.y, body.uid, "solid")
@@ -692,6 +697,7 @@ def _collide_flight(cube: Cube, near: list[Body], p: CubeParams, tick: int, prev
     c_half = contact_half(cube, p)
     touch = cube.box(c_half)
     inner = cube.box(_inner_half(cube, p))
+    danger = cube.box(c_half + clear) if clear else touch
     # Orbs are touched before the move as well as after, as the cube's (P6).
     before = (Box(prev_x - c_half, prev_y - c_half, prev_x + c_half, prev_y + c_half)
               if prev_x is not None else touch)
@@ -701,7 +707,7 @@ def _collide_flight(cube: Cube, near: list[Body], p: CubeParams, tick: int, prev
             if cube.mode != "wave" and body.box.overlaps(inner):
                 return Death(tick, cube.x, cube.y, body.uid, "solid")
         elif body.role is Role.HAZARD:
-            if body.hits(touch):
+            if body.hits(danger):
                 return Death(tick, cube.x, cube.y, body.uid, "hazard")
         elif body.role is Role.ORB:
             if body.uid not in cube.used and (body.touches(touch) or body.touches(before)):
@@ -851,7 +857,8 @@ def advance(cube: Cube, world: World, p: CubeParams, tick: int,
     prev_x, prev_y = cube.x, cube.y
     # One broad-phase lookup per tick, covering the cube before and after its move.
     if near is None:
-        near = world.near(prev_x - HALF, prev_x + p.dx[cube.speed] + HALF)
+        near = world.near(prev_x - HALF - p.clearance,
+                          prev_x + p.dx[cube.speed] + HALF + p.clearance)
     move(cube, near, p)
     death = collide(cube, near, p, tick, prev_y, prev_x)
     if death is None and cube.unverifiable is None:

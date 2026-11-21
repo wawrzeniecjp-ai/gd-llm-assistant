@@ -1,0 +1,16 @@
+id = "fix-ship-wall"
+description = "M5: a ship section blocked by a full-height wall; fix it with few changes."
+fixture = "ship-wall-1x"
+prompt = "My ship part around column 30 can't be passed. Fix it with as few changes as possible."
+section = [0, 1500]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+objects_deleted = { max = 4 }
+objects_created = { max = 4 }
+exit_mode = "cube"

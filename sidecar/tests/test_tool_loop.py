@@ -183,6 +183,9 @@ class FailsAfterFirstCall(Provider):
 
 
 def make_loop(link: FakeLink, provider: Provider, **overrides) -> ToolLoop:
+    history = overrides.pop("history", None)
+    if history is None:
+        history = History(token_budget=8000)
     defaults = {
         "max_tool_rounds": 10,
         "max_objects_per_turn": 5000,
@@ -196,7 +199,7 @@ def make_loop(link: FakeLink, provider: Provider, **overrides) -> ToolLoop:
         link=link,
         provider=provider,
         catalog=catalog.load_catalog(),
-        history=History(token_budget=8000),
+        history=history,
         **(defaults | overrides),
     )
 
@@ -613,8 +616,8 @@ async def test_interim_text_is_sent_and_then_replaced_by_the_final() -> None:
 # -- history -------------------------------------------------------------
 
 
-async def test_history_keeps_only_completed_turns() -> None:
-    """An interrupted turn recorded as fact would be repeated on the next turn."""
+async def test_history_leaves_out_a_turn_the_provider_failed() -> None:
+    """Nothing ran that a later turn could build on; the request is still on screen."""
     link = FakeLink()
     history = History(token_budget=8000)
     loop = ToolLoop(
@@ -628,6 +631,44 @@ async def test_history_keeps_only_completed_turns() -> None:
     await loop.run(turn_id="t-1", message_id="m1", user_text="change everything")
 
     assert len(history) == 0
+
+
+async def test_history_keeps_a_turn_stopped_by_the_round_cap_marked_unfinished() -> None:
+    """Without it, "continue" reaches a model that does not know what it was doing."""
+    history = History(token_budget=8000)
+    provider = RepeatingProvider(ToolCall(id="x", name="get_editor_state", arguments={}))
+    await make_loop(FakeLink(), provider, max_tool_rounds=3, history=history).run(
+        turn_id="t-1", message_id="m1", user_text="build the ship section")
+
+    user, assistant = history.messages()
+    assert user.text == "build the ship section"
+    assert "stopped before it finished" in assistant.text
+    assert "3-round cap" in assistant.text and "Nothing was changed" in assistant.text
+
+
+async def test_history_keeps_a_turn_stopped_by_the_time_limit_with_its_edits() -> None:
+    history = History(token_budget=8000)
+    link = FakeLink()
+    provider = ScriptedProvider([create_turn(2)])
+    loop = make_loop(link, provider, history=history)
+    real = provider.complete
+    calls = 0
+
+    async def then_sleep(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            await asyncio.sleep(10)
+        return await real(**kwargs)
+
+    provider.complete = then_sleep  # type: ignore[method-assign]
+    loop._timeout_s = 0.3
+    result = await loop.run(turn_id="t-1", message_id="m1", user_text="go")
+
+    assert result.status == INCOMPLETE
+    user, assistant = history.messages()
+    assert user.text == "go"
+    assert "time limit" in assistant.text and "Edits made before the stop" in assistant.text
 
 
 async def test_history_records_a_completed_turn() -> None:

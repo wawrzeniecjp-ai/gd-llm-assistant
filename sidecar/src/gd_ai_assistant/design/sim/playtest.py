@@ -35,6 +35,7 @@ from .cube import HALF, Cube, CubeParams, UncalibratedError, simulate
 from .solver import (
     WINDOW_REACH,
     centre_inputs,
+    forgiving,
     input_events,
     move_input,
     release_windows,
@@ -261,6 +262,9 @@ async def playtest_verify(request: Request, model: LevelModel, args: dict[str, A
                         "solver": solved.result, "furthest_x": round(solved.furthest_x, 1),
                         "note": "the solver found no route, so there is nothing to play; "
                                 "fix the section with verify_section first"}
+            # A ship or wave route with room to spare: a simulator a unit off then
+            # still flies it in the game.
+            solved = forgiving(world, params, cube, x1, solved)
             assert solved.end_tick is not None
             route, releases = centre_inputs(world, params, cube, solved.route,
                                             solved.releases or None, x1,

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .cube import HALF, Cube, CubeParams, Death, advance, simulate
@@ -71,6 +71,8 @@ class SolveResult:
     final: Cube | None = None
     reason: str | None = None
     elapsed_ms: float = 0.0
+    #: How far a hold route keeps from what kills a ship or wave (set by `forgiving`).
+    clearance: float = 0.0
 
 
 def _actions(branch: Branch, tick: int, press: bool) -> list[str]:
@@ -110,6 +112,155 @@ def solve(world: World, p: CubeParams, start: Cube, end_x: float, *,
 
 #: Decisions considered every this many ticks in the first pass (16.7 ms).
 COARSE_STRIDE = 4
+
+#: Margins (level units) a forgiving hold route is looked for with, widest first (the
+#: widest searches are the quickest: few branches survive them).
+CLEARANCES = (30.0, 24.0, 18.0, 12.0, 6.0)
+FORGIVING_BUDGET_S = 3.0
+#: A wider margin's route is preferred only when its estimate is this much better: it
+#: takes more inputs for the room it buys.
+WIDER_BY = 1.25
+
+
+def _holds(route: Sequence[int], releases: Sequence[int]) -> list[tuple[int, int]]:
+    return [(t, r) for t, r in zip(route, releases, strict=True) if r > t + 1]
+
+
+#: The widest margin a route's own clearance is measured up to, and how finely.
+CLEARANCE_MAX = 48.0
+CLEARANCE_STEPS = 6
+
+
+def _finishes(world: World, p: CubeParams, start: Cube, end_x: float, found: SolveResult,
+              margin: float) -> bool:
+    assert found.end_tick is not None
+    return simulate(world, replace(p, clearance=margin),
+                    input_events(found.route, found.releases), max_ticks=found.end_tick + 2,
+                    until_x=end_x, start=start, start_tick=0,
+                    record=False).outcome == "reached"
+
+
+def _slack(world: World, p: CubeParams, start: Cube, end_x: float, found: SolveResult,
+           known: float = 0.0) -> tuple[float, float, bool] | None:
+    """An estimate (ticks) of how far one hold input of the route may move, the route's
+    clearance, and whether the clearance (not the holds' spacing) is the limit; None if
+    it does not finish in the game's physics.
+
+    The clearance (the widest margin it still finishes with, at least `known`) is found
+    by bisection. Moving a press or a release by a tick moves the rest of the flight by
+    twice the vertical step, so the clearance buys `clearance / (2 * step)` ticks either
+    way; and an input cannot pass its neighbour, so a route of very short holds is
+    limited by their spacing, whatever its clearance. Cheap next to measuring windows:
+    a handful of replays, where the windows replay every shifted input to the end.
+    """
+    assert found.end_tick is not None
+    replay = simulate(world, p, input_events(found.route, found.releases),
+                      max_ticks=found.end_tick + 2, until_x=end_x, start=start,
+                      start_tick=0)
+    if replay.outcome != "reached":
+        return None
+    lo, hi = known, CLEARANCE_MAX
+    if _finishes(world, p, start, end_x, found, hi):
+        lo = hi
+    else:
+        for _ in range(CLEARANCE_STEPS):
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if _finishes(world, p, start, end_x, found, mid) else (lo, mid)
+    trace = replay.trace
+    step = max((abs(b - a) for a, b, m0, m1 in zip(
+        trace["y"], trace["y"][1:], trace["mode"], trace["mode"][1:], strict=False)
+        if m0 in HOLD_MODES and m1 in HOLD_MODES), default=0.0)
+    events = sorted(t for hold in _holds(found.route, found.releases) for t in hold)
+    gap = min((b - a for a, b in zip(events, events[1:], strict=False)), default=WINDOW_REACH)
+    reach = lo / (2 * step) if step else float(WINDOW_REACH)
+    return min(reach, gap, WINDOW_REACH), lo, reach <= gap
+
+
+def forgiving(world: World, p: CubeParams, start: Cube, end_x: float, solved: SolveResult,
+              *, budget_s: float = FORGIVING_BUDGET_S) -> SolveResult:
+    """A route that keeps clear of what kills, when `solved` has holds.
+
+    The search returns the first route it reaches the end with, and for a ship or a
+    wave that one skims walls and spikes: the wave's zigzags bounce from floor to
+    ceiling, so every input sits a tick or two from death and its windows say the
+    section is frame-tight when a player flying down the middle has room to spare
+    (eval wave-easy, 2026-11-17: 8.3 ms). The search is run again with the ship and the
+    wave dying `clearance` units early, widest margin first, until a margin finds
+    nothing or its route is limited by its clearance (a narrower one could only do
+    worse). A wide margin in a narrow gap is only kept by many short holds, which crowd
+    each other (wave-easy: 24 units took 8.9 inputs a second for 66.7 ms, 18 units 5.7
+    for 75 ms), so the routes are compared by `_slack`, narrowest first, and a wider
+    margin's route is taken only when it is `WIDER_BY` better.
+    Windows are then measured on it in the game's physics (the margin only adds deaths,
+    so the route finishes without it; it is replayed to make sure). Taps-only routes
+    (cube, ball, ufo), and sections no margin fits, are returned as they are; see
+    `describe_forgiving` for the choice between this route and the one found.
+    """
+    if solved.result != "possible" or not _holds(solved.route, solved.releases):
+        return solved
+    began = time.perf_counter()
+    deadline = began + budget_s
+    slowest = min(p.dx.values())
+    max_ticks = int((end_x - start.x) / slowest) + 2 * 240
+    first = _slack(world, p, start, end_x, solved)
+    if first is None:
+        return solved
+    # A margin the route found already keeps cannot give it more room (eval ship-insert:
+    # 48 units, its windows set by its cube part; five searches found the same route).
+    solved.clearance = first[1]
+    found_by_margin: list[tuple[float, SolveResult]] = []
+    for margin in CLEARANCES:
+        if time.perf_counter() >= deadline:
+            break
+        if margin <= solved.clearance:
+            break
+        found = _search(world, replace(p, clearance=margin), start, end_x,
+                        beam=COARSE_BEAM, deadline=deadline, max_ticks=max_ticks,
+                        stride=COARSE_STRIDE)
+        if found.result != "possible" or found.end_tick is None:
+            continue    # too wide for this section
+        slack = _slack(world, p, start, end_x, found, margin)
+        if slack is None:
+            continue
+        found.clearance = slack[1]
+        found_by_margin.append((slack[0], found))
+        if slack[2]:
+            break
+    if not found_by_margin:
+        return solved
+    best, kept = found_by_margin[-1]
+    for score, found in reversed(found_by_margin[:-1]):
+        if score > best * WIDER_BY and score > best + 1:
+            best, kept = score, found
+    kept.elapsed_ms = solved.elapsed_ms + (time.perf_counter() - began) * 1000
+    return kept
+
+
+#: A route whose tightest window is narrower than this is compared with a forgiving one.
+FORGIVING_BELOW_MS = 50.0
+
+
+def describe_forgiving(world: World, p: CubeParams, start: Cube, solved: SolveResult,
+                       end_x: float) -> tuple[SolveResult, dict[str, Any]]:
+    """`describe_route` of the more forgiving of the route found and `forgiving`'s.
+
+    `_slack` only estimates: a route can skim a spike in a direction no mistimed input
+    pushes it (a spiked wave corridor in test_solver: 108 ms against 71 ms). So when the
+    route found is tight, both are measured and the wider tightest window wins (the
+    route found on a tie); when it is not, it is kept without a second search.
+    """
+    described = describe_route(world, p, start, solved, end_x)
+    tightest = described["difficulty"]["min_window_ms"]
+    if tightest is None or tightest >= FORGIVING_BELOW_MS:
+        return solved, described
+    other = forgiving(world, p, start, end_x, solved)
+    if other is solved:
+        return solved, described
+    eased = describe_route(world, p, start, other, end_x)
+    if (eased["difficulty"]["min_window_ms"] or 0.0) > tightest:
+        return other, eased
+    return solved, described
+
 
 #: Horizontal reach of a press, in ticks of travel: a jump's airtime (~104) plus margin.
 #: With nothing gameplay-relevant that close ahead, a press cannot be needed.
@@ -152,7 +303,8 @@ def _search(world: World, p: CubeParams, start: Cube, end_x: float, *, beam: int
             if lookup is None:
                 dx = p.dx[cube.speed]
                 lookup = lookups[spot] = (
-                    world.near(cube.x - HALF, cube.x + dx + HALF),
+                    world.near(cube.x - HALF - p.clearance,
+                               cube.x + dx + HALF + p.clearance),
                     world.obstacle_between(cube.x - 30, cube.x + PRESS_HORIZON_TICKS * dx + 30))
             near, obstacle_ahead = lookup
             holding = branch.holding
@@ -283,7 +435,8 @@ def _reference(world: World, p: CubeParams, start: Cube, route: Sequence[int],
 
 
 def _survives(world: World, p: CubeParams, states: list[Cube], route: list[int],
-              releases: list[int], changed: tuple[int, int], end_x: float) -> bool:
+              releases: list[int], changed: tuple[int, int], end_x: float,
+              near_cache: dict[tuple[float, str], list] | None = None) -> bool:
     """Does the route (one input moved: `changed` is its old and new tick) still finish?
 
     Simulated from the reference state just before the earlier of the two ticks, and
@@ -296,14 +449,25 @@ def _survives(world: World, p: CubeParams, states: list[Cube], route: list[int],
     by_tick = commands(route, releases, since=begin)
     cube = states[begin].copy()
     settle = max(changed) + 2      # both versions of the input fully played
+    margin = HALF + p.clearance
     for tick in range(begin + 1, len(states) + 4 * 240):
-        if advance(cube, world, p, tick, by_tick.get(tick - 1, ())) is not None:
+        # The broad phase depends only on x and speed, which a shifted run shares with
+        # the others at the same tick: looked up once per window, not once per shift.
+        spot = (cube.x, cube.speed)
+        near = near_cache.get(spot) if near_cache is not None else None
+        if near is None:
+            near = world.near(cube.x - margin, cube.x + p.dx[cube.speed] + margin)
+            if near_cache is not None:
+                near_cache[spot] = near
+        if advance(cube, world, p, tick, by_tick.get(tick - 1, ()), near) is not None:
             return False
         if cube.x >= end_x:
             return True
         if tick >= settle and tick < len(states):
             ref = states[tick]
-            if abs(cube.x - ref.x) < 1e-6 and cube.key() == ref.key():
+            # Position first: building both keys every tick was a tenth of the time.
+            if (abs(cube.x - ref.x) < 1e-6 and round(cube.y * 2) == round(ref.y * 2)
+                    and cube.key() == ref.key()):
                 return True
     return False
 
@@ -332,12 +496,13 @@ def _window(world: World, p: CubeParams, states: list[Cube], route: list[int],
     """The contiguous ticks one input could move to with the others fixed."""
     tick = releases[i] if part == "release" else route[i]
     lo = hi = tick
+    near_cache: dict[tuple[float, str], list] = {}
     for sign in (-1, 1):
         for shift in range(1, WINDOW_REACH + 1):
             moved = tick + sign * shift
             candidate = move_input(route, releases, i, part, moved)
             if candidate is None or not _survives(world, p, states, *candidate,
-                                                  (tick, moved), end_x):
+                                                  (tick, moved), end_x, near_cache):
                 break
             lo, hi = min(lo, moved), max(hi, moved)
     return lo, hi
@@ -437,5 +602,6 @@ def describe_route(world: World, p: CubeParams, start: Cube, solved: SolveResult
             "p10_window_ms": widths[len(widths) // 10] if widths else None,
             "inputs_per_second": round(len(widths) / seconds, 2) if seconds else 0.0,
             "frame_perfect": exact,
+            **({"clearance": solved.clearance} if solved.clearance else {}),
         },
     }

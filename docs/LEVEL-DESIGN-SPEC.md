@@ -807,6 +807,33 @@ For hold inputs the window is computed separately for the press and the release.
 A window of 1 tick (≈4 ms) is **frame-perfect** and is always a violation unless the plan
 declares the section `extreme`.
 
+**Forgiving routes (2026-11-17).** For a ship or a wave, the first route found skims walls
+and spikes, so its windows can describe the solver's path rather than the section. In a
+wave corridor its zigzags bounced from floor to ceiling, two ticks from death at every
+input (8.3 ms), while a player down the middle had far more room. So when a route with
+holds has a window under 50 ms, the search is run again with a **clearance** margin:
+- the ship and the wave die that many units early (hazards; the wave's solids too). This
+  only adds deaths, so a route found this way also finishes in the game's physics;
+- margins of 30, 24, 18, 12 and 6 units are tried, widest first. The search stops at the
+  first margin whose route is limited by its clearance rather than by the spacing of its
+  holds;
+- a cheap estimate picks among these routes. It is the shortest of the two limits, in
+  ticks: clearance / (2 × vertical step), and the gap between neighbouring inputs. A
+  wide margin in a narrow gap needs many short holds, so a wider margin's route is taken
+  only when it scores 25% better;
+- the chosen route's windows are measured, and they replace the first route's only when
+  its tightest window is wider.
+
+`difficulty.clearance` reports the margin the route keeps. The in-game playtest flies the
+forgiving route too. No search is run for a margin the first route already keeps.
+
+Cost: a wave's windows are the slowest to measure. A mistimed input shifts the rest of
+the flight, so each successful shift is replayed to the end of the section. Three exact
+speed-ups cut wave-easy's verify from 7.3 s to about 4.8 s, with the same windows:
+- the simulator's boxes are a plain class rather than a frozen dataclass;
+- the shifted runs share one nearby-object lookup per position;
+- a cheap position check comes before the full state comparison.
+
 ### 6.8.4 Performance budget
 
 - Cube, 1000 columns, typical density: ≤ 2 s in CPython on a desktop machine.
@@ -866,7 +893,7 @@ the frontier, so the model knows where to look.
 - Property tests: a flat floor with no hazards is `possible` with zero inputs, at every
   speed and mode where that applies. A wall is `impossible`.
 
-## 6.10.1 Sim-2 as built (M5, 2026-11-15/16, in progress)
+## 6.10.1 Sim-2 as built (M5, 2026-11-15 to 17; Sim-3 still to come)
 
 P15 (ship, ball, ufo and wave: held, tapped, held long; mini, upside down, every speed, a
 portal above the ground; 72 runs) and P16 (the cube upside down, gravity and toggle
@@ -1002,6 +1029,24 @@ P18 results, now in the simulator; 253 of the 254 runs replay as goldens (1149 i
   - a grounded mini cube under a block more than 4 into it;
   - a ship, UFO or ball meeting a block from below between the push and kill depths;
   - robot, spider and swing (Sim-3).
+
+**Mode evals (2026-11-17).** Seven cases cover the Sim-2 modes:
+- `ship-corridor`, `wave-easy`, `ufo-orbs`, `ball-mini`: building each mode from empty;
+- `ship-insert`: a ship part inside an existing cube level;
+- `fix-ship-wall`: fixing an impassable ship wall;
+- `explain-robot`: a Sim-3 stretch that must be reported as unverifiable, not guessed.
+
+New metrics: `portals_created.<switch>` (what each new mode, size or gravity portal
+switches to), `exit_mode` (the mode at the section's end), `holds` (holds in the route),
+and `says_unverified` (the reply says the check could not be made).
+
+Baseline in `evals/BASELINE.md`: deepseek-flash passes every hard assertion. Two soft
+failures:
+- the wave's `min_window_ms` is 8.3, a solver artefact: difficulty is measured on the
+  solver's route, which bounces off the walls. Fixed the same day by forgiving routes
+  (§6.8.3); the replayed section now measures 75 ms;
+- the ship-wall fix flies over its cube portal: "possible" does not require passing
+  through every portal.
 
 ## 6.11 Deferred: slopes, platformer, moving objects
 

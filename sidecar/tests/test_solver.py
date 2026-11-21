@@ -165,6 +165,54 @@ def test_hold_routes_replay_to_the_end() -> None:
         assert run.outcome == "reached"
 
 
+def test_a_wave_corridor_is_measured_on_a_route_that_keeps_its_distance() -> None:
+    """eval wave-easy (2026-11-17), rebuilt: in a 90-unit corridor with small spikes the
+    first route found bounced from floor to ceiling, two ticks from death at every input
+    (8.3 ms); a player down the middle has far more. The forgiving route keeps a margin,
+    finishes without it, and its windows are measured in the game's physics."""
+    from dataclasses import replace
+
+    from gd_ai_assistant.design.sim.solver import describe_forgiving, forgiving
+
+    floor = [b for c in range(14, 51) for b in (_block(c, 0), _block(c, 1))]
+    ceiling = [_block(c, 5) for c in range(12, 51)]
+    spikes = [{"id": 39, "x": 30 * c + 15, "y": 66} for c in (18, 31, 44)]
+    spikes += [{"id": 39, "x": 30 * c + 15, "y": 135, "properties": {"rotation": 180}}
+               for c in (24, 38)]
+    world = _world([{"id": 660, "x": 315, "y": 45}, *floor, *ceiling, *spikes])
+    end = 1650
+    solved = solve(world, PARAMS, Cube(), end)
+    assert solved.result == "possible"
+    raw = describe_route(world, PARAMS, Cube(), solved, end)["difficulty"]
+    kept, described = describe_forgiving(world, PARAMS, Cube(), solved, end)
+    assert kept is not solved and kept.clearance > 0
+    # It survives with its clearance, so without.
+    assert simulate(world, replace(PARAMS, clearance=kept.clearance),
+                    input_events(kept.route, kept.releases), max_ticks=kept.end_tick + 2,
+                    until_x=end, start=Cube(), start_tick=0).outcome == "reached"
+    eased = described["difficulty"]
+    assert raw["min_window_ms"] < 20 and eased["min_window_ms"] >= 50, (raw, eased)
+    assert eased["clearance"] == kept.clearance
+    # A route of taps is left alone.
+    spike = _world([{"id": 8, "x": 255, "y": 15}])
+    tapped = solve(spike, PARAMS, Cube(), 600)
+    assert forgiving(spike, PARAMS, Cube(), 600, tapped) is tapped
+
+
+def test_a_route_with_room_is_kept_without_a_second_search() -> None:
+    """A wave over a row of spikes, its windows already wide: `describe_forgiving` keeps
+    the route found (a margin's route can measure narrower: the estimate is rough)."""
+    from gd_ai_assistant.design.sim.solver import describe_forgiving
+
+    world, solved = _flight(660, [_spike(c) for c in range(18, 24)])
+    raw = describe_route(world, PARAMS, Cube(), solved, 1000)
+    kept, described = describe_forgiving(world, PARAMS, Cube(), solved, 1000)
+    if raw["difficulty"]["min_window_ms"] >= 50:
+        assert kept is solved and described == raw
+    else:
+        assert described["difficulty"]["min_window_ms"] >= raw["difficulty"]["min_window_ms"]
+
+
 def test_a_ufo_presses_in_the_air() -> None:
     world, solved = _flight(111, [_spike(20), _spike(20, 1), _spike(20, 2)])
     assert solved.result == "possible" and len(solved.route) >= 2

@@ -9,6 +9,7 @@ assertion as `n/a`, so a missing measurement never passes silently.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from typing import Any
 
@@ -25,6 +26,12 @@ from .cases import Case
 from .fake_editor import FakeEditor
 from .recording import ToolEvent
 
+#: A reply saying a check could not be made (rather than guessing an answer).
+_UNVERIFIED = re.compile(r"unverifiable|not (?:yet )?simulated|can(?:no|')t (?:be )?"
+                         r"(?:check|verif)|could(?: not|n't) (?:be )?(?:check|verif)|"
+                         r"not (?:able to )?(?:check|verif)")
+#: Roles whose variant names what they switch to (a mode, a size, a gravity).
+_SWITCHES = {"portal_mode", "portal_size", "portal_gravity"}
 #: Tools that check playability. `place_grid` counts only with `verify`.
 _VERIFIERS = {"verify_section", "playtest_verify"}
 
@@ -50,9 +57,13 @@ def measure(case: Case, editor: FakeEditor, before: dict[int, tuple], results: l
     deleted = before.keys() - after.keys()
     moved = sum(1 for uid in after.keys() & before.keys() if after[uid] != before[uid])
     created_roles = Counter()
+    #: Mode, size and gravity portals by what they switch to: `portals_created.ship`.
+    portals_created = Counter()
     for type_id, _, _ in created:
         entry = roles.get(type_id)
         created_roles[entry.role.value if entry else "unknown"] += 1
+        if entry and entry.role.value in _SWITCHES and entry.variant:
+            portals_created[entry.variant] += 1
 
     last_mutation = max((i for i, e in enumerate(events) if _mutates(e)), default=None)
     verified_after = last_mutation is None or any(
@@ -74,10 +85,13 @@ def measure(case: Case, editor: FakeEditor, before: dict[int, tuple], results: l
         "objects_moved": moved,
         "edited": bool(created or deleted or moved),
         "created_roles": dict(created_roles),
+        "portals_created": dict(portals_created),
         "verified_after_last_edit": verified_after,
         "colors_set": sum(1 for e in events
                           if e.name == "set_color_channel" and not e.error),
     }
+    replies = " ".join(r.text or "" for r in results).lower()
+    metrics["says_unverified"] = bool(_UNVERIFIED.search(replies))
     metrics["plan_written"] = any(e.name == "update_level_plan" and not e.error
                                   for e in events)
     for name in ("verify_section", "simulate_inputs", "place_grid", "render_grid",
@@ -90,6 +104,12 @@ def measure(case: Case, editor: FakeEditor, before: dict[int, tuple], results: l
         check = verify_section(model, {"x_range": list(case.section), "budget_s": 20.0,
                                        "_level_start_speed": start_speed})
         metrics["playable"] = check.get("result")
+        exit_state = check.get("exit") or {}
+        if exit_state.get("mode"):
+            metrics["exit_mode"] = exit_state["mode"]
+        if check.get("result") == "possible":
+            metrics["holds"] = sum(1 for item in check.get("route") or []
+                                   if item.get("action") == "hold")
         difficulty = check.get("difficulty") or {}
         for key in ("min_window_ms", "inputs_per_second", "frame_perfect"):
             if difficulty.get(key) is not None:
@@ -113,7 +133,8 @@ def lookup(metrics: dict[str, Any], name: str) -> Any:
         if not isinstance(value, dict):
             return None
         if part not in value:
-            return 0 if name.startswith(("created_roles.", "tools_used.")) else None
+            return 0 if name.startswith(("created_roles.", "tools_used.",
+                                         "portals_created.")) else None
         value = value[part]
     return value
 

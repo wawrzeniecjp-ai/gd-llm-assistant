@@ -1,0 +1,12 @@
+id = "explain-robot"
+description = "M5: a robot part (Sim-3) can't be checked; say so, don't guess, don't edit."
+fixture = "robot-1x"
+prompt = "Is the part from column 10 to column 45 beatable? Just check, don't change anything."
+
+[assert.hard]
+status = "completed"
+edited = false
+
+[assert.soft]
+used_verify_section = true
+says_unverified = true

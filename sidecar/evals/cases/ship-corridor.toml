@@ -1,0 +1,22 @@
+id = "ship-corridor"
+description = "M5: a ship section from empty, with a roof to fly under and spikes; back to the cube."
+fixture = "empty"
+prompt = """
+Build a 1x ship section from column 10 to column 60: a ship portal at the start, a few
+spikes on the floor and some blocks overhead to fly between, and a cube portal at the end.
+Medium difficulty, and check it can be played.
+"""
+section = [0, 1950]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+"portals_created.ship" = { between = [1, 1] }
+"portals_created.cube" = { between = [1, 1] }
+exit_mode = "cube"
+holds = { min = 1 }
+frame_perfect = 0

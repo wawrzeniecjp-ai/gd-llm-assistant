@@ -32,3 +32,45 @@ Notes:
   the whole turn each round (about 45k tokens a round by the end). Three cases use 70% of
   the tokens.
 - `speed-change` built 30 columns of 2x with 6 objects: thin, but no assertion covers it.
+
+# M5 baseline: game modes (openai_compatible deepseek-flash)
+
+2026-11-17, run `m5-baseline`, one seed per case, 7.25M tokens. The seven M5 cases, scored
+against the cases as committed. Their recordings are in `recordings/` and replay to the
+same results.
+
+| case | hard | soft failed | rounds | tokens | time |
+|---|---|---|---|---|---|
+| ball-mini | pass | - | 10 | 260k | 106 s |
+| explain-robot | pass | - | 4 | 55k | 14 s |
+| fix-ship-wall | pass | objects_deleted 10 (max 4), objects_created 5 (max 4), exit_mode ship | 14 | 488k | 240 s |
+| ship-corridor | pass | - | 27 | 1.53M | 477 s |
+| ship-insert | pass | - | 38 | 1.88M | 377 s |
+| ufo-orbs | pass | - | 16 | 688k | 277 s |
+| wave-easy | pass | min_window_ms 8.3 (min 40) | 30 | 2.35M | 469 s |
+
+Hard assertions: 7 of 7 cases. Soft: 2 cases with a failure.
+
+Notes:
+
+- `fix-ship-wall`: the model cut the wall from 10 blocks to 5, which is a small fix. It
+  deleted the column and placed the lower half again, so the counts look bigger than the
+  change. The route it fixed flies over the low cube portal and ends as a ship. The model
+  noticed this and offered to make the portal unavoidable. Before the fix,
+  `verify_section` said `inconclusive`, not `impossible` (the ship-wall solver limit),
+  and the model still worked out why the wall could not be passed.
+- `wave-easy`: the model built a closed tunnel 3 blocks high. Its own check found a wide
+  band (66 units), and its route still cleared the section with every tap 25 ms late. The
+  8.3 ms comes from the solver's route, which reverses at the walls. The difficulty
+  numbers measure the route the solver found, not the easiest one, and for the wave that
+  understates how forgiving a section is. A solver issue, not the model's. Fixed the same
+  day (spec §6.8.3, forgiving routes): replayed, the section now measures 75 ms on a
+  route that keeps 18 units from the spikes and walls, at 5.7 inputs a second, so the soft
+  assertion passes. The table keeps the run as recorded.
+- `explain-robot`: it said plainly that the robot part cannot be checked, did not guess,
+  and checked the cube stretches it could.
+- In every case the model saw only the catalog seed (block and spike): the fake editor
+  has no object table, and the real one comes from the game. It built portals, orbs and
+  pads from GridText characters and the role table. Dumping the game's catalog into an
+  eval fixture would make this closer to real use.
+- `--max-total-tokens 5000000` checks between cases, so the last case ran past it.

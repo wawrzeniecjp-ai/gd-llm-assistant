@@ -1,0 +1,20 @@
+id = "ship-insert"
+description = "M5: turn the middle of an existing cube level into a ship part, keeping the rest."
+fixture = "pattern-1x"
+prompt = """
+Turn columns 30 to 50 of my level into a short ship part: a ship portal before it and a cube
+portal after it, keeping the cube parts before and after as they are. It must stay playable.
+"""
+section = [0, 2100]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+"portals_created.ship" = { between = [1, 1] }
+"portals_created.cube" = { between = [1, 1] }
+exit_mode = "cube"
+objects_deleted = { max = 8 }

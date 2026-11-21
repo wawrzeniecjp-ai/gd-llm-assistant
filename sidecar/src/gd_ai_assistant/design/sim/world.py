@@ -20,12 +20,30 @@ SIM1_ORBS = frozenset({"yellow", "pink", "blue"})
 SIM1_PADS = frozenset({"yellow", "pink", "blue"})
 
 
-@dataclass(frozen=True)
 class Box:
-    x1: float
-    y1: float
-    x2: float
-    y2: float
+    """An axis-aligned box. A plain class, not a frozen dataclass: the simulator makes
+    several per tick, and a frozen dataclass's constructor was the largest single cost
+    of measuring timing windows (2026-11-17). Treat it as immutable."""
+
+    __slots__ = ("x1", "y1", "x2", "y2")
+
+    def __init__(self, x1: float, y1: float, x2: float, y2: float) -> None:
+        self.x1 = x1
+        self.y1 = y1
+        self.x2 = x2
+        self.y2 = y2
+
+    def _tuple(self) -> tuple[float, float, float, float]:
+        return (self.x1, self.y1, self.x2, self.y2)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Box) and self._tuple() == other._tuple()
+
+    def __hash__(self) -> int:
+        return hash(self._tuple())
+
+    def __repr__(self) -> str:
+        return f"Box(x1={self.x1}, y1={self.y1}, x2={self.x2}, y2={self.y2})"
 
     def overlaps(self, other: Box) -> bool:
         return self.x1 < other.x2 and other.x1 < self.x2 and \

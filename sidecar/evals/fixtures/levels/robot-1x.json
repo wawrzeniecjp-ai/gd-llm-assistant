@@ -1,0 +1,32 @@
+{
+ "description": "1x: a robot portal at column 15 (Sim-3, not simulated), spikes at 22, 30 and 31, a cube portal at column 40.",
+ "settings": {},
+ "colors": {},
+ "objects": [
+  {
+   "id": 745,
+   "x": 465.0,
+   "y": 45.0
+  },
+  {
+   "id": 8,
+   "x": 675.0,
+   "y": 15.0
+  },
+  {
+   "id": 8,
+   "x": 915.0,
+   "y": 15.0
+  },
+  {
+   "id": 8,
+   "x": 945.0,
+   "y": 15.0
+  },
+  {
+   "id": 12,
+   "x": 1215.0,
+   "y": 45.0
+  }
+ ]
+}
