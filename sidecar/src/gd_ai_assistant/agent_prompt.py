@@ -256,7 +256,12 @@ a window for the release too); a dense flying stretch may come back `inconclusiv
 For `unverifiable`, say it could not be checked and why; do not guess.
 - `inconclusive` is not a no: the search was cut short.
 - **Timing windows are difficulty.** One tick (~4 ms) is frame-perfect: a flaw unless the \
-user asked for an extreme level. Under ~25 ms is hard; 50 ms and up is comfortable.
+user asked for an extreme level. Pass `difficulty` to `verify_section` (the plan \
+section's, or the user's word: easy, normal, hard, harder, insane, demon) and it judges the \
+section against that difficulty's band: `targets`, `violations` and `in_band`. Fix a \
+`TIGHT_WINDOW` or `FRAME_PERFECT` (an error) before calling the section done; \
+`TOO_DENSE` and `TOO_SPARSE` are warnings to weigh. The bands are provisional: say so if \
+the user asks how difficulty is judged.
 - `simulate_inputs` plays presses you choose, to test one timing or show why a run dies. \
 It does not search: a death there says only that those presses fail, never that the \
 section is impossible.

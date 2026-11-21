@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from ..bands import judge
 from ..constants import SPEEDS, PhysicsConstants, load_constants
 from ..level_model import LevelModel
 from .cube import HALF, Cube, CubeParams, UncalibratedError, simulate
@@ -83,14 +84,14 @@ def verify(world: World, params: CubeParams, args: dict[str, Any]) -> dict[str, 
     if solved.result == "possible":
         # A tight ship or wave route is compared with one that keeps its distance: the
         # windows a player flying it would have.
-        solved, described = describe_forgiving(world, params, cube, solved, x1)
-        if args.get("start_from", "level_start") != "explicit":
-            # From the level start, only the presses inside the asked-for range matter
-            # to the caller; the approach is summarised.
-            inside = [r for r in described["route"] if r["x"] >= x0 - 30]
-            result["approach_presses"] = len(described["route"]) - len(inside)
-            described["route"] = inside
+        # From the level start, only the presses inside the asked-for range matter to
+        # the caller, and only they are measured; the approach is counted.
+        from_x = None if args.get("start_from", "level_start") == "explicit" else x0
+        solved, described = describe_forgiving(world, params, cube, solved, x1, from_x)
         result.update(described)
+        judged = judge(described, args.get("difficulty"))
+        if judged is not None:
+            result.update(judged)
         final = solved.final
         assert final is not None
         result["exit"] = {"x": round(final.x, 1), "y": round(final.y, 2),

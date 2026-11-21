@@ -1810,6 +1810,38 @@ reports `UNVERIFIABLE`.
 us and marked provisional. They are tuned against levels the user rates in the eval suite
 (§15.5). The table is data (`data/difficulty_bands.json`), not code.
 
+**As built (M5, 2026-11-22).** `design/bands.py` reads the table.
+- **Scale:** GD's stars: 1 auto, 2 easy, 3 normal, 4-5 hard, 6-7 harder, 8-9 insane,
+  10 demon. The words map to 2, 3, 4, 6, 8 and 10 ("medium" to 3).
+- **Shape:** one base row per difficulty (`min_window_ms` floor, `p10_window_ms` floor,
+  `inputs_per_second` range) and a factor pair per mode. A mode's window floors are the
+  base ones times its `window` factor (ship 0.85), and its density ceiling the base one
+  times its `density` factor (ship 2, wave 3, ufo 1.5, ball 1.3). The density floor is not
+  scaled, and is low: a calm stretch is not a flaw. Robot, spider and swing factors are
+  guesses until Sim-3.
+- **Agreement with the evals:** the floors were set so that a section inside its band
+  passes the soft ranges the eval cases already used: easy ≥ 40 ms, medium 25-100,
+  hard 12-60.
+- **`verify_section { difficulty }`** (a number or a word) adds `targets`,
+  `violations` and `in_band`:
+  - every press and release is held to the floor of the mode it is in, so a route item
+    now carries `mode`;
+  - density is judged against the modes' bands weighted by time
+    (`difficulty.modes`);
+  - codes are 14.2's: `FRAME_PERFECT` (≤ one tick), `TIGHT_WINDOW`, `TOO_DENSE`,
+    `TOO_SPARSE`, at most 8 listed per code;
+  - `in_band` is false on an error and only then. The p10 target is reported but not
+    judged: with fewer than ten inputs it is the tightest window again, and an
+    out-of-band result with nothing listed to fix misled.
+- **Sections measured alone:** from the level start, `min_window_ms`, `p10_window_ms`
+  and `inputs_per_second` are now measured over the presses inside `x_range` and the
+  time from its start. Before, the whole route from the level start was measured, so an
+  easy approach diluted a hard section's density and an approach's tight press stood
+  for the section's.
+- **First check** on the mode evals' sections: ship-corridor, ship-insert and
+  fix-ship-wall are in band at "medium". wave-easy is in band at "easy", with
+  `TOO_DENSE` (5.7 inputs/s against 3.7): its forgiving route corrects often.
+
 ---
 
 # 15. Evaluation harness

@@ -943,6 +943,15 @@ def _design_tools() -> list[Tool]:
                     "additionalProperties": False,
                     "properties": {
                         "x_range": {**_RANGE, "description": "Level units, [start, end]."},
+                        "difficulty": {
+                            "type": ["integer", "string"],
+                            "description": (
+                                "The difficulty to judge against: 1-10 on GD's star scale (2 "
+                                "easy, 3 normal, 4-5 hard, 6-7 harder, 8-9 insane, 10 demon), "
+                                "or one of those words. Use the plan section's difficulty. "
+                                "Adds `targets`, `violations` and `in_band`."
+                            ),
+                        },
                         "start_from": {
                             "type": "string", "enum": ["level_start", "explicit"],
                             "default": "level_start",

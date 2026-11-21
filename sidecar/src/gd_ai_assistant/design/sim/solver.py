@@ -241,7 +241,8 @@ FORGIVING_BELOW_MS = 50.0
 
 
 def describe_forgiving(world: World, p: CubeParams, start: Cube, solved: SolveResult,
-                       end_x: float) -> tuple[SolveResult, dict[str, Any]]:
+                       end_x: float, from_x: float | None = None
+                       ) -> tuple[SolveResult, dict[str, Any]]:
     """`describe_route` of the more forgiving of the route found and `forgiving`'s.
 
     `_slack` only estimates: a route can skim a spike in a direction no mistimed input
@@ -249,14 +250,14 @@ def describe_forgiving(world: World, p: CubeParams, start: Cube, solved: SolveRe
     route found is tight, both are measured and the wider tightest window wins (the
     route found on a tie); when it is not, it is kept without a second search.
     """
-    described = describe_route(world, p, start, solved, end_x)
+    described = describe_route(world, p, start, solved, end_x, from_x)
     tightest = described["difficulty"]["min_window_ms"]
     if tightest is None or tightest >= FORGIVING_BELOW_MS:
         return solved, described
     other = forgiving(world, p, start, end_x, solved)
     if other is solved:
         return solved, described
-    eased = describe_route(world, p, start, other, end_x)
+    eased = describe_route(world, p, start, other, end_x, from_x)
     if (eased["difficulty"]["min_window_ms"] or 0.0) > tightest:
         return other, eased
     return solved, described
@@ -562,9 +563,21 @@ def centre_route(world: World, p: CubeParams, start: Cube, route: list[int], end
     return centre_inputs(world, p, start, route, None, end_x, max_ticks)[0]
 
 
+#: A press this far before the asked-for range still belongs to it: the jump over its
+#: first obstacle can start just before it.
+APPROACH_SLACK = 30.0
+
+
 def describe_route(world: World, p: CubeParams, start: Cube, solved: SolveResult,
-                   end_x: float) -> dict[str, Any]:
-    """The `verify_section` view of a solved route (LEVEL-DESIGN-SPEC.md 6.9)."""
+                   end_x: float, from_x: float | None = None) -> dict[str, Any]:
+    """The `verify_section` view of a solved route (LEVEL-DESIGN-SPEC.md 6.9).
+
+    With `from_x` (a route played from the level start), only the presses from there on
+    are listed and measured: the approach is counted in `approach_presses`, and the time
+    for `inputs_per_second` starts where the section does. Measuring the whole route
+    (as before 2026-11-22) let an easy approach dilute a hard section's density, and an
+    approach's tight press stand for the section's.
+    """
     assert solved.end_tick is not None
     limit = solved.end_tick + 2
     releases = solved.releases or tap_releases(solved.route)
@@ -573,14 +586,25 @@ def describe_route(world: World, p: CubeParams, start: Cube, solved: SolveResult
     trace = simulate(world, p, input_events(solved.route, releases),
                      max_ticks=limit, until_x=end_x, start=start, start_tick=0)
     xs = dict(zip(trace.trace["tick"], trace.trace["x"], strict=True))
+    mode_at = dict(zip(trace.trace["tick"], trace.trace["mode"], strict=True))
+    first = 0
+    if from_x is not None:
+        first = next((t for t, x in zip(trace.trace["tick"], trace.trace["x"], strict=True)
+                      if x >= from_x), solved.end_tick)
     route = []
     widths = []
+    approach = 0
     for tick, release, (lo, hi), held in zip(solved.route, releases, spans, release_spans,
                                              strict=True):
+        x = round(xs.get(tick, start.x), 1)
+        if from_x is not None and x < from_x - APPROACH_SLACK:
+            approach += 1
+            continue
         width = round((hi - lo + 1) * TICK_MS, 1)
         widths.append(width)
-        item = {"tick": tick, "x": round(xs.get(tick, start.x), 1), "action": "press",
-                "window_ticks": [lo, hi], "window_ms": width}
+        item = {"tick": tick, "x": x, "action": "press",
+                "window_ticks": [lo, hi], "window_ms": width,
+                "mode": mode_at.get(tick, start.mode)}
         if held is not None:
             rlo, rhi = held
             release_ms = round((rhi - rlo + 1) * TICK_MS, 1)
@@ -591,7 +615,12 @@ def describe_route(world: World, p: CubeParams, start: Cube, solved: SolveResult
                         release_window_ticks=[rlo, rhi], release_window_ms=release_ms)
         route.append(item)
     widths.sort()
-    seconds = solved.end_tick / 240.0
+    seconds = (solved.end_tick - first) / 240.0
+    ticks: dict[str, int] = {}
+    for t, mode in zip(trace.trace["tick"], trace.trace["mode"], strict=True):
+        if t >= first:
+            ticks[mode] = ticks.get(mode, 0) + 1
+    total = sum(ticks.values()) or 1
     exact = sum(1 for r in route if r["window_ticks"][0] == r["window_ticks"][1])
     exact += sum(1 for r in route if "release_window_ticks" in r
                  and r["release_window_ticks"][0] == r["release_window_ticks"][1])
@@ -602,6 +631,8 @@ def describe_route(world: World, p: CubeParams, start: Cube, solved: SolveResult
             "p10_window_ms": widths[len(widths) // 10] if widths else None,
             "inputs_per_second": round(len(widths) / seconds, 2) if seconds else 0.0,
             "frame_perfect": exact,
+            "modes": {m: round(n / total, 2) for m, n in sorted(ticks.items())},
             **({"clearance": solved.clearance} if solved.clearance else {}),
         },
+        **({"approach_presses": approach} if from_x is not None else {}),
     }
