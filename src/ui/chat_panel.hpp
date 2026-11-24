@@ -17,40 +17,6 @@ enum class Status {
     Ready,
 };
 
-/// Text-input callbacks chained to the delegate `geode::TextInput` installs on
-/// the input node, intercepting Enter on the way past.
-///
-/// Taking the slot is necessary (see the class comment above) and chaining is
-/// what makes it safe: `TextInput`'s own behaviour -- its internal string, its
-/// placeholder, its width handling -- is driven by `textChanged`, so dropping
-/// its delegate would quietly break the widget rather than fail loudly.
-///
-/// Enter fires the callback from both `enterPressed` and `textInputReturn`,
-/// because which one GD's node calls is not documented. That is safe because
-/// submitting clears the draft, so the second call finds nothing to send.
-class InputForwarder final : public TextInputDelegate {
-public:
-    void setInner(TextInputDelegate* inner) {
-        m_inner = inner;
-    }
-
-    void setOnEnter(geode::Function<void()> onEnter) {
-        m_onEnter = std::move(onEnter);
-    }
-
-    void textChanged(CCTextInputNode* node) override;
-    void textInputOpened(CCTextInputNode* node) override;
-    void textInputClosed(CCTextInputNode* node) override;
-    void textInputShouldOffset(CCTextInputNode* node, float yOffset) override;
-    bool allowTextInput(CCTextInputNode* node) override;
-    void enterPressed(CCTextInputNode* node) override;
-    void textInputReturn(CCTextInputNode* node) override;
-
-private:
-    TextInputDelegate* m_inner = nullptr;
-    geode::Function<void()> m_onEnter;
-};
-
 /// The non-modal assistant panel (SPEC.md 8, decision D8).
 ///
 /// Deliberately **not** a `geode::Popup`: that derives from the alert-layer
@@ -79,36 +45,23 @@ private:
 /// own.
 /// Keyboard: Enter submits (SPEC.md 8.5).
 ///
-/// `geode::TextInput` does not forward `enterPressed` or `textInputReturn` -- it
-/// only forwards `textChanged` -- so Enter never reached the panel, which is why
-/// clicking Send worked and Enter did nothing.
+/// Geode v5's `TextInput` wrapped a `CCTextInputNode` that never forwarded
+/// `enterPressed` or `textInputReturn`, so Enter had to be caught by taking over
+/// that node's delegate slot (`InputForwarder`) and, failing that, by hooking
+/// `CCTextInputNode::onTextFieldInsertText` and `EditorUI::keyDown`. Registering
+/// the panel as a keyboard delegate never worked at all: GD suppresses
+/// `CCKeyboardDispatcher` dispatch while a text field has focus.
 ///
-/// A keyboard delegate does not work either, and is worth recording as a dead
-/// end: the panel was registered as one and its `keyDown` was never called. GD
-/// suppresses `CCKeyboardDispatcher` dispatch while a text field has focus (so
-/// the editor does not react to typing), which suppresses mod-registered
-/// delegates along with everything else. Characters still reach the field because
-/// they arrive by the IME path, not by that dispatcher.
+/// **v6 removed all of it.** `TextInput` was rewritten, it no longer wraps a
+/// `CCTextInputNode`, and `TextInputDelegate` is gone -- so `InputForwarder`
+/// could not even be declared. What replaced it is `TextInput::setEnterCallback`,
+/// which is the supported way to see Enter and the only one now used.
 ///
-/// That leaves taking over the input node's delegate slot, which is what
-/// `InputForwarder` below is for.
-/// Enter handling (SPEC.md 8.5), and the two approaches that do **not** work.
-///
-/// `geode::TextInput` does not forward `enterPressed` or `textInputReturn` -- it
-/// only forwards `textChanged` -- and `CCTextInputNode` is not a keyboard delegate
-/// and takes text through the IME path, so neither is called. Installing a chained
-/// delegate on the node therefore changes nothing.
-///
-/// Registering the panel as a keyboard delegate does not work either, and this was
-/// measured rather than assumed: with `addDelegate`, with `forceAddDelegate`, and
-/// with `CCLayer::setKeyboardEnabled(true)`, not one `keyDown` was logged while the
-/// user was typing. GD does not dispatch keyboard messages while a text field holds
-/// focus.
-///
-/// What is left is the hook below, on the node's own text-insertion callback. Its
-/// `keyCodes` parameter is the only place GD surfaces the key that produced the
-/// input, so it is the only place that can see Enter.
-class ChatPanel final : public cocos2d::CCLayer, public TextInputDelegate {
+/// `inputHasFocus` survives because playtest suppression still needs it, but it
+/// is a plain flag fed by `setFocusCallback` rather than a field on a node we no
+/// longer own. `EditorUI::keyDown` still calls submit as a belt-and-braces
+/// fallback; submitting an empty draft is a no-op, so a second call is harmless.
+class ChatPanel final : public cocos2d::CCLayer {
 public:
     static ChatPanel* create();
 
@@ -120,9 +73,7 @@ public:
     ///
     /// The hook is global -- it fires for every text field in the game -- so it has
     /// to ask whether the node belongs to us. Only one panel exists at a time.
-    [[nodiscard]] static bool ownsInputNode(CCTextInputNode* node);
-
-    /// Submits the draft, for the hook to call when it sees Enter.
+    /// Submits the draft, for the `EditorUI::keyDown` fallback to call on Enter.
     static void submitFromInputNode();
 
     /// True when the panel is open and its text input has keyboard focus.
@@ -240,10 +191,6 @@ public:
     /// outcome through `finishRevert`.
     void setOnRevert(geode::Function<void(std::string)> onRevert);
 
-    // -- TextInputDelegate: Enter submits (SPEC.md 8.5) ------------------
-
-    void textInputReturn(CCTextInputNode* node) override;
-
 private:
     ChatPanel() = default;
 
@@ -360,7 +307,6 @@ private:
 
     /// The tool the running turn is using, or empty. Shown by the thinking indicator.
     std::string m_progressTool;
-    InputForwarder m_inputForwarder;
     cocos2d::CCLabelBMFont* m_buttonLabel = nullptr;
     geode::Button* m_actionButton = nullptr;
     geode::Label* m_emptyHint = nullptr;
@@ -387,12 +333,16 @@ private:
     /// Panel size when expanded, in points. The collapsed size is derived.
     cocos2d::CCSize m_size { 216.f, 196.f };
 
-    /// Set while this panel is attached, so the global input hook can find its
-    /// panel. Exactly one panel exists at a time.
+    /// Set while this panel is attached, so global hooks can find their panel.
+    /// Exactly one panel exists at a time.
     static ChatPanel* s_attached;
 
-    /// The panel's own input node, cached so the hook can compare pointers.
-    CCTextInputNode* m_inputNode = nullptr;
+    /// Whether the text input currently holds keyboard focus.
+    ///
+    /// Fed by `TextInput::setFocusCallback`. It used to be read off the input
+    /// node's `m_selected` field, which v6 removed along with the rest of the
+    /// `CCTextInputNode` wrapper -- a callback is the supported source anyway.
+    bool m_inputFocused = false;
 
     geode::Function<void(std::string)> m_onSubmit;
     geode::Function<void()> m_onCancel;

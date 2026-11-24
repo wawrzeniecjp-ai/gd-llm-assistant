@@ -4,7 +4,6 @@
 
 #include <Geode/binding/EditorUI.hpp>
 #include <Geode/modify/CCMouseDispatcher.hpp>
-#include <Geode/modify/CCTextInputNode.hpp>
 #include <Geode/modify/EditorUI.hpp>
 #include <Geode/ui/Button.hpp>
 #include <Geode/ui/Label.hpp>
@@ -387,28 +386,23 @@ void ChatPanel::buildInput() {
         input->setCommonFilter(CommonFilter::Any);
         input->setID("input"_spr);
         // The callback fires on every keystroke and is the only signal the panel gets
-        // while the user types: `TextInput` forwards `textChanged` through our delegate
-        // chain, so this works even though `m_inputForwarder` owns the node's delegate.
+        // while the user types.
         input->setCallback([this](std::string const&) { updateDraftPreview(); });
+        // Enter, through the widget's own event. This is the v6 replacement for the
+        // delegate slot the panel used to take over: `TextInput` no longer wraps a
+        // `CCTextInputNode`, so there is no node's delegate to hijack.
+        input->setEnterCallback([this](std::string const&) {
+            log::info("panel: Enter via TextInput::setEnterCallback");
+            submitDraft();
+        });
+        // Focus, for the playtest-suppression check. A flag fed by a callback rather
+        // than a field on the node, because v6 removed the node we used to read.
+        input->setFocusCallback([this](geode::TextInput::FocusState state) {
+            m_inputFocused = state == geode::TextInput::FocusState::Focused;
+        });
         m_inputRow->addChild(input, 1);
         m_input = input;
-
-        // Take over the node's delegate so Enter can be seen, chaining to the
-        // delegate `TextInput` had installed there so its own behaviour is
-        // unchanged. See `InputForwarder`.
-        if (auto node = input->getInputNode()) {
-            m_inputNode = node;
-            s_attached = this;
-            m_inputForwarder.setInner(node->m_delegate);
-            m_inputForwarder.setOnEnter([this] {
-                log::info("panel: Enter via enterPressed");
-                submitDraft();
-            });
-            node->setDelegate(&m_inputForwarder);
-            log::info("panel: installed the Enter forwarder on the input node");
-        } else {
-            log::warn("panel: input node missing; Enter will not submit");
-        }
+        s_attached = this;
     }
 
     m_buttonLabel = cocos2d::CCLabelBMFont::create("Send", kFont);
@@ -543,7 +537,11 @@ void ChatPanel::relayout() {
     auto inputWidth = width - 2.f * kPad - kButtonWidth - kPad;
     if (m_input) {
         m_input->setPosition({ kPad + inputWidth * 0.5f, kPad + kInputHeight * 0.5f });
-        m_input->setWidth(inputWidth / 0.62f);
+        // v6 has no `setWidth`; `setContentSize` is the replacement, so the
+        // height is carried over rather than guessed.
+        m_input->setContentSize(
+            { inputWidth / 0.62f, m_input->getContentSize().height }
+        );
     }
     if (m_actionButton) {
         m_actionButton->setPosition({ width - kPad - kButtonWidth * 0.5f, kPad + kInputHeight * 0.5f });
@@ -609,7 +607,7 @@ void ChatPanel::setPlaytestHidden(bool hidden) {
     // from the playtest transition rather than from the key handler so it applies
     // however the playtest started.
     if (hidden && m_input) {
-        m_input->defocus();
+        m_input->unfocus();
     }
 
     applyVisibility();
@@ -1158,60 +1156,13 @@ void ChatPanel::onToggleExpanded(CCObject* sender) {
     toggle();
 }
 
-void ChatPanel::textInputReturn(CCTextInputNode* node) {
-    log::info("panel: enter pressed in the input");
-    submitDraft();
-}
-
-// ---------------------------------------------------------------------------
-// Input forwarding (SPEC.md 8.5)
-// ---------------------------------------------------------------------------
-
-void InputForwarder::textChanged(CCTextInputNode* node) {
-    if (m_inner) m_inner->textChanged(node);
-}
-
-void InputForwarder::textInputOpened(CCTextInputNode* node) {
-    if (m_inner) m_inner->textInputOpened(node);
-}
-
-void InputForwarder::textInputClosed(CCTextInputNode* node) {
-    if (m_inner) m_inner->textInputClosed(node);
-}
-
-void InputForwarder::textInputShouldOffset(CCTextInputNode* node, float yOffset) {
-    if (m_inner) m_inner->textInputShouldOffset(node, yOffset);
-}
-
-bool InputForwarder::allowTextInput(CCTextInputNode* node) {
-    // Defaults to allowing when there is nothing to chain to, mirroring what the
-    // base class does. Refusing would make the field silently uneditable.
-    return m_inner ? m_inner->allowTextInput(node) : true;
-}
-
-void InputForwarder::enterPressed(CCTextInputNode* node) {
-    log::info("panel: Enter via enterPressed");
-    if (m_onEnter) m_onEnter();
-    if (m_inner) m_inner->enterPressed(node);
-}
-
-void InputForwarder::textInputReturn(CCTextInputNode* node) {
-    log::info("panel: Enter via textInputReturn");
-    if (m_onEnter) m_onEnter();
-    if (m_inner) m_inner->textInputReturn(node);
-}
-
 void ChatPanel::onExit() {
     unschedule(schedule_selector(ChatPanel::tickThinking));
     if (s_attached == this) {
         s_attached = nullptr;
     }
-    m_inputNode = nullptr;
+    m_inputFocused = false;
     CCLayer::onExit();
-}
-
-bool ChatPanel::ownsInputNode(CCTextInputNode* node) {
-    return node != nullptr && s_attached != nullptr && s_attached->m_inputNode == node;
 }
 
 void ChatPanel::submitFromInputNode() {
@@ -1225,12 +1176,7 @@ void ChatPanel::clearPlaytestSuppression() {
 }
 
 bool ChatPanel::inputHasFocus() {
-    if (s_attached == nullptr || s_attached->m_inputNode == nullptr) {
-        return false;
-    }
-    // `m_selected` is the node's own focus flag, which avoids having to track focus
-    // separately through callbacks that are never delivered.
-    return s_attached->m_inputNode->m_selected;
+    return s_attached != nullptr && s_attached->m_inputFocused;
 }
 
 // ---------------------------------------------------------------------------
@@ -1278,39 +1224,6 @@ void ChatPanel::ccTouchMoved(cocos2d::CCTouch* touch, cocos2d::CCEvent* event) {
 void ChatPanel::ccTouchEnded(cocos2d::CCTouch* touch, cocos2d::CCEvent* event) {}
 
 void ChatPanel::ccTouchCancelled(cocos2d::CCTouch* touch, cocos2d::CCEvent* event) {}
-
-// ---------------------------------------------------------------------------
-// Input hook (SPEC.md 8.5)
-// ---------------------------------------------------------------------------
-
-// The only place GD surfaces the key that produced typed input. See the class
-// comment for the two mechanisms that were measured not to work.
-//
-// Chained rather than replaced: the original is what inserts the character, so
-// skipping it would make the field read-only.
-class $modify(ChatInputNodeHook, CCTextInputNode) {
-    bool onTextFieldInsertText(
-        cocos2d::CCTextFieldTTF* sender, char const* text, int nLen,
-        cocos2d::enumKeyCodes keyCodes
-    ) {
-        if (gdai::ui::ChatPanel::ownsInputNode(this)) {
-            // Logged unconditionally: the key code is the answer to a question that
-            // has cost several rounds, and it is cheap to record while the answer
-            // is still uncertain.
-            log::info(
-                "panel: insert text len={} keyCode=0x{:X} text='{}'",
-                nLen,
-                static_cast<int>(keyCodes),
-                text ? std::string(text, nLen) : std::string()
-            );
-            if (keyCodes == cocos2d::KEY_Enter) {
-                log::info("panel: Enter via the input node hook");
-                gdai::ui::ChatPanel::submitFromInputNode();
-            }
-        }
-        return CCTextInputNode::onTextFieldInsertText(sender, text, nLen, keyCodes);
-    }
-};
 
 // Enter arrives here, not at the text field.
 //
