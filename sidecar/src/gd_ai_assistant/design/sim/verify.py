@@ -67,8 +67,9 @@ def verify(world: World, params: CubeParams, args: dict[str, Any]) -> dict[str, 
                     "blue orbs and pads, and speed, gravity, size and mode portals; ship, "
                     "ball, ufo and wave, mini or not, with blocks, spikes, orbs and pads. "
                     "A mini cube's orbs, a mini cube squeezed under a low block, a flying "
-                    "player meeting a block from below deeper than measured, and Sim-3's "
-                    "modes are not calibrated yet and stop it.",
+                    "player meeting a block from below deeper than measured, an "
+                    "upside-down robot, the spider and the swing are not calibrated yet "
+                    "and stop it.",
         }
 
     idle = simulate(world, params, [], max_ticks=10**6, until_x=x1, start=cube,

@@ -1053,7 +1053,7 @@ failures:
 Sim-3 starts with the robot, explored before anything is fitted, as P15 explored the
 flight modes. The replay trace already reports `robot`, so no mod change is needed.
 
-**P19 (written 2026-11-22, not run yet).** `scripts/calibrate.py P19`, 65 runs (about
+**P19 (written 2026-11-22, run and fitted 2026-11-24).** `scripts/calibrate.py P19`, 65 runs (about
 5 minutes). The robot portal is in column 6; pads, orbs, the spike and the step are in
 column 14. Each press that must meet an object is aimed by the cube simulator, which
 crosses at the same speed. The fixture is `cal_robot.json`.
@@ -1082,6 +1082,56 @@ crosses at the same speed. The fixture is `cal_robot.json`.
 - every object is inside the area the script checks is empty;
 - every input falls inside its run, and after the robot portal;
 - every orb press falls inside the overlap.
+
+Two tests run the whole probe against a fake game: every run goes through the code that
+records it, and runs recorded before a failure are saved. The first attempt crashed on
+run 12 over a clashing argument name and lost the 11 runs before it.
+
+**P19 results, now in the simulator (`modes.robot`).** 58 of the 65 runs replay as
+goldens; the 7 upside-down runs are skipped (1214 goldens in all).
+- **The boost:** a press on the ground sets vy to half the cube's jump velocity at that
+  speed: 5.31, 5.59, 5.71, 5.615 and 5.615 at 0.5x-4x, times 0.8 mini. vy stays there,
+  with no gravity, while the press is held, for at most 68 samples counting the one it
+  is set on, the same at every speed and size.
+- **After the boost:** gravity 0.19 at 0.5x, 0.194 at 1x and 2x, 0.195 at 3x and 4x
+  (about 0.9 of the cube's, not exactly). The fall is capped at 15, as the cube's.
+- **Height:** the apex grows linearly with the hold, from 18.75 units for a one-tick tap
+  (1.26 a tick) to about 103 units at the cap.
+- **Landing:** held through a landing, the robot does not jump again (the cube does).
+  A press made in the air and still held at landing jumps on the next move, which moves
+  that tick, as the cube's re-jump. A press in the air never boosts.
+- **Pads:** yellow 16.0 and pink 10.4 at 1x, the cube's.
+- **Orbs:**
+  - yellow 10.06 (0.9 of the cube's) and pink 8.05 (the cube's) at 1x; other speeds
+    scale the cube's orb by the same ratio, which is not measured;
+  - holding the press after an orb adds no boost;
+  - an orb touched on the ground fires instead of the boost: the probe's orbs sat on
+    the floor, and pressing inside one gave the orb's vy, not 5.59.
+- **Mode portal:** entering the robot keeps vy as it is (entry factor 1).
+- **Contacts:** the cube's: landing, inner box, spikes. Every spike and step outcome of
+  part F matches with no change.
+- **Still unverifiable:**
+  - the robot upside down: a gravity portal, or a blue orb or pad, stops the run. P19's
+    flipped runs had no roof, so the robot just fell upward off the top of the level;
+  - a mini robot's orbs.
+
+**The solver (2026-11-24).** On the ground, a robot press is searched as a hold of one of
+`ROBOT_HOLDS` ticks (1 to 68, about 5-10 units of apex apart), its release fixed when it
+starts; touching an orb, it is a tap. Branches waiting for different releases are no
+longer merged. `forgiving` returns a route with holds as it is when it never flies a
+ship or a wave, since its margin applies to neither. Results:
+- a two-block step is possible in 1.9 s, with one hold and a 112 ms press window;
+- three spikes in a row are possible in 0.6 s;
+- a four-block wall is impossible: the highest jump rises about 103 units.
+
+**Next (P20):**
+- the robot upside down, under a roof;
+- how early a press in the air can be and still jump at landing;
+- the robot meeting a block from the side and from below.
+
+The `explain-robot` eval was written when the robot was unverifiable. Its recording
+replays, but a live run would now get `possible`. It should be pointed at the spider
+when it is next recorded.
 
 ## 6.11 Deferred: slopes, platformer, moving objects
 

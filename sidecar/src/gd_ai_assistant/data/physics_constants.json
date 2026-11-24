@@ -1,7 +1,7 @@
 {
     "schema": 1,
     "game_version": "2.2091",
-    "calibrated_at": "2026-11-16",
+    "calibrated_at": "2026-11-24",
     "note": "LEVEL-DESIGN-SPEC.md 6.3. Every leaf is {value, source, confidence}. confidence is measured | derived | guess. A null value means 'not known yet', and code that needs it must refuse rather than assume. Replaced by scripts/calibrate.py (M2).",
     "tick_rate": {
         "value": 240,
@@ -779,6 +779,87 @@
             "orbs_and_pads": {
                 "value": 0,
                 "source": "scripts/calibrate.py P18, 2026-11-16; yellow and pink orbs and pads leave the wave's path unchanged; blue ones flip its gravity",
+                "confidence": "measured"
+            }
+        },
+        "robot": {
+            "boost_ratio": {
+                "value": 0.5,
+                "source": "scripts/calibrate.py P19, 2026-11-24; while held, vy stays at this times the cube's jump velocity at that speed (5.31, 5.59, 5.71, 5.615, 5.615 at 0.5x-4x); mini 0.8 of it (4.472)",
+                "confidence": "measured"
+            },
+            "boost_ticks": {
+                "value": 68,
+                "source": "scripts/calibrate.py P19, 2026-11-24; samples vy keeps the boost, counting the one it is set on, the same at every speed and mini; a longer hold changes nothing",
+                "confidence": "measured"
+            },
+            "gravity": {
+                "value": 0.194,
+                "source": "scripts/calibrate.py P19, 2026-11-24; per tick at 1x, after the boost (0.9 of the cube's, not exactly)",
+                "confidence": "measured"
+            },
+            "by_speed": {
+                "0.5x": {
+                    "gravity": {
+                        "value": 0.19,
+                        "source": "scripts/calibrate.py P19, 2026-11-24",
+                        "confidence": "measured"
+                    }
+                },
+                "2x": {
+                    "gravity": {
+                        "value": 0.194,
+                        "source": "scripts/calibrate.py P19, 2026-11-24",
+                        "confidence": "measured"
+                    }
+                },
+                "3x": {
+                    "gravity": {
+                        "value": 0.195,
+                        "source": "scripts/calibrate.py P19, 2026-11-24",
+                        "confidence": "measured"
+                    }
+                },
+                "4x": {
+                    "gravity": {
+                        "value": 0.195,
+                        "source": "scripts/calibrate.py P19, 2026-11-24",
+                        "confidence": "measured"
+                    }
+                }
+            },
+            "orb_impulse": {
+                "yellow": {
+                    "value": 10.06,
+                    "source": "scripts/calibrate.py P19, 2026-11-24; 1x; holding the press adds no boost",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 8.05,
+                    "source": "scripts/calibrate.py P19, 2026-11-24; 1x",
+                    "confidence": "measured"
+                }
+            },
+            "pad_impulse": {
+                "yellow": {
+                    "value": 16.0,
+                    "source": "scripts/calibrate.py P19, 2026-11-24; 1x, the cube's",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 10.4,
+                    "source": "scripts/calibrate.py P19, 2026-11-24; 1x, the cube's",
+                    "confidence": "measured"
+                }
+            },
+            "entry_vy": {
+                "value": 1.0,
+                "source": "scripts/calibrate.py P19, 2026-11-24; from the cube in the air: vy goes on unchanged",
+                "confidence": "measured"
+            },
+            "rejump_on_landing": {
+                "value": false,
+                "source": "scripts/calibrate.py P19, 2026-11-24; held through a landing it does not jump again; a press made in the air and still held at landing jumps on the next move",
                 "confidence": "measured"
             }
         }

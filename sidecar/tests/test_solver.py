@@ -110,8 +110,8 @@ def test_verify_impossible_says_how_far_and_what_killed() -> None:
 
 
 def test_verify_refuses_unsupported_content() -> None:
-    robot = [{"id": 745, "x": 255, "y": 45}]           # Sim-3
-    result = _verify(robot, {"x_range": [0, 600]})
+    spider = [{"id": 1331, "x": 255, "y": 45}]          # Sim-3, after the robot
+    result = _verify(spider, {"x_range": [0, 600]})
     assert result["result"] == "unverifiable"
     assert "Sim-3" in result["unverifiable"][0]["reason"]
 
@@ -292,3 +292,54 @@ def test_tricky_columns_beaten_by_hand() -> None:
     lo, hi = spans[0]
     assert all(first_column(t) for t in range(lo, hi + 1))
     assert not first_column(lo - 1) and not first_column(hi + 1)
+
+
+# -- the robot (Sim-3, P19) --------------------------------------------------------------
+
+ROBOT_PORTAL = [{"id": 745, "x": 195, "y": 45}]
+
+
+def test_a_robot_holds_to_climb_a_two_block_step() -> None:
+    """A tap rises 18.75 units: a 60-high step needs the press held (P19 A)."""
+    step = [{"id": 1, "x": 15 + 30 * c, "y": 15 + 30 * row}
+            for c in range(16, 30) for row in range(2)]
+    result = _verify(ROBOT_PORTAL + step, {"x_range": [0, 1000]})
+    assert result["result"] == "possible"
+    (jump,) = result["route"]
+    assert jump["action"] == "hold" and jump["mode"] == "robot"
+    assert jump["hold_ms"] > 10 * 1000 / 240
+    assert jump["window_ms"] > 0 and jump["release_window_ms"] > 0
+
+
+def test_a_robot_cannot_clear_a_four_block_wall() -> None:
+    """Its highest jump (a 68-tick boost) rises about 103 units: 120 is out of reach."""
+    wall = [{"id": 1, "x": 15 + 30 * 16, "y": 15 + 30 * row} for row in range(4)]
+    result = _verify(ROBOT_PORTAL + wall, {"x_range": [0, 900]})
+    assert result["result"] == "impossible"
+
+
+def test_robot_routes_replay_and_skip_the_forgiving_search() -> None:
+    """The margin `forgiving` searches with applies to the ship and the wave only, so a
+    robot route with holds comes back as it is, without five searches."""
+    import time
+
+    from gd_ai_assistant.design.sim.solver import forgiving
+
+    spikes = [{"id": 8, "x": 15 + 30 * c, "y": 15} for c in (16, 17, 18)]
+    world = _world(ROBOT_PORTAL + spikes)
+    solved = solve(world, PARAMS, Cube(), 900)
+    assert solved.result == "possible" and solved.releases[0] > solved.route[0] + 1
+    replay = simulate(world, PARAMS, input_events(solved.route, solved.releases),
+                      max_ticks=solved.end_tick + 2, until_x=900)
+    assert replay.outcome == "reached"
+    began = time.perf_counter()
+    assert forgiving(world, PARAMS, Cube(), 900, solved) is solved
+    assert time.perf_counter() - began < 0.5
+
+
+def test_an_upside_down_robot_is_unverifiable() -> None:
+    """P19's flipped runs had no roof: the robot upside down is not measured yet."""
+    flip = [{"id": 11, "x": 15 + 30 * 9, "y": 45}]
+    run = simulate(_world(ROBOT_PORTAL + flip), PARAMS, [], max_ticks=600, until_x=600)
+    assert run.outcome == "unverifiable"
+    assert run.death is not None and "upside-down robot" in (run.death.reason or "")

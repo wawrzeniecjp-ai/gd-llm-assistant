@@ -7,7 +7,9 @@ choice when an input would do something:
   press is a tap, released on the next tick;
 - the ufo: any tick (it jumps in the air too), a tap;
 - the ship and the wave: any tick, start holding or let go; a hold lasts until a later
-  decision releases it.
+  decision releases it;
+- the robot: on the ground, a press held for one of `ROBOT_HOLDS` ticks (its jump grows
+  with the hold, P19); touching an orb, a tap.
 
 Between decision points the state advances deterministically. A route is its press
 ticks and, for each, the tick it is released (a tap: the next one).
@@ -35,6 +37,11 @@ TICK_MS = 1000.0 / 240.0
 HOLD_MODES = frozenset({"ship", "wave"})
 #: Modes whose press does something in the air.
 AIR_MODES = frozenset({"ship", "wave", "ufo"})
+#: How long the search holds a robot's press from the ground, in ticks. The jump grows by
+#: 1.26 units a tick of hold up to a 68-tick boost (P19), so these step its apex by about
+#: 5-10 units from a tap (18.75) to the highest (103); windows then measure each press
+#: and release in single ticks.
+ROBOT_HOLDS = (1, 4, 8, 12, 16, 20, 25, 30, 36, 42, 50, 58, 68)
 #: In the air modes, decisions every this many ticks in the coarse and the full pass.
 FLIGHT_STRIDE = {"coarse": 8, "full": 2}
 #: Flying states closer than this (y, vy) count as one in the search (the cube's own key
@@ -176,6 +183,16 @@ def _slack(world: World, p: CubeParams, start: Cube, end_x: float, found: SolveR
     return min(reach, gap, WINDOW_REACH), lo, reach <= gap
 
 
+def _flies(world: World, p: CubeParams, start: Cube, end_x: float,
+           found: SolveResult) -> bool:
+    """Does the route spend any tick as a ship or a wave?"""
+    assert found.end_tick is not None
+    replay = simulate(world, p, input_events(found.route, found.releases),
+                      max_ticks=found.end_tick + 2, until_x=end_x, start=start,
+                      start_tick=0)
+    return any(mode in HOLD_MODES for mode in replay.trace["mode"])
+
+
 def forgiving(world: World, p: CubeParams, start: Cube, end_x: float, solved: SolveResult,
               *, budget_s: float = FORGIVING_BUDGET_S) -> SolveResult:
     """A route that keeps clear of what kills, when `solved` has holds.
@@ -197,6 +214,10 @@ def forgiving(world: World, p: CubeParams, start: Cube, end_x: float, solved: So
     `describe_forgiving` for the choice between this route and the one found.
     """
     if solved.result != "possible" or not _holds(solved.route, solved.releases):
+        return solved
+    if not _flies(world, p, start, end_x, solved):
+        # Holds without a ship or a wave (a robot's jumps): the margin applies to neither,
+        # so every search would find the same route.
         return solved
     began = time.perf_counter()
     deadline = began + budget_s
@@ -311,7 +332,8 @@ def _search(world: World, p: CubeParams, start: Cube, end_x: float, *, beam: int
             holding = branch.holding
             # A hold may be let go at any decision tick (also after leaving its mode).
             may_release = holding and fly
-            may_press = (not holding and branch.release_at in (None, tick - 1)
+            may_press = (not holding and (branch.release_at is None
+                                          or branch.release_at <= tick - 1)
                          and obstacle_ahead)
             pre = cube.copy() if may_press or may_release else None
             death = advance(cube, world, p, tick, _actions(branch, tick - 1, False), near)
@@ -321,13 +343,12 @@ def _search(world: World, p: CubeParams, start: Cube, end_x: float, *, beam: int
             children = [Branch(cube, branch.presses, branch.releases,
                                None if branch.release_at == tick - 1 else branch.release_at)]
             if pre is not None:
-                child = _decide(world, p, branch, pre, cube, tick, near, decide, fly,
-                                may_release)
-                if child is not None:
-                    children.append(child)
+                children += _decide(world, p, branch, pre, cube, tick, near, decide, fly,
+                                    may_release)
             for child in children:
                 key = (round(child.cube.x, 2), *_search_key(child.cube),
-                       child.release_at is not None, child.holding)
+                       None if child.release_at is None else child.release_at - tick,
+                       child.holding)
                 kept = seen.get(key)
                 # Fewer presses wins a tie: the same state reached more simply.
                 if kept is None or len(child.presses) < len(kept.presses):
@@ -373,25 +394,32 @@ def _prune(frontier: list[Branch], beam: int) -> list[Branch]:
 
 
 def _decide(world: World, p: CubeParams, branch: Branch, pre: Cube, idle: Cube, tick: int,
-            near: list, decide: bool, fly: bool, may_release: bool) -> Branch | None:
-    """The branch that acts this tick, if acting would do something and survives. `idle`
-    is the same tick without acting: its mode and contacts say what a press would do
-    (the commands run after the move and contacts)."""
+            near: list, decide: bool, fly: bool, may_release: bool) -> list[Branch]:
+    """The branches that act this tick, if acting would do something and survives (one,
+    or one per hold length for a robot's jump). `idle` is the same tick without acting:
+    its mode and contacts say what a press would do (the commands run after the move and
+    contacts)."""
     t = tick - 1
     if may_release:
         if advance(pre, world, p, tick, [*_actions(branch, t, False), "release"], near):
-            return None
-        return Branch(pre, branch.presses, (*branch.releases, t), branch.release_at)
+            return []
+        return [Branch(pre, branch.presses, (*branch.releases, t), branch.release_at)]
     hold = idle.mode in HOLD_MODES and fly
     tap = (idle.touching_orbs or (decide and idle.grounded)
            or (fly and idle.mode == "ufo"))
     if not (hold or tap):
-        return None
+        return []
     if advance(pre, world, p, tick, _actions(branch, t, True), near) is not None:
-        return None
+        return []
     if hold:
-        return Branch(pre, (*branch.presses, t), branch.releases, None)
-    return Branch(pre, (*branch.presses, t), (*branch.releases, tick), tick)
+        return [Branch(pre, (*branch.presses, t), branch.releases, None)]
+    if idle.mode == "robot" and idle.grounded and not idle.touching_orbs:
+        # The release is fixed now, so the branch is a tap with a length: nothing else
+        # is decided until it lets go.
+        return [Branch(pre.copy() if i else pre, (*branch.presses, t),
+                       (*branch.releases, t + hold_for), t + hold_for)
+                for i, hold_for in enumerate(ROBOT_HOLDS)]
+    return [Branch(pre, (*branch.presses, t), (*branch.releases, tick), tick)]
 
 
 def tap_releases(route: Sequence[int]) -> list[int]:

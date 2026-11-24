@@ -59,8 +59,11 @@ def f32(value: float) -> float:
 
 
 FLOOR = 0.0          # the ground's top (S-L1)
-#: Modes Sim-2 simulates.
-MODES = ("cube", "ship", "ball", "ufo", "wave")
+#: Modes the simulator plays (Sim-2, and the robot of Sim-3).
+MODES = ("cube", "ship", "ball", "ufo", "wave", "robot")
+#: Modes that run on the ground and jump: the cube's moves and contacts, each with its
+#: own jump. The others fly within a band.
+GROUND_MODES = frozenset({"cube", "robot"})
 #: How close (units) a flight-mode or mini player may come to an object whose contact is
 #: not calibrated (see `_uncalibrated_contact`) before the run is unverifiable.
 CONTACT_MARGIN = 3.0
@@ -68,6 +71,11 @@ CONTACT_MARGIN = 3.0
 #: never below the ground (P17: portals at y 143, 192, 238 and 284 gave floors 0, 30, 60
 #: and 120 for the 300-high ufo and wave bands, and 0, 60, 90 and 150 for the ball's 240).
 BAND_GRID = 30.0
+
+
+#: Why an upside-down robot stops a run: P19's flipped runs had no roof, so its jump
+#: upside down is not measured yet.
+UPSIDE_DOWN_ROBOT = "an upside-down robot is not calibrated yet"
 
 
 class UncalibratedError(RuntimeError):
@@ -148,9 +156,10 @@ class FlightParams:
             return None
         modes = {"ship": ship, "ufo": ufo, "ball": ball, "wave": wave}
         entry = {name: t["entry_vy"] for name, t in modes.items()}
-        cube_entry = constants.mode_value("cube", "entry_vy")
-        if cube_entry is not None and cube_entry.value is not None:
-            entry["cube"] = cube_entry.value
+        for ground in ("cube", "robot"):
+            ground_entry = constants.mode_value(ground, "entry_vy")
+            if ground_entry is not None and ground_entry.value is not None:
+                entry[ground] = ground_entry.value
         orb, pad = {}, {}
         for name in ("ship", "ufo", "ball"):
             orbs = table(name, "yellow", "pink", sub=("orb_impulse",))
@@ -169,6 +178,47 @@ class FlightParams:
     def impulses_known(self, mode: str) -> bool:
         """Are this flight mode's orbs and pads calibrated? (The wave's need nothing.)"""
         return mode == "wave" or (mode in self.orb and mode in self.pad)
+
+
+@dataclass(frozen=True)
+class RobotParams:
+    """The robot (calibration P19, 2026-11-24). A ground mode: it runs, lands and dies as
+    the cube does, and only its jump differs. A press on the ground sets vy to
+    `boost_ratio` times the cube's jump at that speed (mini: times `mini_impulse`), and vy
+    stays there while the press is held, for `boost_ticks` samples at most, counting the
+    one it is set on; then the robot falls with its own gravity. Held through a landing
+    it does not jump again; a press made in the air and still held at landing does."""
+
+    boost_ratio: float
+    boost_ticks: int
+    gravity: float
+    gravity_by_speed: Mapping[str, float]
+    #: Yellow and pink orbs at 1x (10.06 and 8.05: 0.9 and 1.0 of the cube's); other
+    #: speeds scale the cube's by the same ratio.
+    orb: Mapping[str, float]
+
+    def gravity_for(self, speed: str) -> float:
+        return self.gravity_by_speed.get(speed, self.gravity)
+
+    @classmethod
+    def from_constants(cls, constants: PhysicsConstants) -> RobotParams | None:
+        def get(*path: str) -> float | None:
+            value = constants.mode_value("robot", *path)
+            return None if value is None or value.value is None else value.value
+
+        ratio, ticks, gravity = get("boost_ratio"), get("boost_ticks"), get("gravity")
+        yellow, pink = get("orb_impulse", "yellow"), get("orb_impulse", "pink")
+        if None in (ratio, ticks, gravity, yellow, pink):
+            return None
+        by_speed = {}
+        for speed in SPEEDS:
+            value = get("by_speed", speed, "gravity")
+            if value is not None:
+                by_speed[speed] = value
+        assert ratio is not None and ticks is not None and gravity is not None
+        assert yellow is not None and pink is not None
+        return cls(boost_ratio=ratio, boost_ticks=int(ticks), gravity=gravity,
+                   gravity_by_speed=by_speed, orb={"yellow": yellow, "pink": pink})
 
 
 @dataclass(frozen=True)
@@ -204,6 +254,8 @@ class CubeParams:
     pad_by_speed: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
     #: Sim-2 (None: not calibrated, so mode, gravity and size portals are unverifiable).
     flight: FlightParams | None = None
+    #: Sim-3's robot (None: not calibrated, so a robot portal is unverifiable).
+    robot: RobotParams | None = None
     #: Not physics: a margin the ship and the wave keep from what kills them (hazards; the
     #: wave's solids too), used by the solver to find a forgiving route. It only adds
     #: deaths, so a route that survives with it survives without. 0 in the game's physics.
@@ -297,6 +349,7 @@ class CubeParams:
             pad_by_speed=pads,
             snap_max_step=max_steps,
             flight=FlightParams.from_constants(constants),
+            robot=RobotParams.from_constants(constants),
         )
 
 
@@ -324,6 +377,8 @@ class Cube:
     bounds: tuple[float, float] | None = None
     #: Set when the run meets something Sim-2 does not simulate; ends the run.
     unverifiable: str | None = None
+    #: The robot: moves left that keep its boost while the press is held.
+    boost: int = 0
 
     def box(self, half: float = HALF) -> Box:
         return Box(self.x - half, self.y - half, self.x + half, self.y + half)
@@ -332,13 +387,13 @@ class Cube:
         """What the solver deduplicates on (LEVEL-DESIGN-SPEC.md 6.8.2)."""
         return (round(self.y * 2) / 2, round(self.vy * 20) / 20, self.speed, self.grounded,
                 self.holding, self.buffered, self.used, self.snap, self.mode, self.gravity,
-                self.mini, self.bounds)
+                self.mini, self.bounds, self.boost)
 
     def copy(self) -> Cube:
         return Cube(self.x, self.y, self.vy, self.speed, self.grounded, self.holding,
                     self.buffered, self.used, self.touching_orbs, self.dead,
                     self.was_grounded, self.snap, self.ground_x, self.mode, self.gravity,
-                    self.mini, self.bounds, self.unverifiable)
+                    self.mini, self.bounds, self.unverifiable, self.boost)
 
 
 @dataclass
@@ -400,8 +455,11 @@ def move(cube: Cube, near: list[Body], p: CubeParams) -> None:
     if cube.grounded:
         cube.ground_x = cube.x
     cube.x = f32(cube.x + p.dx[cube.speed])
-    if cube.mode != "cube":
+    if cube.mode not in GROUND_MODES:
         _move_flight(cube, p)
+        return
+    if cube.mode == "robot":
+        _move_robot(cube, near, p)
         return
     g = cube.gravity
     if cube.grounded and cube.holding:
@@ -418,6 +476,40 @@ def move(cube: Cube, near: list[Body], p: CubeParams) -> None:
         if p.terminal_velocity is not None and g * cube.vy < -p.terminal_velocity:
             cube.vy = -g * p.terminal_velocity
         cube.y += cube.vy * p.scale
+
+
+def _robot_boost(cube: Cube, p: CubeParams) -> None:
+    """Start the robot's jump: vy at its boost, kept for the moves that follow."""
+    assert p.robot is not None
+    cube.vy = (cube.gravity * p.robot.boost_ratio * p.jump_for(cube.speed)
+               * _impulse_scale(cube, p))
+    cube.boost = p.robot.boost_ticks - 1
+    cube.grounded, cube.buffered = False, False
+
+
+def _move_robot(cube: Cube, near: list[Body], p: CubeParams) -> None:
+    """The robot's move (P19). Its boost keeps vy, with no gravity, while held."""
+    r = p.robot
+    assert r is not None
+    g = cube.gravity
+    if cube.grounded and cube.holding and cube.buffered:
+        # A press made in the air and held to the landing jumps on the next move, moving
+        # that tick (P19 C: landed at 414, at 15 + 5.59 x 0.225 at 415).
+        _robot_boost(cube, p)
+        cube.y += cube.vy * p.scale
+        return
+    if cube.grounded and not _supported(cube, near, half_of(cube, p)):
+        cube.grounded = False
+    if cube.grounded:
+        return
+    if cube.holding and cube.boost > 0:
+        cube.boost -= 1
+    else:
+        cube.boost = 0
+        cube.vy -= g * r.gravity_for(cube.speed)
+        if p.terminal_velocity is not None and g * cube.vy < -p.terminal_velocity:
+            cube.vy = -g * p.terminal_velocity
+    cube.y += cube.vy * p.scale
 
 
 def _move_flight(cube: Cube, p: CubeParams) -> None:
@@ -508,7 +600,7 @@ def _uncalibrated_contact(cube: Cube, near: list[Body], half: float,
     other contact of the Sim-2 modes is: the cube's (Sim-1), solids and hazards in every
     mode and size (P17, P18), pads (P16, P18) and flight orbs (P18). A mini cube's orbs
     are checked when one fires."""
-    if cube.mode == "cube" or (fp is not None and fp.impulses_known(cube.mode)):
+    if cube.mode in GROUND_MODES or (fp is not None and fp.impulses_known(cube.mode)):
         return None
     reach = Box(cube.x - half - CONTACT_MARGIN, cube.y - half - CONTACT_MARGIN,
                 cube.x + half + CONTACT_MARGIN, cube.y + half + CONTACT_MARGIN)
@@ -538,6 +630,9 @@ def _portal(cube: Cube, body: Body, p: CubeParams, half: float) -> None:
         new = {"normal": 1, "inverse": -1}.get(body.variant or "", -cube.gravity)
         if new == cube.gravity:
             return
+        if cube.mode == "robot":
+            cube.unverifiable = UPSIDE_DOWN_ROBOT
+            return
         if cube.mode == "cube" and cube.grounded and not (
                 cube.gravity > 0 and abs(cube.y - half - FLOOR) < 1e-6):
             # Standing on a block, the game's move already pulled the cube one tick of
@@ -557,13 +652,17 @@ def _portal(cube: Cube, body: Body, p: CubeParams, half: float) -> None:
         if target not in MODES:
             cube.unverifiable = f"the {target} is Sim-3, not simulated yet"
             return
-        if target not in fp.entry or cube.mode not in fp.entry:
+        if target not in fp.entry or cube.mode not in fp.entry or (
+                target == "robot" and p.robot is None):
             cube.unverifiable = f"entering the {target} from the {cube.mode} is not calibrated"
             return
-        bounds = _bounds_for(target, body, fp) if target != "cube" else None
+        if target == "robot" and cube.gravity < 0:
+            cube.unverifiable = UPSIDE_DOWN_ROBOT
+            return
+        bounds = _bounds_for(target, body, fp) if target not in GROUND_MODES else None
         cube.vy *= fp.entry[cube.mode] * fp.entry[target]
         cube.mode, cube.bounds = target, bounds
-        cube.grounded, cube.snap, cube.buffered = False, None, False
+        cube.grounded, cube.snap, cube.buffered, cube.boost = False, None, False, 0
 
 
 def collide(cube: Cube, near: list[Body], p: CubeParams, tick: int, prev_y: float,
@@ -591,7 +690,7 @@ def collide(cube: Cube, near: list[Body], p: CubeParams, tick: int, prev_y: floa
         cube.unverifiable = (f"the {cube.mode} meeting a {contact.role.value} is not "
                              f"calibrated yet (object {contact.uid})")
         return None
-    if cube.mode != "cube":
+    if cube.mode not in GROUND_MODES:
         return _collide_flight(cube, near, p, tick, prev_y, half, prev_x)
     # Solids first: landing changes y, which every later check depends on.
     for body in near:
@@ -790,6 +889,10 @@ def _launch(cube: Cube, p: CubeParams, color: str, impulse) -> None:
     """A pad or an orb: yellow and pink push against gravity; blue flips gravity and
     sends the cube towards its new floor at 0.4 of the yellow one (P16)."""
     scale = _impulse_scale(cube, p)
+    cube.boost = 0
+    if color == "blue" and cube.mode == "robot":
+        cube.unverifiable = UPSIDE_DOWN_ROBOT
+        return
     if color == "blue":
         assert p.flight is not None
         cube.gravity = -cube.gravity
@@ -804,7 +907,7 @@ def commands(cube: Cube, p: CubeParams, actions: Iterable[str]) -> None:
     for action in actions:
         if action == "press":
             cube.holding = cube.buffered = True
-            if cube.mode != "cube" and _fire_flight_orb(cube, p):
+            if cube.mode not in GROUND_MODES and _fire_flight_orb(cube, p):
                 cube.buffered = False
                 return
             if cube.mode == "ball":
@@ -817,6 +920,16 @@ def commands(cube: Cube, p: CubeParams, actions: Iterable[str]) -> None:
                                * p.jump_for(cube.speed) * _impulse_scale(cube, p))
                     cube.grounded = cube.buffered = False
                     return
+            elif cube.mode == "robot" and cube.grounded and p.robot is not None:
+                if cube.touching_orbs:
+                    # An orb touched on the ground fires instead of the boost (P19 E:
+                    # pressed on the ground inside a yellow orb, vy 10.062, not 5.59).
+                    _fire_orb(cube, p)
+                    return
+                # A fresh press boosts at once: vy is set now, and the robot moves next
+                # tick (P19 A: vy 5.59 at 321 for a press at 320, y still 15).
+                _robot_boost(cube, p)
+                return
             elif cube.mode == "cube" and cube.grounded:
                 # A fresh press jumps at once: vy is set now, the cube moves next tick
                 # (P2: vy 11.18 at sample 61, y still 15).
@@ -835,11 +948,23 @@ def commands(cube: Cube, p: CubeParams, actions: Iterable[str]) -> None:
 
 
 def _fire_orb(cube: Cube, p: CubeParams) -> None:
-    if cube.buffered and cube.touching_orbs and cube.mode == "cube":
+    if cube.buffered and cube.touching_orbs and cube.mode in GROUND_MODES:
         orb = cube.touching_orbs[0]
         color = orb.variant or "yellow"
         if cube.mini:
-            cube.unverifiable = "the mini cube's orbs are not calibrated yet"
+            cube.unverifiable = f"the mini {cube.mode}'s orbs are not calibrated yet"
+            return
+        if cube.mode == "robot":
+            r = p.robot
+            assert r is not None
+            cube.used = cube.used | {orb.uid}
+            if color == "blue":
+                cube.unverifiable = UPSIDE_DOWN_ROBOT
+                return
+            # P19 E, at 1x; other speeds scale the cube's orb by the same ratio.
+            ratio = r.orb[color] / p.orb_for("1x", color)
+            _launch(cube, p, color, lambda speed, c: p.orb_for(speed, c) * ratio)
+            cube.buffered = False
             return
         if color == "blue" and p.flight is None:
             cube.unverifiable = "blue orbs are not calibrated"

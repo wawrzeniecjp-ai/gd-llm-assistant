@@ -68,7 +68,9 @@ Notes:
   route that keeps 18 units from the spikes and walls, at 5.7 inputs a second, so the soft
   assertion passes. The table keeps the run as recorded.
 - `explain-robot`: it said plainly that the robot part cannot be checked, did not guess,
-  and checked the cube stretches it could.
+  and checked the cube stretches it could. Since 2026-11-24 the simulator plays the
+  robot (P19), so a live run would get `possible`: the case should move to the spider
+  when it is next recorded. The recording still replays.
 - In every case the model saw only the catalog seed (block and spike): the fake editor
   has no object table, and the real one comes from the game. It built portals, orbs and
   pads from GridText characters and the role table. Dumping the game's catalog into an
