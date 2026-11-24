@@ -60,10 +60,10 @@ def f32(value: float) -> float:
 
 FLOOR = 0.0          # the ground's top (S-L1)
 #: Modes the simulator plays (Sim-2, and the robot of Sim-3).
-MODES = ("cube", "ship", "ball", "ufo", "wave", "robot")
+MODES = ("cube", "ship", "ball", "ufo", "wave", "robot", "spider")
 #: Modes that run on the ground and jump: the cube's moves and contacts, each with its
 #: own jump. The others fly within a band.
-GROUND_MODES = frozenset({"cube", "robot"})
+GROUND_MODES = frozenset({"cube", "robot", "spider"})
 #: How close (units) a flight-mode or mini player may come to an object whose contact is
 #: not calibrated (see `_uncalibrated_contact`) before the run is unverifiable.
 CONTACT_MARGIN = 3.0
@@ -157,10 +157,15 @@ class FlightParams:
             return None
         modes = {"ship": ship, "ufo": ufo, "ball": ball, "wave": wave}
         entry = {name: t["entry_vy"] for name, t in modes.items()}
-        for ground in ("cube", "robot"):
+        for ground in ("cube", "robot", "spider"):
             ground_entry = constants.mode_value(ground, "entry_vy")
             if ground_entry is not None and ground_entry.value is not None:
                 entry[ground] = ground_entry.value
+        bounds = {name: t["bounds"] for name, t in modes.items()}
+        spider_bounds = constants.mode_value("spider", "bounds")
+        if spider_bounds is not None and spider_bounds.value is not None:
+            # A ground mode in a band (P21: a press with nothing overhead stops at 270).
+            bounds["spider"] = spider_bounds.value
         orb, pad = {}, {}
         for name in ("ship", "ufo", "ball"):
             orbs = table(name, "yellow", "pink", sub=("orb_impulse",))
@@ -173,7 +178,7 @@ class FlightParams:
                    ceiling_push=player["ceiling_push"], ceiling_kill=player["ceiling_kill"],
                    mini_cube_squeeze=player["mini_cube_squeeze"], ship=ship, ufo=ufo,
                    ball=ball, wave=wave, ship_mini=ship_mini, ufo_mini=ufo_mini,
-                   bounds={name: t["bounds"] for name, t in modes.items()}, entry=entry,
+                   bounds=bounds, entry=entry,
                    orb=orb, pad=pad)
 
     def impulses_known(self, mode: str) -> bool:
@@ -223,6 +228,37 @@ class RobotParams:
 
 
 @dataclass(frozen=True)
+class SpiderParams:
+    """The spider (calibration P21, 2026-11-24). A ground mode in a band: it runs, lands
+    and dies as the cube does, with its own size and gravity. A press on the ground (or a
+    spider pad or orb) moves it at once to the surface opposite, the nearest solid
+    overhead across its width or else the band's edge, and flips its gravity."""
+
+    gravity: float
+    half: float
+    teleport_vy: float
+    pad: Mapping[str, float]
+    orb: Mapping[str, float]
+
+    @classmethod
+    def from_constants(cls, constants: PhysicsConstants) -> SpiderParams | None:
+        def get(*path: str) -> float | None:
+            value = constants.mode_value("spider", *path)
+            return None if value is None or value.value is None else value.value
+
+        found = {k: get(k) for k in ("gravity", "half", "teleport_vy")}
+        pads = {c: get("pad_impulse", c) for c in ("yellow", "pink")}
+        orbs = {c: get("orb_impulse", c) for c in ("yellow", "pink")}
+        values = [*found.values(), *pads.values(), *orbs.values()]
+        if any(v is None for v in values):
+            return None
+        return cls(gravity=found["gravity"] or 0.0, half=found["half"] or 0.0,
+                   teleport_vy=found["teleport_vy"] or 0.0,
+                   pad={c: v or 0.0 for c, v in pads.items()},
+                   orb={c: v or 0.0 for c, v in orbs.items()})
+
+
+@dataclass(frozen=True)
 class CubeParams:
     dx: Mapping[str, float]          # units per tick, by speed
     gravity: float
@@ -257,6 +293,8 @@ class CubeParams:
     flight: FlightParams | None = None
     #: Sim-3's robot (None: not calibrated, so a robot portal is unverifiable).
     robot: RobotParams | None = None
+    #: Sim-3's spider (None: not calibrated, so a spider portal is unverifiable).
+    spider: SpiderParams | None = None
     #: Not physics: a margin the ship and the wave keep from what kills them (hazards; the
     #: wave's solids too), used by the solver to find a forgiving route. It only adds
     #: deaths, so a route that survives with it survives without. 0 in the game's physics.
@@ -351,6 +389,7 @@ class CubeParams:
             snap_max_step=max_steps,
             flight=FlightParams.from_constants(constants),
             robot=RobotParams.from_constants(constants),
+            spider=SpiderParams.from_constants(constants),
         )
 
 
@@ -414,6 +453,8 @@ def half_of(cube: Cube, p: CubeParams) -> float:
     fp = p.flight
     if cube.mode == "wave" and fp is not None:
         base = fp.wave["half"]
+    elif cube.mode == "spider" and p.spider is not None:
+        base = p.spider.half
     if cube.mini and fp is not None:
         base *= fp.mini_scale
     return base
@@ -462,6 +503,9 @@ def move(cube: Cube, near: list[Body], p: CubeParams) -> None:
     if cube.mode == "robot":
         _move_robot(cube, near, p)
         return
+    if cube.mode == "spider":
+        _move_spider(cube, near, p)
+        return
     g = cube.gravity
     if cube.grounded and cube.holding:
         # A held button jumps again from inside the move, with no gravity that tick: in
@@ -486,6 +530,58 @@ def _robot_boost(cube: Cube, p: CubeParams) -> None:
                * _impulse_scale(cube, p))
     cube.boost = p.robot.boost_ticks - 1
     cube.grounded, cube.buffered = False, False
+
+
+def _move_spider(cube: Cube, near: list[Body], p: CubeParams) -> None:
+    """The spider's move (P21): it only falls; its press acts in `commands`."""
+    s = p.spider
+    assert s is not None
+    if cube.grounded and not _supported(cube, near, half_of(cube, p)):
+        cube.grounded = False
+    if cube.grounded:
+        return
+    g = cube.gravity
+    cube.vy -= g * s.gravity
+    if p.terminal_velocity is not None and g * cube.vy < -p.terminal_velocity:
+        cube.vy = -g * p.terminal_velocity
+    cube.y += cube.vy * p.scale
+
+
+def _teleport(cube: Cube, p: CubeParams, near: Iterable[Body]) -> None:
+    """The spider's press: at once to the surface opposite, gravity flipped (P21 A: on
+    the roof's underside at 196.5 on the next sample, vy 1.0 towards it; grounded the
+    sample after). The surface is the nearest solid face overhead across its width, else
+    its band's edge. A hazard in the way is not calibrated (P22)."""
+    s = p.spider
+    assert s is not None
+    half = half_of(cube, p)
+    g = cube.gravity
+    x1, x2 = cube.x - half, cube.x + half
+    solids = [b for b in near if b.role is Role.SOLID and b.box.x1 < x2 and b.box.x2 > x1]
+    if g > 0:
+        edge = cube.bounds[1] if cube.bounds is not None else None
+        faces = [b.box.y1 for b in solids if b.box.y1 >= cube.y + half - 1e-6]
+        surface = min([f for f in (edge, *faces) if f is not None], default=None)
+        target = None if surface is None else surface - half
+    else:
+        edge = cube.bounds[0] if cube.bounds is not None else FLOOR
+        faces = [b.box.y2 for b in solids if b.box.y2 <= cube.y - half + 1e-6]
+        surface = max([edge, *faces])
+        target = surface + half
+    if target is None:
+        cube.unverifiable = "a spider with nothing overhead is not calibrated"
+        return
+    lo, hi = sorted((cube.y, target))
+    swept = Box(x1, lo - half, x2, hi + half)
+    for body in near:
+        if body.role is Role.HAZARD and body.touches(swept):
+            cube.unverifiable = (f"a spider teleporting past or onto a hazard is not "
+                                 f"calibrated yet (object {body.uid})")
+            return
+    cube.y = target
+    cube.vy = g * s.teleport_vy
+    cube.gravity = -g
+    cube.grounded, cube.buffered, cube.snap = False, False, None
 
 
 def _move_robot(cube: Cube, near: list[Body], p: CubeParams) -> None:
@@ -651,10 +747,11 @@ def _portal(cube: Cube, body: Body, p: CubeParams, half: float) -> None:
             cube.unverifiable = f"the {target} is Sim-3, not simulated yet"
             return
         if target not in fp.entry or cube.mode not in fp.entry or (
-                target == "robot" and p.robot is None):
+                target == "robot" and p.robot is None) or (
+                target == "spider" and (p.spider is None or "spider" not in fp.bounds)):
             cube.unverifiable = f"entering the {target} from the {cube.mode} is not calibrated"
             return
-        bounds = _bounds_for(target, body, fp) if target not in GROUND_MODES else None
+        bounds = _bounds_for(target, body, fp) if target in fp.bounds else None
         cube.vy *= fp.entry[cube.mode] * fp.entry[target]
         cube.mode, cube.bounds = target, bounds
         cube.grounded, cube.snap, cube.buffered, cube.boost = False, None, False, 0
@@ -740,7 +837,17 @@ def collide(cube: Cube, near: list[Body], p: CubeParams, tick: int, prev_y: floa
             continue
         elif body.role is Role.PAD and body.uid not in cube.used:
             cube.used = cube.used | {body.uid}
-            _launch(cube, p, body.variant or "yellow", p.pad_for)
+            color = body.variant or "yellow"
+            if cube.mode == "spider":
+                spider = p.spider
+                assert spider is not None
+                if color == "spider":
+                    _teleport(cube, p, near)
+                else:
+                    _launch(cube, p, color,
+                            lambda _speed, c, table=spider.pad: table[c])
+            else:
+                _launch(cube, p, color, p.pad_for)
         elif body.role is Role.PORTAL_SPEED and body.variant:
             cube.speed = body.variant
     return None
@@ -848,6 +955,9 @@ def _flight_launch(cube: Cube, p: CubeParams, color: str,
     """A flight mode's orb or pad (P18): the mode's own yellow and pink values, blue at
     the player's blue factor of the mode's yellow, mini times `mini_impulse`, as the
     cube's. The wave only flips on blue: its path takes no vy."""
+    if color == "spider":
+        cube.unverifiable = f"a spider pad or orb under the {cube.mode} is not calibrated"
+        return
     if cube.mode == "wave":
         if color == "blue":
             cube.gravity = -cube.gravity
@@ -889,6 +999,10 @@ def _launch(cube: Cube, p: CubeParams, color: str, impulse) -> None:
     sends the cube towards its new floor at 0.4 of the yellow one (P16)."""
     scale = _impulse_scale(cube, p)
     cube.boost = 0
+    if color == "spider":
+        # A spider pad or orb outside the spider: not measured.
+        cube.unverifiable = f"a spider pad or orb under the {cube.mode} is not calibrated"
+        return
     if color == "blue":
         assert p.flight is not None
         cube.gravity = -cube.gravity
@@ -899,7 +1013,11 @@ def _launch(cube: Cube, p: CubeParams, color: str, impulse) -> None:
     cube.grounded = False
 
 
-def commands(cube: Cube, p: CubeParams, actions: Iterable[str]) -> None:
+def commands(cube: Cube, p: CubeParams, actions: Iterable[str],
+             near: Iterable[Body] = ()) -> None:
+    """`near`: the bodies around the player this tick (the spider's press looks for the
+    surface it teleports to among them)."""
+    near = list(near)
     for action in actions:
         if action == "press":
             cube.holding = cube.buffered = True
@@ -916,11 +1034,17 @@ def commands(cube: Cube, p: CubeParams, actions: Iterable[str]) -> None:
                                * p.jump_for(cube.speed) * _impulse_scale(cube, p))
                     cube.grounded = cube.buffered = False
                     return
+            elif cube.mode == "spider" and cube.grounded and p.spider is not None:
+                if cube.touching_orbs:
+                    _fire_orb(cube, p, near)
+                    return
+                _teleport(cube, p, near)
+                return
             elif cube.mode == "robot" and cube.grounded and p.robot is not None:
                 if cube.touching_orbs:
                     # An orb touched on the ground fires instead of the boost (P19 E:
                     # pressed on the ground inside a yellow orb, vy 10.062, not 5.59).
-                    _fire_orb(cube, p)
+                    _fire_orb(cube, p, near)
                     return
                 # A fresh press boosts at once: vy is set now, and the robot moves next
                 # tick (P19 A: vy 5.59 at 321 for a press at 320, y still 15).
@@ -936,19 +1060,30 @@ def commands(cube: Cube, p: CubeParams, actions: Iterable[str]) -> None:
             # A press buffered in the air still fires an orb first touched on the tick
             # it is released (P13, every speed: a one-tick press one tick before the
             # first touch fired, on the release tick).
-            _fire_orb(cube, p)
+            _fire_orb(cube, p, near)
             cube.holding = False
             if cube.mode != "ufo":
                 cube.buffered = False
-    _fire_orb(cube, p)
+    _fire_orb(cube, p, near)
 
 
-def _fire_orb(cube: Cube, p: CubeParams) -> None:
+def _fire_orb(cube: Cube, p: CubeParams, near: Iterable[Body] = ()) -> None:
     if cube.buffered and cube.touching_orbs and cube.mode in GROUND_MODES:
         orb = cube.touching_orbs[0]
         color = orb.variant or "yellow"
         if cube.mini:
             cube.unverifiable = f"the mini {cube.mode}'s orbs are not calibrated yet"
+            return
+        if cube.mode == "spider":
+            spider = p.spider
+            assert spider is not None
+            cube.used = cube.used | {orb.uid}
+            if color == "spider":
+                _teleport(cube, p, near)
+            else:
+                # P21 E at 1x: yellow and pink 0.7 of the cube's, blue 0.4 of its yellow.
+                _launch(cube, p, color, lambda _speed, c: spider.orb[c])
+            cube.buffered = False
             return
         if cube.mode == "robot":
             r = p.robot
@@ -986,7 +1121,7 @@ def advance(cube: Cube, world: World, p: CubeParams, tick: int,
     move(cube, near, p)
     death = collide(cube, near, p, tick, prev_y, prev_x)
     if death is None and cube.unverifiable is None:
-        commands(cube, p, actions)
+        commands(cube, p, actions, near)
     if cube.unverifiable is not None:
         cube.dead = True
         return Death(tick, cube.x, cube.y, None, "unverifiable", cube.unverifiable)

@@ -1195,6 +1195,42 @@ trace already reports `spider`. The fixture will be `cal_spider.json`.
 `tests/test_probe_plans.py` checks that every run but B has its roof, and runs the whole
 probe against the fake game.
 
+**P21 results, now in the simulator (`modes.spider`, 2026-11-24).** 34 of the 35 runs
+were recorded; the 2x run was cancelled by a key press during the replay. All 34 replay
+as goldens with no further change (1341 in all).
+- **A ground mode in a band:** it runs, lands and dies as the cube does, but lives in a
+  band 270 high, as the flight modes do (ship, ufo and wave 300, ball 240). The band's
+  floor follows the same rule from the portal's height.
+- **Size:** half 13.5 (it rests at y 13.5, and at 196.5 under a roof at 210); mini 8.1.
+- **Gravity:** 0.129 a tick, the same at every speed measured (0.6 of the cube's).
+  Entering keeps vy (entry factor 1).
+- **The press is a teleport.** On the ground, the press moves the spider at once, on
+  the same sample, to the surface opposite, and flips its gravity:
+  - the surface is the nearest solid face overhead across its width, else the band's
+    edge (no roof, a roof above 270, or open sky: y 256.5);
+  - vy is 1.0 towards the new floor for one sample, then it is grounded;
+  - a second press 2 ticks later teleports it back;
+  - held, it does not flip again on landing;
+  - in the air a press does nothing and is not kept.
+- **Pads:** yellow 9.6 and pink 6.72 (0.6 of the cube's).
+- **Orbs:** yellow 7.826 and pink 5.635 (0.7 of the cube's).
+- **Blue:** 0.4 of the spider's own yellow, flipping gravity, as for every mode.
+- **The spider's own pad and orb** teleport it as a press does. Met by any other mode,
+  they make the run unverifiable.
+- **Hazards:** a spike hanging from the roof kills it on contact, as the cube's.
+- **Solver:** a spider press is a tap; no change was needed. Eight floor spikes under a
+  roof are possible in 0.11 s (one teleport, a 117 ms window). Floor spikes then roof
+  spikes take two. Spikes on both sides at once are impossible.
+- **Still unverifiable:**
+  - a teleport whose path crosses or ends on a hazard;
+  - a mini spider's orbs.
+
+**Next (P22):**
+- the 2x run;
+- teleports under blocks that only partly cover the spider's width;
+- a teleport onto or past a spike;
+- the spider at its band's edges.
+
 The `explain-robot` eval was written when the robot was unverifiable. Its recording
 replays, but a live run would now get `possible`. It should be pointed at the spider
 when it is next recorded.

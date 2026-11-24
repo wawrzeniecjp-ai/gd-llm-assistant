@@ -110,8 +110,8 @@ def test_verify_impossible_says_how_far_and_what_killed() -> None:
 
 
 def test_verify_refuses_unsupported_content() -> None:
-    spider = [{"id": 1331, "x": 255, "y": 45}]          # Sim-3, after the robot
-    result = _verify(spider, {"x_range": [0, 600]})
+    swing = [{"id": 1933, "x": 255, "y": 45}]           # Sim-3's last mode
+    result = _verify(swing, {"x_range": [0, 600]})
     assert result["result"] == "unverifiable"
     assert "Sim-3" in result["unverifiable"][0]["reason"]
 
@@ -357,3 +357,48 @@ def test_a_player_dies_above_the_level_top() -> None:
     run = simulate(_world(ROBOT_PORTAL + flip), PARAMS, [], max_ticks=1200)
     assert run.outcome == "death" and run.death is not None
     assert 1502.8 < run.death.y <= 1506.3
+
+
+# -- the spider (Sim-3, P21) -------------------------------------------------------------
+
+SPIDER_PORTAL = [{"id": 1331, "x": 195, "y": 45}]
+SPIDER_ROOF = [{"id": 1, "x": 15 + 30 * c, "y": 225} for c in range(4, 40)]
+
+
+def test_a_spider_teleports_over_floor_spikes() -> None:
+    """Eight spikes no jump clears: one press puts the spider on the roof (P21 A)."""
+    spikes = [{"id": 8, "x": 15 + 30 * c, "y": 15} for c in range(16, 24)]
+    result = _verify(SPIDER_PORTAL + SPIDER_ROOF + spikes, {"x_range": [0, 1100]})
+    assert result["result"] == "possible"
+    (press,) = result["route"]
+    assert press["mode"] == "spider" and press["window_ms"] > 50
+    assert result["exit"]["gravity"] == -1 and result["exit"]["y"] == 210 - 13.5
+
+
+def test_a_spider_with_nothing_overhead_stops_at_its_band() -> None:
+    """P21 B: no roof, and the teleport ends at the band's ceiling, 270 (y 256.5)."""
+    run = simulate(_world(SPIDER_PORTAL), PARAMS,
+                   [{"tick": 320, "action": "press"}, {"tick": 321, "action": "release"}],
+                   max_ticks=400)
+    assert run.outcome == "max_ticks"
+    assert run.final.y == 270 - 13.5 and run.final.gravity == -1 and run.final.grounded
+
+
+def test_a_spider_teleporting_onto_a_spike_is_unverifiable() -> None:
+    """Not measured yet (P22): the teleport's path crossing a hazard stops the run."""
+    hanging = [{"id": 8, "x": 15 + 30 * 13, "y": 195, "properties": {"rotation": 180}}]
+    world = _world(SPIDER_PORTAL + SPIDER_ROOF + hanging)
+    under = next(t for t, x in zip(*(lambda tr: (tr["tick"], tr["x"]))(
+        simulate(world, PARAMS, [], max_ticks=600).trace), strict=True) if x >= 15 + 30 * 13)
+    run = simulate(world, PARAMS, [{"tick": under, "action": "press"},
+                                   {"tick": under + 1, "action": "release"}], max_ticks=600)
+    assert run.outcome == "unverifiable"
+    assert run.death is not None and "hazard" in (run.death.reason or "")
+
+
+def test_a_spider_pad_under_the_cube_is_unverifiable() -> None:
+    """Only the spider's own use of its pad and orb is measured (P21 E)."""
+    pad = [{"id": 3005, "x": 15 + 30 * 8, "y": 2}]
+    run = simulate(_world(pad), PARAMS, [], max_ticks=400)
+    assert run.outcome == "unverifiable"
+    assert "spider pad or orb" in (run.death.reason or "")

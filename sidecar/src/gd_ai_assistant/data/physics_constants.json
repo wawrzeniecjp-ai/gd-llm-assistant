@@ -862,6 +862,57 @@
                 "source": "scripts/calibrate.py P19, 2026-11-24; held through a landing it does not jump again; a press made in the air and still held at landing jumps on the next move",
                 "confidence": "measured"
             }
+        },
+        "spider": {
+            "gravity": {
+                "value": 0.129,
+                "source": "scripts/calibrate.py P21, 2026-11-24; per tick, the same at 0.5x, 1x, 3x and 4x (0.6 of the cube's)",
+                "confidence": "measured"
+            },
+            "half": {
+                "value": 13.5,
+                "source": "scripts/calibrate.py P21, 2026-11-24; rests at y 13.5 on the floor and 196.5 under a roof at 210; mini 8.1 (x 0.6)",
+                "confidence": "measured"
+            },
+            "bounds": {
+                "value": 270.0,
+                "source": "scripts/calibrate.py P21, 2026-11-24; with no roof, or a roof above, a press teleports it to y 256.5 and it stays there; falling up past a roof's end it lands there too",
+                "confidence": "measured"
+            },
+            "entry_vy": {
+                "value": 1.0,
+                "source": "scripts/calibrate.py P21, 2026-11-24; from the cube in the air: vy goes on unchanged",
+                "confidence": "measured"
+            },
+            "teleport_vy": {
+                "value": 1.0,
+                "source": "scripts/calibrate.py P21, 2026-11-24; a press on the ground moves it at once to the surface opposite (the nearest solid overhead, else the band's edge), flips gravity, and leaves vy at this towards the new floor for one sample",
+                "confidence": "measured"
+            },
+            "pad_impulse": {
+                "yellow": {
+                    "value": 9.6,
+                    "source": "scripts/calibrate.py P21, 2026-11-24; 1x (0.6 of the cube's)",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 6.72,
+                    "source": "scripts/calibrate.py P21, 2026-11-24; 1x",
+                    "confidence": "measured"
+                }
+            },
+            "orb_impulse": {
+                "yellow": {
+                    "value": 7.826,
+                    "source": "scripts/calibrate.py P21, 2026-11-24; 1x (0.7 of the cube's)",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 5.635,
+                    "source": "scripts/calibrate.py P21, 2026-11-24; 1x",
+                    "confidence": "measured"
+                }
+            }
         }
     }
 }

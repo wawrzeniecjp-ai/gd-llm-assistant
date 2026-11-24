@@ -16,8 +16,10 @@ from ..roles import Hitbox, Role, RoleEntry, RoleTable
 #: is not calibrated yet (a ship touching a block, say) is found while simulating.
 SIM1_ROLES = frozenset({Role.SOLID, Role.HAZARD, Role.ORB, Role.PAD, Role.PORTAL_SPEED,
                         Role.PORTAL_GRAVITY, Role.PORTAL_MODE, Role.PORTAL_SIZE})
-SIM1_ORBS = frozenset({"yellow", "pink", "blue"})
-SIM1_PADS = frozenset({"yellow", "pink", "blue"})
+#: The spider's own orb and pad are simulated under the spider (P21); any other mode
+#: meeting one is unverifiable when it does.
+SIM1_ORBS = frozenset({"yellow", "pink", "blue", "spider"})
+SIM1_PADS = frozenset({"yellow", "pink", "blue", "spider"})
 
 
 class Box:
