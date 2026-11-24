@@ -29,7 +29,8 @@ cancels a run). Run from `sidecar/`, with `start-sidecar.bat` closed:
     uv run python scripts/calibrate.py P17          # Sim-2 contacts and bands (~6 min)
     uv run python scripts/calibrate.py P18          # flight orbs/pads, mini, wave in solids
     uv run python scripts/calibrate.py P19          # the robot (~5 min)
-    uv run python scripts/calibrate.py P20          # robot contacts (~6 min)
+    uv run python scripts/calibrate.py P20          # robot contacts (~7 min)
+    uv run python scripts/calibrate.py P21          # the spider (~3 min)
 """
 
 from __future__ import annotations
@@ -1381,6 +1382,136 @@ async def probe_robot_contacts(r: Runner, out: dict) -> None:
             save_raw("P20", raw)
 
 
+# P21 (M5, Sim-3): the spider, explored as P19 explored the robot. A press flips its gravity
+# and sends it to the surface opposite, so almost every run has a roof (row 7, inside the
+# cleared columns): P19's upside-down robots had none and fell off the top of the level.
+# A: presses under the roof: one, two, a rhythm, a long hold, a press repeated at once.
+# B: one press with no roof. C: roofs at other heights, and one only partly overhead.
+# D: mini, each speed, upside down from a gravity portal, from a high portal. E: pads and
+# orbs, the spider's own included. F: spikes on the floor and hanging from the roof.
+
+SPIDER_PORTAL = 1331
+SPIDER_ORB, SPIDER_PAD = 3004, 3005
+P21_COL = 14                                    # pads, orbs and spikes
+P21_ROOF_ROW = 7                                # bottom at y 210
+P21_ROOF_COLS = range(4, 40)
+
+
+def _p21_base(speed: str = "1x", mini: bool = False, flipped: bool = False,
+              high: bool = False, roof_row: int | None = P21_ROOF_ROW,
+              roof_cols: range = P21_ROOF_COLS) -> list[dict[str, Any]]:
+    """As `_p19_base`, with the spider portal, and a roof unless `roof_row` is None."""
+    objects = [o if o["id"] != ROBOT_PORTAL else {**o, "id": SPIDER_PORTAL}
+               for o in _p19_base(speed=speed, mini=mini, flipped=flipped, high=high)]
+    if roof_row is not None:
+        objects += _blocks([(c, roof_row) for c in roof_cols])
+    return objects
+
+
+def _spider_free(objects: list[dict]) -> list[dict]:
+    """The layout without its spider portal or roof, for aiming with the cube."""
+    return [o for o in objects if o["id"] != SPIDER_PORTAL and not (
+        o["id"] == 1 and o["y"] > 60)]
+
+
+def p21_plan() -> list[tuple[str, list[dict], list[dict], int, dict]]:
+    """Every P21 run as (label, objects, inputs, max_ticks, meta); no game needed."""
+    runs: list[tuple[str, list[dict], list[dict], int, dict]] = []
+    base = _p21_base()
+    start = P15_START
+    # A: under the roof.
+    runs.append(("A idle", base, [], 600, {"part": "A", "kind": "idle"}))
+    runs.append(("A one press", base, press(start), 700, {"part": "A", "kind": "one"}))
+    runs.append(("A two presses", base, [*press(start), *press(start + 80)], 800,
+                 {"part": "A", "kind": "two"}))
+    runs.append(("A rhythm x5", base, [i for k in range(5) for i in press(start + 50 * k)],
+                 900, {"part": "A", "kind": "rhythm"}))
+    runs.append(("A hold 300", base, press(start, hold=300), 900,
+                 {"part": "A", "kind": "hold", "hold": 300}))
+    runs.append(("A press again at +2", base, [*press(start), *press(start + 2)], 700,
+                 {"part": "A", "kind": "repress", "gap": 2}))
+    runs.append(("A press again at +8", base, [*press(start), *press(start + 8)], 700,
+                 {"part": "A", "kind": "repress", "gap": 8}))
+    # B: no roof: where does a press send it?
+    runs.append(("B no roof, one press", _p21_base(roof_row=None), press(start), 1200,
+                 {"part": "B", "kind": "no_roof"}))
+    # C: roofs at other heights, and a roof only from column 16 on (the press is under
+    # open sky at column 10, then the roof arrives overhead).
+    for row in (2, 4, 10):
+        runs.append((f"C roof row {row}", _p21_base(roof_row=row), press(start), 700,
+                     {"part": "C", "roof_row": row}))
+    partial = _p21_base(roof_cols=range(16, 40))
+    under = _sim_tick_at(_spider_free(partial), [], cell(10, 0)[0])
+    if under is not None:
+        runs.append(("C partial roof, press in the open", partial, press(under), 900,
+                     {"part": "C", "kind": "partial", "press_tick": under}))
+    # D: variants, one press each (two for mini).
+    runs.append(("D mini one press", _p21_base(mini=True), press(start), 700,
+                 {"part": "D", "mini": True}))
+    runs.append(("D mini two presses", _p21_base(mini=True),
+                 [*press(start), *press(start + 80)], 800, {"part": "D", "mini": True}))
+    for sp in ("0.5x", "2x", "3x", "4x"):
+        runs.append((f"D speed {sp} one press", _p21_base(speed=sp), press(start), 800,
+                     {"part": "D", "speed": sp}))
+    flipped = _p21_base(flipped=True)
+    runs.append(("D flipped idle", flipped, [], 600, {"part": "D", "flipped": True}))
+    runs.append(("D flipped one press", flipped, press(start + 40), 700,
+                 {"part": "D", "flipped": True}))
+    high = _p21_base(high=True)
+    runs.append(("D high idle", high, [], 700, {"part": "D", "high": True}))
+    falling = _sim_tick_at(_spider_free(high), [], cell(6, 0)[0] + 30)
+    if falling is not None:
+        runs.append((f"D high press {falling} falling", high, press(falling), 700,
+                     {"part": "D", "high": True, "press_tick": falling}))
+    # E: pads on the floor (no input), orbs on the floor pressed mid-overlap.
+    px, py = cell(P21_COL, 0, PAD_Y_OFFSET)
+    for color, pad_id in (*PAD_IDS.items(), ("spider", SPIDER_PAD)):
+        runs.append((f"E {color} pad", [*base, {"id": pad_id, "x": px, "y": py}], [], 600,
+                     {"part": "E", "color": color, "kind": "pad"}))
+    span = _orb_span(_spider_free(base), mini=False)
+    if span is not None:
+        middle = (span[0] + span[1]) // 2
+        ox, oy = cell(P21_COL, 0)
+        for color, orb_id in (*ORB_IDS.items(), ("spider", SPIDER_ORB)):
+            runs.append((f"E {color} orb", [*base, {"id": orb_id, "x": ox, "y": oy}],
+                         press(middle), 600,
+                         {"part": "E", "color": color, "kind": "orb", "press_tick": middle,
+                          "touch": [span[0], span[1]]}))
+    # F: a floor spike flipped over at three leads; a spike hanging from the roof where
+    # the spider lands, pressed under it and before it.
+    fx = cell(P21_COL, 0)[0]
+    reach = _sim_tick_at(_spider_free(base), [], fx - 15 - HALF_SIM)
+    if reach is not None:
+        floor_spike = [*base, {"id": 8, "x": fx, "y": 15.0}]
+        for lead in (2, 10, 40):
+            runs.append((f"F floor spike lead {lead}", floor_spike, press(reach - lead), 700,
+                         {"part": "F", "kind": "floor_spike", "lead": lead,
+                          "press_tick": reach - lead}))
+        hanging = [*base, {"id": 8, "x": fx, "y": cell(0, P21_ROOF_ROW - 1)[1],
+                           "properties": {"rotation": 180}}]
+        for lead in (0, 40):
+            runs.append((f"F hanging spike lead {lead}", hanging, press(reach - lead), 700,
+                         {"part": "F", "kind": "hanging_spike", "lead": lead,
+                          "press_tick": reach - lead}))
+    return runs
+
+
+async def probe_spider(r: Runner, out: dict) -> None:
+    """P21: the spider (Sim-3 exploration); see `p21_plan`."""
+    runs: list[dict] = []
+    raw: list[dict] = []
+    try:
+        for label, objects, inputs, max_ticks, meta in p21_plan():
+            await _record(r, runs, raw, label, objects, inputs, max_ticks, mode="spider",
+                          **meta)
+    finally:
+        out["P21_spider"] = [{k: v for k, v in run.items() if k != "trace"} for run in runs]
+        if runs:
+            save_fixture("cal_spider", "P21 the spider: presses, roofs, sizes, speeds, "
+                         "pads, orbs, spikes", runs)
+            save_raw("P21", raw)
+
+
 async def probe_hold(r: Runner, out: dict, cube: dict) -> None:
     """P3: hold for a long time; does the cube jump again on landing, and when?"""
     inputs = press(60, hold=480)
@@ -1553,6 +1684,7 @@ async def routine(server: SidecarServer) -> dict[str, Any]:
         ("P19", "the robot (Sim-3 exploration)", lambda: probe_robot(r, out)),
         ("P20", "the robot upside down, buffered, faces, ceilings (Sim-3)",
          lambda: probe_robot_contacts(r, out)),
+        ("P21", "the spider (Sim-3 exploration)", lambda: probe_spider(r, out)),
     ]
     try:
         for code, label, step in steps:

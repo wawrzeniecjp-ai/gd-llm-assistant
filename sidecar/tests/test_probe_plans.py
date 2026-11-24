@@ -152,3 +152,35 @@ def test_p20_runs_end_to_end_against_a_fake_game(tmp_path, monkeypatch) -> None:
     asyncio.run(calibrate.probe_robot_contacts(calibrate.Runner(game), out))
     assert game.replays == len(calibrate.p20_plan()) == len(out["P20_robot"])
     assert (tmp_path / "fixtures" / "cal_robot_contacts.json").exists()
+
+
+def test_p21_spider_plan_is_sound() -> None:
+    plan = calibrate.p21_plan()
+    labels = [label for label, *_ in plan]
+    assert len(labels) == len(set(labels))
+    assert 25 <= len(plan) <= 60
+    assert {meta["part"] for *_, meta in plan} == {"A", "B", "C", "D", "E", "F"}
+    for label, objects, inputs, max_ticks, meta in plan:
+        assert all(o["x"] < calibrate.CLEAR_X for o in objects), label
+        assert sum(o["id"] == calibrate.SPIDER_PORTAL for o in objects) == 1, label
+        assert not any(o["id"] == calibrate.ROBOT_PORTAL for o in objects), label
+        ticks = [i["tick"] for i in inputs]
+        assert ticks == sorted(ticks) and all(0 < t < max_ticks for t in ticks), label
+        # A spider pressed with nothing above falls off the level (P19's robots did):
+        # every run has a roof, but the one meant to show that.
+        has_roof = any(o["id"] == 1 and o["y"] > 60 for o in objects)
+        assert has_roof == (meta["part"] != "B"), label
+        if "touch" in meta and "press_tick" in meta:
+            assert meta["touch"][0] <= meta["press_tick"] <= meta["touch"][1], label
+
+
+def test_p21_runs_end_to_end_against_a_fake_game(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    monkeypatch.setattr(calibrate, "FIXTURES", tmp_path / "fixtures")
+    monkeypatch.setattr(calibrate, "RAW", tmp_path / "raw")
+    game = _FakeGame()
+    out: dict = {}
+    asyncio.run(calibrate.probe_spider(calibrate.Runner(game), out))
+    assert game.replays == len(calibrate.p21_plan()) == len(out["P21_spider"])
+    assert (tmp_path / "fixtures" / "cal_spider.json").exists()

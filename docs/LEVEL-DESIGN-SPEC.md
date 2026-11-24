@@ -1168,6 +1168,33 @@ simulator, which plays the robot since P19. The fixture will be
 - **Ceilings (D) and faces (C):** match the cube's contacts with the new tolerance.
 - **Still unverifiable for the robot:** a mini robot's orbs.
 
+**P21, the spider (written 2026-11-24, not run yet).** `scripts/calibrate.py P21`, 35
+runs (about 3 minutes), explored before anything is fitted, as P19 explored the robot.
+A press flips the spider's gravity and sends it to the surface opposite. So every run has
+a roof (row 7, columns 4-39, inside the cleared area), but the one meant to show what
+happens without one. Spider portal 1331, spider orb 3004, spider pad 3005; the replay
+trace already reports `spider`. The fixture will be `cal_spider.json`.
+- **A, under the roof:** idle; one press; two; five in a rhythm; a 300-tick hold (does
+  it flip again on landing?); a press repeated 2 and 8 ticks after the first.
+- **B, no roof:** one press.
+- **C, other roofs:** rows 2, 4 and 10; and a roof starting at column 16, pressed under
+  open sky at column 10.
+- **D, variants:**
+  - mini, one press and two;
+  - at 0.5x, 2x, 3x and 4x, one press;
+  - upside down from a gravity portal, idle and pressed;
+  - from a high portal, idle and pressed while falling.
+- **E, pads and orbs:**
+  - yellow, pink, blue and spider pads on the floor, no input;
+  - the same orbs on the floor, pressed mid-overlap.
+- **F, spikes:**
+  - a floor spike, pressed 2, 10 and 40 ticks before reaching it;
+  - a spike hanging from the roof above column 14, pressed under it and 40 ticks
+    before it.
+
+`tests/test_probe_plans.py` checks that every run but B has its roof, and runs the whole
+probe against the fake game.
+
 The `explain-robot` eval was written when the robot was unverifiable. Its recording
 replays, but a live run would now get `possible`. It should be pointed at the spider
 when it is next recorded.
