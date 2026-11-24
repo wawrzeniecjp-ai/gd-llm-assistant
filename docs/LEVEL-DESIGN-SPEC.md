@@ -1110,10 +1110,8 @@ goldens; the 7 upside-down runs are skipped (1214 goldens in all).
 - **Mode portal:** entering the robot keeps vy as it is (entry factor 1).
 - **Contacts:** the cube's: landing, inner box, spikes. Every spike and step outcome of
   part F matches with no change.
-- **Still unverifiable:**
-  - the robot upside down: a gravity portal, or a blue orb or pad, stops the run. P19's
-    flipped runs had no roof, so the robot just fell upward off the top of the level;
-  - a mini robot's orbs.
+- **Still unverifiable after P19:** the robot upside down (P19's flipped runs had no
+  roof; P20 measured it), and a mini robot's orbs.
 
 **The solver (2026-11-24).** On the ground, a robot press is searched as a hold of one of
 `ROBOT_HOLDS` ticks (1 to 68, about 5-10 units of apex apart), its release fixed when it
@@ -1124,10 +1122,51 @@ ship or a wave, since its margin applies to neither. Results:
 - three spikes in a row are possible in 0.6 s;
 - a four-block wall is impossible: the highest jump rises about 103 units.
 
-**Next (P20):**
-- the robot upside down, under a roof;
-- how early a press in the air can be and still jump at landing;
-- the robot meeting a block from the side and from below.
+**P20 (written, run and fitted 2026-11-24).** `scripts/calibrate.py P20`, 86 runs (about
+7 minutes). It covers what P19 left unverifiable or untested. Each run is aimed by the
+simulator, which plays the robot since P19. The fixture will be
+`cal_robot_contacts.json`.
+- **A, upside down, under a roof** (rows 7, columns 4-39, as P16):
+  - idle, held 1, 10, 25 and 68 ticks, and mini held 25;
+  - a blue pad, idle and then pressed on the roof;
+  - a blue orb on the floor, pressed.
+- **B, presses in the air:** a 25-tick jump, then a second press 1 to 40 ticks before
+  its landing, held 40 ticks through it: how early a press may come and still jump.
+- **C, a two-block step's face:** for holds 30, 38 and 68, the simulator finds the leads
+  where landing turns into dying on the face. Each edge is swept 6 ticks either side, in
+  steps of 2.
+- **D, ceilings:** a row of blocks at row 2, then row 3, above the floor, jumped into
+  from below with holds whose head reaches the blocks' bottom.
+- **E, the lowest jump onto a step:** holds 1 to 6 at three leads, across the
+  simulator's edge (1 dies, from 2 it lands at the nearer leads).
+
+`tests/test_probe_plans.py` checks:
+- every C and E sweep holds both outcomes in the simulator;
+- every upside-down run has its roof;
+- the whole probe runs against the fake game.
+
+**P20 results.** All 151 robot runs (P19 and P20) now replay as goldens, 1307 in all.
+- **Upside down:** the upright robot mirrored, with no new constant. All 9 roofed runs
+  match: idle, every hold, mini, and the blue pad and orb sending it up. So gravity
+  portals, blue pads and blue orbs no longer stop a robot run.
+- **Blue orb:** 0.4 of the cube's yellow orb (4.47), not of the robot's own yellow
+  (10.06).
+- **Presses in the air (B):** a press 1 to 40 ticks before landing, held through it,
+  jumps at landing in every run, as already simulated. No limit was found inside
+  40 ticks.
+- **Landing tolerance, shared:** the robot landed on a step from at most 10 units below
+  its top; every one of the 1286 goldens then reproduces from 9.99 to 10.14. That sits
+  inside the cube's old range (8.72-12, value 10.5), and the cube's runs reproduce
+  throughout it, so the cube's `landing_tolerance` is now 10.06 for both. At 10.5 two
+  robot runs landed where the game did not.
+- **Covered tops:** the robot lands on the top of a block covered by another, inside a
+  wall, and dies there. The cube does not land there (`_covered`, slot 12). Only the
+  cube skips covered tops now.
+- **The level top:** P19's four roofless upside-down robots fell up off the level and
+  died at y 1506.21, alive at 1502.83. A player above y 1504.5 now dies in every mode.
+  It has only been seen with the robot.
+- **Ceilings (D) and faces (C):** match the cube's contacts with the new tolerance.
+- **Still unverifiable for the robot:** a mini robot's orbs.
 
 The `explain-robot` eval was written when the robot was unverifiable. Its recording
 replays, but a live run would now get `possible`. It should be pointed at the spider

@@ -29,6 +29,7 @@ cancels a run). Run from `sidecar/`, with `start-sidecar.bat` closed:
     uv run python scripts/calibrate.py P17          # Sim-2 contacts and bands (~6 min)
     uv run python scripts/calibrate.py P18          # flight orbs/pads, mini, wave in solids
     uv run python scripts/calibrate.py P19          # the robot (~5 min)
+    uv run python scripts/calibrate.py P20          # robot contacts (~6 min)
 """
 
 from __future__ import annotations
@@ -1252,6 +1253,134 @@ async def probe_robot(r: Runner, out: dict) -> None:
             save_raw("P19", raw)
 
 
+# P20 (M5, Sim-3): what P19 left unverifiable or untested about the robot, each run aimed
+# by the simulator, which plays the robot upright since P19. A: upside down under a roof
+# (P19's flipped runs had none, so the robot fell off the top of the level). B: how early
+# a press made in the air may come and still jump at landing. C: a two-block step's
+# face, swept across where the simulator turns a landing into a death. D: a block above
+# the floor, met from below. E: the lowest jump that lands on a one-block step.
+
+P20_ROOF = [(c, 7) for c in range(4, 40)]        # as P16's, inside the cleared columns
+P20_FLIPPED_PRESS = 420                          # well after the robot reaches the roof
+P20_FLIPPED_HOLDS = (1, 10, 25, 68)
+#: B: a 25-tick jump from the ground at P15_START; the second press comes this many ticks
+#: before its landing and is held through it.
+P20_BUFFER_LEADS = (1, 2, 3, 4, 6, 8, 10, 14, 18, 24, 32, 40)
+P20_BUFFER_HOLD = 40
+#: C: the holds swept against the step's face, and how far either side of the edge.
+P20_FACE_HOLDS = (30, 38, 68)
+P20_FACE_REACH = 6
+#: D: (block row, holds) with the head reaching the block's bottom inside the sweep.
+P20_CEILINGS = ((2, (6, 8, 10, 12, 14, 16)), (3, (30, 32, 34, 36, 38, 40)))
+#: E: the shortest holds onto a one-block step (P19 F: 1 died, 10 landed; the simulator
+#: lands from 2), at three leads.
+P20_STEP_HOLDS = (1, 2, 3, 4, 5, 6)
+P20_STEP_LEADS = (25, 35, 45)
+
+
+def _blocks(cells: list[tuple[int, int]]) -> list[dict[str, Any]]:
+    return [{"id": 1, "x": cell(c, r)[0], "y": cell(c, r)[1]} for c, r in cells]
+
+
+def _robot_outcome(objects: list[dict], inputs: list[dict]) -> str:
+    return _sim_run(objects, inputs, 900).outcome
+
+
+def _edges(objects: list[dict], hold: int, leads: range, reach: int) -> list[int]:
+    """Leads where the simulator's outcome changes between neighbouring leads."""
+    outcomes = [(lead, _robot_outcome(objects, press(reach - lead, hold=hold)))
+                for lead in leads]
+    return [b for (_, x), (b, y) in zip(outcomes, outcomes[1:], strict=False) if x != y]
+
+
+def p20_plan() -> list[tuple[str, list[dict], list[dict], int, dict]]:
+    """Every P20 run as (label, objects, inputs, max_ticks, meta); no game needed."""
+    runs: list[tuple[str, list[dict], list[dict], int, dict]] = []
+    base = _p19_base()
+    roof = _blocks(P20_ROOF)
+    # A: upside down under a roof: idle, a press of each length, mini; a blue pad and a
+    # blue orb on the floor send it up instead.
+    flipped = [*_p19_base(flipped=True), *roof]
+    runs.append(("A flipped idle", flipped, [], 800, {"part": "A", "flipped": True}))
+    for hold in P20_FLIPPED_HOLDS:
+        runs.append((f"A flipped hold {hold}", flipped, press(P20_FLIPPED_PRESS, hold=hold),
+                     900, {"part": "A", "flipped": True, "hold": hold}))
+    mini = [*_p19_base(mini=True, flipped=True), *roof]
+    runs.append(("A mini flipped hold 25", mini, press(P20_FLIPPED_PRESS, hold=25), 900,
+                 {"part": "A", "flipped": True, "mini": True, "hold": 25}))
+    px, py = cell(P19_COL, 0, PAD_Y_OFFSET)
+    blue_pad = [*base, *roof, {"id": PAD_IDS["blue"], "x": px, "y": py}]
+    runs.append(("A blue pad to the roof", blue_pad, [], 800, {"part": "A", "color": "blue"}))
+    runs.append(("A blue pad, then hold 25", blue_pad, press(P20_FLIPPED_PRESS + 40, hold=25),
+                 900, {"part": "A", "color": "blue", "hold": 25}))
+    span = _orb_span(_cube_only(base), mini=False)
+    if span is not None:
+        ox, oy = cell(P19_COL, 0)
+        orb = [*base, *roof, {"id": ORB_IDS["blue"], "x": ox, "y": oy}]
+        middle = (span[0] + span[1]) // 2
+        runs.append(("A blue orb to the roof", orb, press(middle), 800,
+                     {"part": "A", "color": "blue", "press_tick": middle}))
+    # B: a press in the air, held through the landing of a 25-tick jump.
+    first = press(P15_START, hold=25)
+    trace = _sim_run(base, first, 700).trace
+    landing = next(t for t, g in zip(trace["tick"], trace["grounded"], strict=True)
+                   if t > P15_START + 2 and g)
+    for lead in P20_BUFFER_LEADS:
+        second = press(landing - lead, hold=P20_BUFFER_HOLD)
+        runs.append((f"B air press {lead} before landing", base, [*first, *second], 800,
+                     {"part": "B", "lead": lead, "landing": landing}))
+    # C: a two-block step from column 16, jumped at leads either side of each edge the
+    # simulator finds between landing on it and dying on its face.
+    step = _blocks([(c, r) for c in range(16, 28) for r in range(2)])
+    face = [*base, *step]
+    reach = _sim_tick_at(base, [], cell(16, 0)[0] - 15 - HALF_SIM)
+    if reach is not None:
+        for hold in P20_FACE_HOLDS:
+            leads: set[int] = set()
+            for edge in _edges(face, hold, range(10, 100, 2), reach):
+                leads |= set(range(edge - P20_FACE_REACH, edge + P20_FACE_REACH + 1, 2))
+            for lead in sorted(leads):
+                runs.append((f"C face hold {hold} lead {lead}", face,
+                             press(reach - lead, hold=hold), 700,
+                             {"part": "C", "hold": hold, "lead": lead, "press_tick": reach - lead}))
+    # D: a row of blocks above the floor, the robot jumping into it from below.
+    under = _sim_tick_at(base, [], cell(15, 0)[0])
+    if under is not None:
+        for row, holds in P20_CEILINGS:
+            ceiling = [*base, *_blocks([(c, row) for c in range(14, 20)])]
+            for hold in holds:
+                runs.append((f"D ceiling row {row} hold {hold}", ceiling,
+                             press(under, hold=hold), 700,
+                             {"part": "D", "row": row, "hold": hold, "press_tick": under}))
+    # E: short holds onto a one-block step.
+    one = [*base, *_blocks([(c, 0) for c in range(P19_COL, P19_COL + 12)])]
+    reach_one = _sim_tick_at(base, [], cell(P19_COL, 0)[0] - 15 - HALF_SIM)
+    if reach_one is not None:
+        for hold in P20_STEP_HOLDS:
+            for lead in P20_STEP_LEADS:
+                t = reach_one - lead
+                runs.append((f"E step hold {hold} lead {lead}", one, press(t, hold=hold), 700,
+                             {"part": "E", "hold": hold, "lead": lead, "press_tick": t}))
+    return runs
+
+
+async def probe_robot_contacts(r: Runner, out: dict) -> None:
+    """P20: the robot upside down, buffered presses, faces, ceilings; see `p20_plan`."""
+    runs: list[dict] = []
+    raw: list[dict] = []
+    try:
+        for label, objects, inputs, max_ticks, meta in p20_plan():
+            await _record(r, runs, raw, label, objects, inputs, max_ticks, mode="robot",
+                          **meta)
+    finally:
+        out["P20_robot"] = [{k: v for k, v in run.items() if k != "trace"} for run in runs]
+        if runs:
+            save_fixture("cal_robot_contacts",
+                         "P20 the robot upside down, buffered presses, faces, ceilings",
+                         runs)
+            save_raw("P20", raw)
+
+
 async def probe_hold(r: Runner, out: dict, cube: dict) -> None:
     """P3: hold for a long time; does the cube jump again on landing, and when?"""
     inputs = press(60, hold=480)
@@ -1422,6 +1551,8 @@ async def routine(server: SidecarServer) -> dict[str, Any]:
         ("P18", "flight orbs and pads, mini contacts, the wave in solids (Sim-2)",
          lambda: probe_flight_contacts(r, out)),
         ("P19", "the robot (Sim-3 exploration)", lambda: probe_robot(r, out)),
+        ("P20", "the robot upside down, buffered, faces, ceilings (Sim-3)",
+         lambda: probe_robot_contacts(r, out)),
     ]
     try:
         for code, label, step in steps:

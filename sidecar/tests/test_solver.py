@@ -337,9 +337,23 @@ def test_robot_routes_replay_and_skip_the_forgiving_search() -> None:
     assert time.perf_counter() - began < 0.5
 
 
-def test_an_upside_down_robot_is_unverifiable() -> None:
-    """P19's flipped runs had no roof: the robot upside down is not measured yet."""
+def test_an_upside_down_robot_jumps_from_a_roof() -> None:
+    """P20 A: upside down the robot is the upright one mirrored; it falls up onto a roof
+    and a held press boosts it down, away from it."""
     flip = [{"id": 11, "x": 15 + 30 * 9, "y": 45}]
-    run = simulate(_world(ROBOT_PORTAL + flip), PARAMS, [], max_ticks=600, until_x=600)
-    assert run.outcome == "unverifiable"
-    assert run.death is not None and "upside-down robot" in (run.death.reason or "")
+    roof = [{"id": 1, "x": 15 + 30 * c, "y": 225} for c in range(4, 40)]
+    world = _world(ROBOT_PORTAL + flip + roof)
+    idle = simulate(world, PARAMS, [], max_ticks=500)
+    assert idle.final.gravity == -1 and idle.final.grounded
+    assert idle.final.y == 210 - 15                     # under the roof's bottom
+    held = simulate(world, PARAMS, [{"tick": 420, "action": "press"},
+                                    {"tick": 445, "action": "release"}], max_ticks=470)
+    assert min(held.trace["y"][420:]) < 195 - 40       # a 25-tick jump, downward
+
+
+def test_a_player_dies_above_the_level_top() -> None:
+    """P19: an upside-down robot with no roof fell up off the level and died at y 1506."""
+    flip = [{"id": 11, "x": 15 + 30 * 9, "y": 45}]
+    run = simulate(_world(ROBOT_PORTAL + flip), PARAMS, [], max_ticks=1200)
+    assert run.outcome == "death" and run.death is not None
+    assert 1502.8 < run.death.y <= 1506.3

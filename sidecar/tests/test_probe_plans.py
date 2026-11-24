@@ -106,3 +106,49 @@ def test_p19_keeps_the_runs_made_before_a_failure(tmp_path, monkeypatch) -> None
         asyncio.run(calibrate.probe_robot(calibrate.Runner(game), out))
     assert len(out["P19_robot"]) == 5
     assert (tmp_path / "fixtures" / "cal_robot.json").exists()
+
+
+def test_p20_robot_contacts_plan_is_sound() -> None:
+    plan = calibrate.p20_plan()
+    labels = [label for label, *_ in plan]
+    assert len(labels) == len(set(labels))
+    assert 50 <= len(plan) <= 100
+    assert {meta["part"] for *_, meta in plan} == {"A", "B", "C", "D", "E"}
+    for label, objects, inputs, max_ticks, _meta in plan:
+        assert all(o["x"] < calibrate.CLEAR_X for o in objects), label
+        assert sum(o["id"] == calibrate.ROBOT_PORTAL for o in objects) == 1, label
+        ticks = [i["tick"] for i in inputs]
+        assert ticks == sorted(ticks) and all(0 < t < max_ticks for t in ticks), label
+    # Upside down, the robot has a roof to land on this time (P19's had none).
+    for label, objects, *_rest, meta in plan:
+        if meta["part"] == "A":
+            roof = [o for o in objects if o["id"] == 1 and o["y"] > 200]
+            assert roof, label
+
+
+def test_p20_sweeps_straddle_the_simulators_edges() -> None:
+    """C and E are aimed where the simulator changes its answer: each sweep holds both
+    outcomes, so the game decides which side of every edge is right."""
+    by_sweep: dict[tuple, set[str]] = {}
+    for _label, objects, inputs, _max, meta in calibrate.p20_plan():
+        if meta["part"] in ("C", "E"):
+            key = (meta["part"], meta["hold"])
+            by_sweep.setdefault(key, set()).add(calibrate._robot_outcome(objects, inputs))
+    assert by_sweep
+    for key, outcomes in by_sweep.items():
+        if key[0] == "C":
+            assert outcomes == {"death", "max_ticks"}, key
+    assert set().union(*(o for k, o in by_sweep.items() if k[0] == "E")) == {
+        "death", "max_ticks"}
+
+
+def test_p20_runs_end_to_end_against_a_fake_game(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    monkeypatch.setattr(calibrate, "FIXTURES", tmp_path / "fixtures")
+    monkeypatch.setattr(calibrate, "RAW", tmp_path / "raw")
+    game = _FakeGame()
+    out: dict = {}
+    asyncio.run(calibrate.probe_robot_contacts(calibrate.Runner(game), out))
+    assert game.replays == len(calibrate.p20_plan()) == len(out["P20_robot"])
+    assert (tmp_path / "fixtures" / "cal_robot_contacts.json").exists()

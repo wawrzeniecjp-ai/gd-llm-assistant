@@ -73,9 +73,10 @@ CONTACT_MARGIN = 3.0
 BAND_GRID = 30.0
 
 
-#: Why an upside-down robot stops a run: P19's flipped runs had no roof, so its jump
-#: upside down is not measured yet.
-UPSIDE_DOWN_ROBOT = "an upside-down robot is not calibrated yet"
+#: A player whose centre rises above this dies (P19: four upside-down robots with no roof
+#: fell up off the level and died at y 1506.21, alive at 1502.83). Only seen with the
+#: robot; no other run has flown that high.
+LEVEL_TOP = 1504.5
 
 
 class UncalibratedError(RuntimeError):
@@ -630,9 +631,6 @@ def _portal(cube: Cube, body: Body, p: CubeParams, half: float) -> None:
         new = {"normal": 1, "inverse": -1}.get(body.variant or "", -cube.gravity)
         if new == cube.gravity:
             return
-        if cube.mode == "robot":
-            cube.unverifiable = UPSIDE_DOWN_ROBOT
-            return
         if cube.mode == "cube" and cube.grounded and not (
                 cube.gravity > 0 and abs(cube.y - half - FLOOR) < 1e-6):
             # Standing on a block, the game's move already pulled the cube one tick of
@@ -656,9 +654,6 @@ def _portal(cube: Cube, body: Body, p: CubeParams, half: float) -> None:
                 target == "robot" and p.robot is None):
             cube.unverifiable = f"entering the {target} from the {cube.mode} is not calibrated"
             return
-        if target == "robot" and cube.gravity < 0:
-            cube.unverifiable = UPSIDE_DOWN_ROBOT
-            return
         bounds = _bounds_for(target, body, fp) if target not in GROUND_MODES else None
         cube.vy *= fp.entry[cube.mode] * fp.entry[target]
         cube.mode, cube.bounds = target, bounds
@@ -671,6 +666,8 @@ def collide(cube: Cube, near: list[Body], p: CubeParams, tick: int, prev_y: floa
     tick, before or after the move. Returns the death, if this tick kills."""
     half = half_of(cube, p)
     g = cube.gravity
+    if cube.y > LEVEL_TOP:
+        return Death(tick, cube.x, cube.y, None, "solid")
     _bands(cube, half)
     outer = cube.box(contact_half(cube, p))
     if not near:
@@ -696,7 +693,9 @@ def collide(cube: Cube, near: list[Body], p: CubeParams, tick: int, prev_y: floa
     for body in near:
         if body.role is not Role.SOLID or not body.box.overlaps(outer):
             continue
-        if _covered(body, near, outer, g):
+        if cube.mode == "cube" and _covered(body, near, outer, g):
+            # The robot lands on a covered top, inside the stack, and dies there on the
+            # next check (P20 C, hold 38 lead 102: y 45.0 inside a two-block face).
             continue
         if g > 0:
             top = body.box.y2
@@ -890,9 +889,6 @@ def _launch(cube: Cube, p: CubeParams, color: str, impulse) -> None:
     sends the cube towards its new floor at 0.4 of the yellow one (P16)."""
     scale = _impulse_scale(cube, p)
     cube.boost = 0
-    if color == "blue" and cube.mode == "robot":
-        cube.unverifiable = UPSIDE_DOWN_ROBOT
-        return
     if color == "blue":
         assert p.flight is not None
         cube.gravity = -cube.gravity
@@ -959,7 +955,10 @@ def _fire_orb(cube: Cube, p: CubeParams) -> None:
             assert r is not None
             cube.used = cube.used | {orb.uid}
             if color == "blue":
-                cube.unverifiable = UPSIDE_DOWN_ROBOT
+                # The cube's yellow orb times the blue factor (P19 E: 4.47, not 0.4 of
+                # the robot's own yellow 10.06).
+                _launch(cube, p, color, p.orb_for)
+                cube.buffered = False
                 return
             # P19 E, at 1x; other speeds scale the cube's orb by the same ratio.
             ratio = r.orb[color] / p.orb_for("1x", color)
