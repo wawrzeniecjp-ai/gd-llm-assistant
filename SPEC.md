@@ -8,10 +8,85 @@
 | Document version | 0.11.0 |
 | Status | Draft — Phases 0-4 implemented and **verified in-editor on GD 2.2091**. Phase 5 in progress. |
 | Target platform | Windows only (initial release) |
-| Target Geode version | v5.11.2 nightly (loader `57415d9`, the v6 merge). Requires C++23 |
+| Target Geode version | **v6.0.0** (released 2026-11-24; CLI 4.0.2, SDK and loader `fcbf84c`). Requires C++23 |
 | Target GD version | **2.2091** (was 2.2081; see 0.1) |
 
+## 0.0 Current baseline: Geode v6.0.0 (2026-11-24)
+
+Geode shipped **v6.0.0** as the first stable release for 2.2091, so the project moved off
+the pre-release snapshot it had been pinned to (0.1 below explains why it was there).
+
+| Piece | Version |
+| --- | --- |
+| Geode CLI | 4.0.2 |
+| SDK | tag `v6.0.0` (`fcbf84c`) |
+| Loader in the game folder | 6.0.0 |
+| Our `mod.json` | 6.0.0 |
+
+The upgrade was a clean fast-forward: the old commit (`57415d94`) was 137 commits behind
+the tag with **zero** diverging commits, so no merge was needed.
+
+### Order matters, and two steps are not optional
+
+1. **The CLI first.** v6's `cmake/GeodeFile.cmake` opens with
+   `set(GEODE_CLI_MINIMUM_VERSION 4.0.1)` and hard-fails configure below it, so the SDK
+   upgrade is simply unreachable from the 3.9.0 we had.
+2. **Then the SDK**, and `geode sdk install-binaries` is mandatory rather than a
+   convenience. A v6 SDK without prebuilt binaries stops at *"No valid loader binary to
+   link to"*, and this step is also where the matching `Geode.dll` comes from. That
+   matters more than it looks: the loader and the SDK must be the same build, and
+   installing the loader from anywhere else is how they silently drift.
+3. **`mod.json`'s `geode` field is a hard gate**, not documentation. It read `5.11.1`
+   and configure refused to continue with an explicit "please change the Geode version in
+   your mod.json".
+
+### What actually broke: only `TextInput`
+
+The migration guide's breaking changes were assessed against the source before starting,
+and the estimate held — one file, and it got **shorter**.
+
+`geode::TextInput` was rewritten. It no longer wraps a `CCTextInputNode`, `TextInputDelegate`
+is removed, and `getInputNode`/`setDelegate` are gone. Every workaround the panel had built
+for Enter therefore vanished with it: `InputForwarder`, the delegate hijack in `buildInput`,
+the `CCTextInputNode::onTextFieldInsertText` hook, and `ChatPanel::textInputReturn`. v6
+supplies `TextInput::setEnterCallback`, which does the job the workarounds were
+reconstructing, so Enter is now one call instead of three redundant paths.
+
+Two renames, both smaller than they sound:
+
+- `setWidth` → **`setContentSize`**. The guide documents `setContentWidth`, which does not
+  exist in the final API; the compiler is the authority here.
+- `defocus` → `unfocus`.
+
+`inputHasFocus` used to read the input node's `m_selected` field, which went away with the
+wrapper. Focus is now a flag fed by `setFocusCallback` — a supported source rather than a
+private field, which is an improvement independent of the migration.
+
+`FocusState` is nested in `TextInput` (`TextInput::FocusState`), not in `geode`, despite
+the guide naming it as a plain enum.
+
+### What did **not** need changing, contrary to expectation
+
+- **`async::waitForMainThread`** still takes its result type as the first template
+  parameter, so all ~15 call sites in `bridge.cpp` were untouched.
+- **The filesystem move** to `asp::fs` was already handled — we had been converting
+  `getSaveDir().string()` all along.
+- **`geode::Task`, `utils::Timer`, `GEODE_EVENT_EXPORT`** — none are used.
+- **`scrollWheel` returning `bool`** was already present in the snapshot we came from
+  (0.1), which is why the transcript's wheel hook works.
+
+Net diff: **184 lines deleted, 47 added.**
+
+### Rollback
+
+Branch `main` at tag `v5-sdk-57415d94`, and the previous loader is backed up in
+`<GD>/geode/loader-backup-v5.11.2/` (`Geode.dll`, `GeodeUpdater.exe`, `XInput1_4.dll`).
+Restoring all three is a complete revert of the loader.
+
 ## 0.1 RESOLVED: GD 2.209 support (2026-10-31)
+
+**Superseded by 0.0, which is the current state.** Kept because it records what the
+pre-release situation actually was and why the snapshot existed.
 
 **The mod builds, loads and works in the editor on GD 2.2091.** The full stack was
 verified in-game: panel, connection, a complete tool-loop turn, transaction grouping, and
@@ -238,7 +313,11 @@ the headers and the bindings together, or nothing.
 Worth recording the confirmed API deltas for the eventual port: `scrollWheel` returns
 `bool` in 2.209, and there are new input classes. Neither affects the sidecar.
 
-**Conclusion: waiting is the correct call, and nothing is lost by it.** Three loader builds
+**Conclusion at the time: waiting was the correct call.** It was — v6.0.0 shipped on
+2026-11-24, exactly as predicted here, and the port was a rebuild-and-go with one real
+source change (0.0). The rest of this subsection is the pre-release record.
+
+**Original conclusion.** Three loader builds
 have been tried and none works, and the one branch that has a fix is an unreleased,
 daily-changing WIP that must be built from source. When v6 releases, this is a rebuild-and-go
 with minor porting — no design changes, because the blocker is the game's DLL and, after
@@ -523,6 +602,12 @@ focus. `CCTextInputNode::onTextFieldInsertText` fires per character but reports
 on `EditorUI::keyDown`**, which GD demonstrably dispatches (Geode's keybind mod hooks
 the same function). This is now a spike-level finding, not an implementation detail.
 
+**v6 retired all of it.** `TextInput` gained `setEnterCallback`, so the hook, the
+delegate chain and the text-insertion hook are gone and Enter is a callback on the
+widget itself (0.0). The finding above stays because it explains why the panel does
+*not* rely on a plain key handler even now: GD still suppresses keyboard dispatch to
+mod delegates while a text field holds focus.
+
 **Touch priority runs the opposite way to intuition.** Lower values are dispatched
 first. A panel that claims a region at a low priority steals the gesture from its own
 children: at `-400`/`-499` the panel swallowed scroll drags before the `ScrollLayer`
@@ -582,6 +667,11 @@ plain. The mouse wheel does not scroll the transcript (drag does): GD's
 `CCMouseDispatcher` offers no priority API, so the editor keeps the wheel; recorded
 rather than worked around. `Home`/`End` and `!`-style navigation keys inside the field
 are GD's `CCTextInputNode` behaviour, which implements only left/right/backspace/delete.
+**v6 changes this specific gap for the better:** `TextInput` no longer wraps a
+`CCTextInputNode` at all and implements its own editing, with Ctrl+A/C/X/V, Home/End,
+word-wise movement and selection. Our `setCommonFilter` is retained: `CommonFilter::Any`
+now means "anything in bigFont.fnt" (Alphanumeric | Printable), which still admits an
+apostrophe, so the original reason holds.
 
 ## 0.2 Changes from 0.6.0
 
@@ -627,7 +717,7 @@ whether it means what it appears to. Two of the three failures here returned cle
 
 ## 0.3 Changes from 0.4.0
 
-- **Version target settled and raised:** Geode SDK **5.11.1** is installed and the target is now **v5.11.x**. Geode v6 exists only as a work-in-progress migration guide, so no v6 work is in scope. Resolves §15 Q3 and Appendix A #1.
+- **Version target settled and raised:** Geode SDK **5.11.1** is installed and the target is now **v5.11.x**. Geode v6 exists only as a work-in-progress migration guide, so no v6 work is in scope. Resolves §15 Q3 and Appendix A #1. *(Historical: v6.0.0 has since released and the project targets it — see 0.0.)*
 - **Toolchain verified end to end:** Clang 23.1.3 (scoop LLVM), Ninja, CMake ≥ 3.29, Git, MSVC 14.51 + Windows SDK 10.0.26100 (VS BuildTools), Geode CLI 3.9.0, and `GEODE_SDK` set per workspace. Recorded in the new §6.1.9.
 - **Third-party refresh dependency removed:** the editor exposes no generic `update()`; vanilla `updateObjectLabel` / `updateObjectSection` / `quickUpdateAllPositions` / `updateGridLayer` / `updateGameObjects` replace `nwo5::editor::update()`, so the "Silly API" is no longer a dependency (§6.1.6, Appendix A #10).
 - **Undo grouping promoted to the primary path:** `addToUndoList(UndoObject*, bool keepRedo)`, `addToRedoList`, `handleAction`, `m_undoObjects` / `m_redoObjects` and `m_increaseMaxUndoRedo` make a grouped mixed-mutation undo entry feasible. The bookkeeping fallback is retained, but is no longer the assumed mechanism (§6.1.5, S3, Appendix A #4).
