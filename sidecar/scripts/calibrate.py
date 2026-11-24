@@ -28,6 +28,7 @@ cancels a run). Run from `sidecar/`, with `start-sidecar.bat` closed:
     uv run python scripts/calibrate.py P16          # upside down, blue orb/pad, mini (~2 min)
     uv run python scripts/calibrate.py P17          # Sim-2 contacts and bands (~6 min)
     uv run python scripts/calibrate.py P18          # flight orbs/pads, mini, wave in solids
+    uv run python scripts/calibrate.py P19          # the robot (~5 min)
 """
 
 from __future__ import annotations
@@ -1099,6 +1100,158 @@ async def probe_flight_contacts(r: Runner, out: dict) -> None:
     save_raw("P18", raw)
 
 
+# P19 (M5, Sim-3): the robot, explored as P15 explored the flight modes. Nothing is
+# fitted here; the traces are read offline. The robot's jump grows with how long the
+# press is held, up to a limit, so A sweeps the hold; B repeats a few holds mini, upside
+# down, at each speed and from a high portal; C taps in a rhythm and holds through
+# landings; D and E meet pads and orbs; F jumps a spike and onto a one-block step. Where
+# a press must land on an object, the simulator aims it with the cube, which moves
+# across at the same speed.
+
+ROBOT_PORTAL = 745
+P19_COL = 14                                   # pads, orbs, spike and step
+P19_HOLDS = (1, 3, 6, 10, 15, 20, 25, 30, 40, 50, 80)
+P19_SHORT_HOLDS = (1, 10, 25, 80)
+P19_SPEED_HOLDS = (1, 25, 80)
+#: Ticks of travel between a robot press and the spike or step, at 1x: the cube's jump
+#: is in the air ~104 ticks, so these straddle where a jump of each hold clears it.
+P19_LEADS = {1: (20, 35, 50), 10: (25, 45, 65), 25: (30, 55, 80)}
+
+
+def _p19_base(speed: str = "1x", mini: bool = False, flipped: bool = False,
+              high: bool = False) -> list[dict[str, Any]]:
+    """As P15: a speed portal (column 2), mini (4), the robot portal (6), gravity (9)."""
+    objects: list[dict[str, Any]] = []
+    if speed != "1x":
+        x, y = cell(2, 1)
+        objects.append({"id": dict(SPEED_PORTALS)[speed], "x": x, "y": y})
+    if mini:
+        x, y = cell(4, 1)
+        objects.append({"id": SIZE_MINI, "x": x, "y": y})
+    if high:
+        x, y = cell(3, 0, PAD_Y_OFFSET)
+        objects.append({"id": 35, "x": x, "y": y})
+        objects.append({"id": ROBOT_PORTAL, "x": cell(6, 0)[0], "y": _high_portal_y()})
+    else:
+        x, y = cell(6, 1)
+        objects.append({"id": ROBOT_PORTAL, "x": x, "y": y})
+    if flipped:
+        x, y = cell(9, 1)
+        objects.append({"id": GRAVITY_FLIP, "x": x, "y": y})
+    return objects
+
+
+def _cube_only(objects: list[dict]) -> list[dict]:
+    """The layout without its robot portal, for aiming with the cube simulator."""
+    return [o for o in objects if o["id"] != ROBOT_PORTAL]
+
+
+def p19_plan() -> list[tuple[str, list[dict], list[dict], int, dict]]:
+    """Every P19 run as (label, objects, inputs, max_ticks, meta). It needs no game, so
+    the layouts and aims can be checked offline."""
+    runs: list[tuple[str, list[dict], list[dict], int, dict]] = []
+    base = _p19_base()
+    start = P15_START
+    # A: one press, held for each length.
+    for hold in P19_HOLDS:
+        runs.append((f"A hold {hold}", base, press(start, hold=hold), 700,
+                     {"part": "A", "hold": hold}))
+    # B: a few holds mini, upside down and at each speed; from a high portal, idle and
+    # pressed while falling.
+    variants: list[tuple[str, dict[str, Any], tuple[int, ...]]] = [
+        ("mini", {"mini": True}, P19_SHORT_HOLDS),
+        ("flipped", {"flipped": True}, P19_SHORT_HOLDS),
+        *[(f"speed {sp}", {"speed": sp}, P19_SPEED_HOLDS) for sp in ("0.5x", "2x", "3x", "4x")],
+    ]
+    for label, kwargs, holds in variants:
+        objects = _p19_base(**kwargs)
+        for hold in holds:
+            runs.append((f"B {label} hold {hold}", objects, press(start, hold=hold), 900,
+                         {"part": "B", "setup": label, "hold": hold, **kwargs}))
+    runs.append(("B flipped idle", _p19_base(flipped=True), [], 600,
+                 {"part": "B", "setup": "flipped", "flipped": True}))
+    high = _p19_base(high=True)
+    runs.append(("B high idle", high, [], 700, {"part": "B", "setup": "high", "high": True}))
+    after = _sim_tick_at(_cube_only(high), [], cell(6, 0)[0] + 30)
+    if after is not None:
+        runs.append((f"B high press {after} falling", high, press(after, hold=25), 700,
+                     {"part": "B", "setup": "high", "high": True, "press_tick": after,
+                      "hold": 25}))
+    # C: taps in a rhythm, short and long; held for a long time (does it jump again on
+    # landing?); a press released and pressed again in the air.
+    runs.append(("C taps 1 x5", base, [i for k in range(5) for i in press(start + 70 * k)],
+                 1000, {"part": "C", "kind": "taps", "hold": 1}))
+    runs.append(("C taps 20 x5", base,
+                 [i for k in range(5) for i in press(start + 90 * k, hold=20)], 1100,
+                 {"part": "C", "kind": "taps", "hold": 20}))
+    runs.append(("C hold 700", base, press(start, hold=700), 1200,
+                 {"part": "C", "kind": "hold_long", "hold": 700}))
+    runs.append(("C repress in the air", base,
+                 [*press(start, hold=8), *press(start + 20, hold=30)], 800,
+                 {"part": "C", "kind": "repress"}))
+    # D: each pad on the floor, no input; the yellow pad mini.
+    px, py = cell(P19_COL, 0, PAD_Y_OFFSET)
+    for color, pad_id in PAD_IDS.items():
+        runs.append((f"D {color} pad", [*base, {"id": pad_id, "x": px, "y": py}], [], 600,
+                     {"part": "D", "color": color}))
+    mini = _p19_base(mini=True)
+    runs.append(("D mini yellow pad", [*mini, {"id": PAD_IDS["yellow"], "x": px, "y": py}],
+                 [], 600, {"part": "D", "color": "yellow", "mini": True}))
+    # E: an orb on the floor, pressed while the robot overlaps it: tapped and held.
+    ox, oy = cell(P19_COL, 0)
+    span = _orb_span(_cube_only(base), mini=False)
+    if span is not None:
+        first, last = span
+        middle = (first + last) // 2
+        for color, orb_id in ORB_IDS.items():
+            for hold in ((1, 25) if color == "yellow" else (1,)):
+                runs.append((f"E {color} orb hold {hold}",
+                             [*base, {"id": orb_id, "x": ox, "y": oy}],
+                             press(middle, hold=hold), 600,
+                             {"part": "E", "color": color, "hold": hold,
+                              "press_tick": middle, "touch": [first, last]}))
+        yellow = {"id": ORB_IDS["yellow"], "x": ox, "y": oy}
+        runs.append(("E yellow orb held through", [*base, yellow],
+                     press(first - 6, hold=last - first + 12), 600,
+                     {"part": "E", "color": "yellow", "buffering": "held_through",
+                      "touch": [first, last]}))
+    # F: a spike, and a one-block step from column 14 on, jumped with three holds at
+    # three leads each.
+    fx = cell(P19_COL, 0)[0]
+    reach = _sim_tick_at(_cube_only(base), [], fx - 15 - HALF_SIM)
+    if reach is not None:
+        step = [{"id": 1, "x": cell(c, 0)[0], "y": 15.0}
+                for c in range(P19_COL, P19_COL + 12)]
+        for kind, objects in (("spike", [*base, {"id": 8, "x": fx, "y": 15.0}]),
+                              ("step", [*base, *step])):
+            for hold, leads in P19_LEADS.items():
+                for lead in leads:
+                    t = reach - lead
+                    runs.append((f"F {kind} hold {hold} lead {lead}", objects,
+                                 press(t, hold=hold), 700,
+                                 {"part": "F", "kind": kind, "hold": hold, "lead": lead,
+                                  "press_tick": t}))
+    return runs
+
+
+async def probe_robot(r: Runner, out: dict) -> None:
+    """P19: the robot (Sim-3 exploration); see `p19_plan`."""
+    runs: list[dict] = []
+    raw: list[dict] = []
+    try:
+        for label, objects, inputs, max_ticks, meta in p19_plan():
+            await _record(r, runs, raw, label, objects, inputs, max_ticks, mode="robot",
+                          **meta)
+    finally:
+        # Saved even when a run fails part-way: five minutes of runs are not thrown
+        # away for the last one (2026-11-24: a crash on run 12 lost the first 11).
+        out["P19_robot"] = [{k: v for k, v in run.items() if k != "trace"} for run in runs]
+        if runs:
+            save_fixture("cal_robot",
+                         "P19 the robot: holds, sizes, speeds, pads, orbs, spike, step", runs)
+            save_raw("P19", raw)
+
+
 async def probe_hold(r: Runner, out: dict, cube: dict) -> None:
     """P3: hold for a long time; does the cube jump again on landing, and when?"""
     inputs = press(60, hold=480)
@@ -1268,6 +1421,7 @@ async def routine(server: SidecarServer) -> dict[str, Any]:
          lambda: probe_contacts(r, out)),
         ("P18", "flight orbs and pads, mini contacts, the wave in solids (Sim-2)",
          lambda: probe_flight_contacts(r, out)),
+        ("P19", "the robot (Sim-3 exploration)", lambda: probe_robot(r, out)),
     ]
     try:
         for code, label, step in steps:

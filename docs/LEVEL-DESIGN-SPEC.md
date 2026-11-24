@@ -1048,6 +1048,41 @@ failures:
 - the ship-wall fix flies over its cube portal: "possible" does not require passing
   through every portal.
 
+## 6.10.2 Sim-3 (M5, from 2026-11-22)
+
+Sim-3 starts with the robot, explored before anything is fitted, as P15 explored the
+flight modes. The replay trace already reports `robot`, so no mod change is needed.
+
+**P19 (written 2026-11-22, not run yet).** `scripts/calibrate.py P19`, 65 runs (about
+5 minutes). The robot portal is in column 6; pads, orbs, the spike and the step are in
+column 14. Each press that must meet an object is aimed by the cube simulator, which
+crosses at the same speed. The fixture is `cal_robot.json`.
+- **A, holds:** one press held 1, 3, 6, 10, 15, 20, 25, 30, 40, 50 and 80 ticks: how
+  the jump grows with the hold, and where it stops growing.
+- **B, variants:**
+  - mini and upside down, held 1, 10, 25 and 80 ticks;
+  - at 0.5x, 2x, 3x and 4x, held 1, 25 and 80 ticks;
+  - upside down with no input;
+  - from a portal high above the ground (after a yellow pad): no input, and pressed
+    while falling.
+- **C, rhythm:**
+  - five taps of 1 tick, then five holds of 20;
+  - one press held 700 ticks, to see whether it jumps again on landing;
+  - a press of 8 ticks pressed again in the air.
+- **D, pads:** yellow, pink and blue pads on the floor with no input; the yellow pad
+  under a mini robot.
+- **E, orbs:** an orb on the floor pressed mid-overlap:
+  - yellow, tapped and held 25 ticks;
+  - pink and blue, tapped;
+  - yellow, held through the orb.
+- **F, obstacles:** a ground spike, then a one-block step 12 columns long. Each is
+  jumped with holds of 1, 10 and 25 ticks, at three leads each.
+
+`tests/test_probe_plans.py` checks the plan offline:
+- every object is inside the area the script checks is empty;
+- every input falls inside its run, and after the robot portal;
+- every orb press falls inside the overlap.
+
 ## 6.11 Deferred: slopes, platformer, moving objects
 
 Slopes need a separate collision response and their own probes. Platformer mode makes
