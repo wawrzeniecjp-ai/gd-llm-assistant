@@ -239,6 +239,10 @@ class SpiderParams:
     teleport_vy: float
     pad: Mapping[str, float]
     orb: Mapping[str, float]
+    #: Where the teleport looks for a solid face: from `probe_back` behind the centre to
+    #: `probe_ahead` in front of it (P22), not the spider's own box.
+    probe_back: float = 0.0
+    probe_ahead: float = 15.0
 
     @classmethod
     def from_constants(cls, constants: PhysicsConstants) -> SpiderParams | None:
@@ -247,6 +251,7 @@ class SpiderParams:
             return None if value is None or value.value is None else value.value
 
         found = {k: get(k) for k in ("gravity", "half", "teleport_vy")}
+        probe_back, probe_ahead = get("probe_back"), get("probe_ahead")
         pads = {c: get("pad_impulse", c) for c in ("yellow", "pink")}
         orbs = {c: get("orb_impulse", c) for c in ("yellow", "pink")}
         values = [*found.values(), *pads.values(), *orbs.values()]
@@ -255,7 +260,9 @@ class SpiderParams:
         return cls(gravity=found["gravity"] or 0.0, half=found["half"] or 0.0,
                    teleport_vy=found["teleport_vy"] or 0.0,
                    pad={c: v or 0.0 for c, v in pads.items()},
-                   orb={c: v or 0.0 for c, v in orbs.items()})
+                   orb={c: v or 0.0 for c, v in orbs.items()},
+                   probe_back=0.0 if probe_back is None else probe_back,
+                   probe_ahead=15.0 if probe_ahead is None else probe_ahead)
 
 
 @dataclass(frozen=True)
@@ -550,34 +557,40 @@ def _move_spider(cube: Cube, near: list[Body], p: CubeParams) -> None:
 def _teleport(cube: Cube, p: CubeParams, near: Iterable[Body]) -> None:
     """The spider's press: at once to the surface opposite, gravity flipped (P21 A: on
     the roof's underside at 196.5 on the next sample, vy 1.0 towards it; grounded the
-    sample after). The surface is the nearest solid face overhead across its width, else
-    its band's edge. A hazard in the way is not calibrated (P22)."""
+    sample after).
+
+    The surface is the nearest solid face in the teleport's direction over
+    [x - probe_back, x + probe_ahead] of its centre (P22 B: not its own box), else its
+    band's edge. A hazard whose hitbox spans the centre x, nearer than that surface,
+    stops it at the hazard's centre height, where it dies on the next tick (P22 C)."""
     s = p.spider
     assert s is not None
     half = half_of(cube, p)
     g = cube.gravity
-    x1, x2 = cube.x - half, cube.x + half
+    x = cube.x
+    x1, x2 = x - s.probe_back, x + s.probe_ahead
+    near = list(near)
     solids = [b for b in near if b.role is Role.SOLID and b.box.x1 < x2 and b.box.x2 > x1]
+    hazards = [b for b in near if b.role is Role.HAZARD and b.box.x1 <= x <= b.box.x2]
     if g > 0:
         edge = cube.bounds[1] if cube.bounds is not None else None
         faces = [b.box.y1 for b in solids if b.box.y1 >= cube.y + half - 1e-6]
         surface = min([f for f in (edge, *faces) if f is not None], default=None)
-        target = None if surface is None else surface - half
+        if surface is None:
+            cube.unverifiable = "a spider with nothing overhead is not calibrated"
+            return
+        target = surface - half
+        ahead = [b for b in hazards if cube.y < b.box.y1 < surface]
+        hit = min(ahead, key=lambda b: b.box.y1, default=None)
     else:
         edge = cube.bounds[0] if cube.bounds is not None else FLOOR
         faces = [b.box.y2 for b in solids if b.box.y2 <= cube.y - half + 1e-6]
         surface = max([edge, *faces])
         target = surface + half
-    if target is None:
-        cube.unverifiable = "a spider with nothing overhead is not calibrated"
-        return
-    lo, hi = sorted((cube.y, target))
-    swept = Box(x1, lo - half, x2, hi + half)
-    for body in near:
-        if body.role is Role.HAZARD and body.touches(swept):
-            cube.unverifiable = (f"a spider teleporting past or onto a hazard is not "
-                                 f"calibrated yet (object {body.uid})")
-            return
+        ahead = [b for b in hazards if surface < b.box.y2 < cube.y]
+        hit = max(ahead, key=lambda b: b.box.y2, default=None)
+    if hit is not None:
+        target = (hit.box.y1 + hit.box.y2) / 2
     cube.y = target
     cube.vy = g * s.teleport_vy
     cube.gravity = -g
@@ -1071,7 +1084,7 @@ def _fire_orb(cube: Cube, p: CubeParams, near: Iterable[Body] = ()) -> None:
     if cube.buffered and cube.touching_orbs and cube.mode in GROUND_MODES:
         orb = cube.touching_orbs[0]
         color = orb.variant or "yellow"
-        if cube.mini:
+        if cube.mini and cube.mode != "spider":
             cube.unverifiable = f"the mini {cube.mode}'s orbs are not calibrated yet"
             return
         if cube.mode == "spider":

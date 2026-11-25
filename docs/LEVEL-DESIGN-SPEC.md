@@ -1225,11 +1225,56 @@ as goldens with no further change (1341 in all).
   - a teleport whose path crosses or ends on a hazard;
   - a mini spider's orbs.
 
-**Next (P22):**
-- the 2x run;
-- teleports under blocks that only partly cover the spider's width;
-- a teleport onto or past a spike;
-- the spider at its band's edges.
+**P22 (written 2026-11-24, run and fitted 2026-11-25).** `scripts/calibrate.py P22`, 35 runs (about 3
+minutes), aimed by the simulator, which plays the spider since P21. The fixture will be
+`cal_spider_contacts.json`.
+- **A:** the 2x run P21 lost, and two presses at 2x.
+- **B, part of a block overhead:**
+  - a single block at row 7 over column 14, with no other roof. The press is aimed so
+    the spider's 27-wide box overlaps it by -2 to 26 units, entering it and leaving it;
+  - two roofs side by side (rows 5 and 7) meeting over column 14, pressed 10 units
+    before the join to 20 after.
+
+  Each sweep holds both of the simulator's answers (the block, or the band's edge).
+- **C, spikes in the teleport's path:**
+  - a spike hanging from the roof, and one standing in mid-air under it, pressed with
+    the spike 0, 10 and 18 units ahead;
+  - a floor spike under a teleport down from the roof.
+
+  The simulator calls all of these unverifiable.
+- **D, raised bands:** spider portals at y 180 and 198, reached on a yellow pad's flight,
+  for band floors of 30 and 60; idle, and two presses.
+- **E, mini:** a mini spider's yellow and pink orbs, and its yellow pad.
+
+`tests/test_probe_plans.py` checks that every B sweep straddles the simulator's edge, that
+D's portals are reached, and runs the whole probe against the fake game.
+
+**P22 results.** All 35 runs were recorded, and with the changes below all 69 spider runs
+replay as goldens (1376 in all). At first, 12 runs disagreed.
+- **The teleport does not look over the spider's box.** It looks for a solid face over a
+  region from its centre to 15 units ahead (`probe_back` 0, `probe_ahead` 15):
+  - coming in, the lone block was found with the centre 13.65 before its left edge, so
+    the box was still short of it;
+  - going out, it was found with the centre 4.7 inside its right edge, and missed 3.1
+    past it, with the box still overlapping it;
+  - under the stepped roof, the lower roof ending 1.9 behind the centre was ignored,
+    and the spider went to the higher one.
+
+  The data fits a back edge from 4.6 behind the centre to 1.9 ahead, and a front edge
+  from 13.7 ahead upward (60 fits too). Nothing yet bounds how far ahead it reaches.
+- **A spike in the way stops the teleport.** A hazard whose hitbox spans the centre x,
+  nearer than the surface, stops it at the hazard's own height. It dies there on the
+  next tick:
+  - the hanging spike at y 195, the mid-air one at 105, the floor spike on the way
+    down at 15;
+  - a spike 5 units beside the centre was passed: hazards are checked at the centre
+    only, not over the block region.
+- **Mini:** the yellow and pink orbs and the yellow pad are 0.8 of the spider's (6.26,
+  4.51, 7.68), the usual mini factor. The mini spider's orbs are simulated now.
+- **2x and raised bands (A, D):** matched as simulated. The band's floor follows the
+  portal's height (30 and 60).
+- **Nothing about the spider is unverifiable now.** A teleport with nothing above it and
+  no band (which no portal produces) is the only case left.
 
 The `explain-robot` eval was written when the robot was unverifiable. Its recording
 replays, but a live run would now get `possible`. It should be pointed at the spider

@@ -31,6 +31,7 @@ cancels a run). Run from `sidecar/`, with `start-sidecar.bat` closed:
     uv run python scripts/calibrate.py P19          # the robot (~5 min)
     uv run python scripts/calibrate.py P20          # robot contacts (~7 min)
     uv run python scripts/calibrate.py P21          # the spider (~3 min)
+    uv run python scripts/calibrate.py P22          # spider contacts (~3 min)
 """
 
 from __future__ import annotations
@@ -1512,6 +1513,130 @@ async def probe_spider(r: Runner, out: dict) -> None:
             save_raw("P21", raw)
 
 
+# P22 (M5, Sim-3): what P21 left unverifiable or untested about the spider, aimed by the
+# simulator, which plays the spider since P21. A: the 2x run P21 lost to a key press.
+# B: a single block overhead covering part of the spider's width, entering and leaving
+# it, and two roofs at different heights side by side. C: teleports onto and past
+# spikes. D: bands whose floor is above the ground. E: a mini spider's orbs and pad.
+
+P22_BLOCK_COL = 14                              # the lone block overhead (B) and spikes (C)
+#: How far (units) the spider's 27-wide box overlaps the lone block where it is aimed;
+#: the press acts a tick later, about 1.3 units on (-2 entering is just short of it).
+P22_OVERLAPS = (-2, 1, 3, 6, 13, 20, 26)
+#: C: the spike's centre this far (units) from the spider's when pressed.
+P22_SPIKE_OFFSETS = (0, 10, 18)
+#: D: spider portals this high, where a yellow pad's flight crosses column 6 (about y
+#: 145); the band's floor follows (P17's rule): 30 and 60.
+P22_PORTAL_YS = (180.0, 198.0)
+
+
+def _spider_tick_at(objects: list[dict], x: float) -> int | None:
+    """The tick the simulated spider's centre reaches `x`."""
+    return _sim_tick_at(objects, [], x)
+
+
+def p22_plan() -> list[tuple[str, list[dict], list[dict], int, dict]]:
+    """Every P22 run as (label, objects, inputs, max_ticks, meta); no game needed."""
+    runs: list[tuple[str, list[dict], list[dict], int, dict]] = []
+    start = P15_START
+    # A: the lost run, and two presses at 2x.
+    fast = _p21_base(speed="2x")
+    runs.append(("A speed 2x one press", fast, press(start), 800, {"part": "A", "speed": "2x"}))
+    runs.append(("A speed 2x two presses", fast, [*press(start), *press(start + 60)], 800,
+                 {"part": "A", "speed": "2x"}))
+    # B: one block at row 7 over column 14, no roof else; pressed with the spider's box
+    # overlapping it by a few units entering it and leaving it.
+    open_sky = _p21_base(roof_row=None)
+    bx1, bx2 = 30.0 * P22_BLOCK_COL, 30.0 * (P22_BLOCK_COL + 1)
+    lone = [*open_sky, *_blocks([(P22_BLOCK_COL, P21_ROOF_ROW)])]
+    half = 13.5
+    for side, centre_of in (("entering", lambda d: bx1 + d - half),
+                            ("leaving", lambda d: bx2 - d + half)):
+        for d in P22_OVERLAPS:
+            tick = _spider_tick_at(lone, centre_of(d))
+            if tick is None:
+                continue
+            runs.append((f"B lone block {side} overlap {d}", lone, press(tick), 600,
+                         {"part": "B", "side": side, "overlap": d, "press_tick": tick}))
+    # Two roofs side by side, rows 5 and 7, meeting over column 14's left edge; pressed
+    # under the join, and a little either side.
+    stepped = [*open_sky, *_blocks([(c, 5) for c in range(4, P22_BLOCK_COL)]),
+               *_blocks([(c, P21_ROOF_ROW) for c in range(P22_BLOCK_COL, 40)])]
+    for shift in (-10, 0, 10, 14, 20):
+        tick = _spider_tick_at(stepped, bx1 + shift)
+        if tick is not None:
+            runs.append((f"B stepped roof, centre {shift:+d} from the join", stepped,
+                         press(tick), 600,
+                         {"part": "B", "kind": "stepped", "shift": shift,
+                          "press_tick": tick}))
+    # C: a roof with a spike hanging from it over column 14, pressed with the spike this
+    # far ahead of the spider; a spike standing in mid-air under the roof; a floor spike
+    # under a spider teleporting down from the roof.
+    roof = _p21_base()
+    sx = cell(P22_BLOCK_COL, 0)[0]
+    hanging = [*roof, {"id": 8, "x": sx, "y": cell(0, P21_ROOF_ROW - 1)[1],
+                       "properties": {"rotation": 180}}]
+    midair = [*roof, {"id": 8, "x": sx, "y": cell(0, 3)[1]}]
+    for kind, objects in (("hanging spike", hanging), ("mid-air spike", midair)):
+        for offset in P22_SPIKE_OFFSETS:
+            tick = _spider_tick_at(_p21_base(), sx - offset)
+            if tick is not None:
+                runs.append((f"C {kind}, {offset} ahead", objects, press(tick), 600,
+                             {"part": "C", "kind": kind, "offset": offset,
+                              "press_tick": tick}))
+    on_floor = [*roof, {"id": 8, "x": sx, "y": 15.0}]
+    up = 200
+    down = _spider_tick_at(_p21_base(), sx)
+    if down is not None:
+        runs.append(("C floor spike under a teleport down", on_floor,
+                     [*press(up), *press(down)], 600,
+                     {"part": "C", "kind": "floor spike", "press_tick": down}))
+    # D: a spider portal high above the ground: the band's floor is above it.
+    for y in P22_PORTAL_YS:
+        portal = [o if o["id"] != SPIDER_PORTAL else {**o, "y": y} for o in open_sky]
+        x, py = cell(3, 0, PAD_Y_OFFSET)
+        launch = [*portal, {"id": 35, "x": x, "y": py}]
+        runs.append((f"D band portal at y {y:.0f}, idle", launch, [], 700,
+                     {"part": "D", "portal_y": y}))
+        runs.append((f"D band portal at y {y:.0f}, two presses", launch,
+                     [*press(start), *press(start + 80)], 700,
+                     {"part": "D", "portal_y": y}))
+    # E: a mini spider's yellow and pink orbs, and its yellow pad.
+    mini = _p21_base(mini=True)
+    span = _orb_span(_spider_free(mini), mini=True)
+    if span is not None:
+        middle = (span[0] + span[1]) // 2
+        ox, oy = cell(P21_COL, 0)
+        for color in ("yellow", "pink"):
+            runs.append((f"E mini {color} orb", [*mini, {"id": ORB_IDS[color], "x": ox,
+                                                         "y": oy}],
+                         press(middle), 600,
+                         {"part": "E", "color": color, "mini": True, "press_tick": middle,
+                          "touch": [span[0], span[1]]}))
+    px, py = cell(P21_COL, 0, PAD_Y_OFFSET)
+    runs.append(("E mini yellow pad", [*mini, {"id": PAD_IDS["yellow"], "x": px, "y": py}],
+                 [], 600, {"part": "E", "color": "yellow", "mini": True, "kind": "pad"}))
+    return runs
+
+
+async def probe_spider_contacts(r: Runner, out: dict) -> None:
+    """P22: the spider's teleport under part of a block, onto spikes, in high bands; see
+    `p22_plan`."""
+    runs: list[dict] = []
+    raw: list[dict] = []
+    try:
+        for label, objects, inputs, max_ticks, meta in p22_plan():
+            await _record(r, runs, raw, label, objects, inputs, max_ticks, mode="spider",
+                          **meta)
+    finally:
+        out["P22_spider"] = [{k: v for k, v in run.items() if k != "trace"} for run in runs]
+        if runs:
+            save_fixture("cal_spider_contacts",
+                         "P22 the spider under part of a block, onto spikes, high bands",
+                         runs)
+            save_raw("P22", raw)
+
+
 async def probe_hold(r: Runner, out: dict, cube: dict) -> None:
     """P3: hold for a long time; does the cube jump again on landing, and when?"""
     inputs = press(60, hold=480)
@@ -1685,6 +1810,8 @@ async def routine(server: SidecarServer) -> dict[str, Any]:
         ("P20", "the robot upside down, buffered, faces, ceilings (Sim-3)",
          lambda: probe_robot_contacts(r, out)),
         ("P21", "the spider (Sim-3 exploration)", lambda: probe_spider(r, out)),
+        ("P22", "the spider under part of a block, onto spikes, high bands",
+         lambda: probe_spider_contacts(r, out)),
     ]
     try:
         for code, label, step in steps:

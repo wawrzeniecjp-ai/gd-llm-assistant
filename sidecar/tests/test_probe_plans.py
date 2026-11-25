@@ -184,3 +184,55 @@ def test_p21_runs_end_to_end_against_a_fake_game(tmp_path, monkeypatch) -> None:
     asyncio.run(calibrate.probe_spider(calibrate.Runner(game), out))
     assert game.replays == len(calibrate.p21_plan()) == len(out["P21_spider"])
     assert (tmp_path / "fixtures" / "cal_spider.json").exists()
+
+
+def test_p22_spider_contacts_plan_is_sound() -> None:
+    plan = calibrate.p22_plan()
+    labels = [label for label, *_ in plan]
+    assert len(labels) == len(set(labels))
+    assert 25 <= len(plan) <= 60
+    assert {meta["part"] for *_, meta in plan} == {"A", "B", "C", "D", "E"}
+    for label, objects, inputs, max_ticks, _meta in plan:
+        assert all(o["x"] < calibrate.CLEAR_X for o in objects), label
+        assert sum(o["id"] == calibrate.SPIDER_PORTAL for o in objects) == 1, label
+        ticks = [i["tick"] for i in inputs]
+        assert ticks == sorted(ticks) and all(0 < t < max_ticks for t in ticks), label
+
+
+def test_p22_teleport_sweeps_straddle_the_simulators_edges() -> None:
+    """The leaving and stepped B sweeps hold both of the simulator's answers for where
+    the first press lands. The entering one did too when P22 was written; the game then
+    found the block on every entering run, and the simulator does now (P22 results)."""
+    landed: dict[tuple, set[float]] = {}
+    for _label, objects, inputs, max_ticks, meta in calibrate.p22_plan():
+        if meta["part"] != "B":
+            continue
+        trace = calibrate._sim_run(objects, inputs, max_ticks).trace
+        after = trace["y"][trace["tick"].index(inputs[0]["tick"] + 1)]
+        landed.setdefault((meta.get("side"), meta.get("kind")), set()).add(round(after, 1))
+    assert len(landed) == 3
+    assert landed[("entering", None)] == {196.5}
+    assert len(landed[("leaving", None)]) == len(landed[(None, "stepped")]) == 2, landed
+
+
+def test_p22_high_portals_are_reached() -> None:
+    """D's portals sit where the pad's flight crosses them, so the band is raised."""
+    floors = set()
+    for _label, objects, inputs, max_ticks, meta in calibrate.p22_plan():
+        if meta["part"] == "D":
+            final = calibrate._sim_run(objects, inputs, max_ticks).final
+            assert final.mode == "spider" and final.bounds is not None
+            floors.add(final.bounds[0])
+    assert floors == {30.0, 60.0}
+
+
+def test_p22_runs_end_to_end_against_a_fake_game(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    monkeypatch.setattr(calibrate, "FIXTURES", tmp_path / "fixtures")
+    monkeypatch.setattr(calibrate, "RAW", tmp_path / "raw")
+    game = _FakeGame()
+    out: dict = {}
+    asyncio.run(calibrate.probe_spider_contacts(calibrate.Runner(game), out))
+    assert game.replays == len(calibrate.p22_plan()) == len(out["P22_spider"])
+    assert (tmp_path / "fixtures" / "cal_spider_contacts.json").exists()

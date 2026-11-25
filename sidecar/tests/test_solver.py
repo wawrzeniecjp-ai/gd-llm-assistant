@@ -384,16 +384,38 @@ def test_a_spider_with_nothing_overhead_stops_at_its_band() -> None:
     assert run.final.y == 270 - 13.5 and run.final.gravity == -1 and run.final.grounded
 
 
-def test_a_spider_teleporting_onto_a_spike_is_unverifiable() -> None:
-    """Not measured yet (P22): the teleport's path crossing a hazard stops the run."""
-    hanging = [{"id": 8, "x": 15 + 30 * 13, "y": 195, "properties": {"rotation": 180}}]
-    world = _world(SPIDER_PORTAL + SPIDER_ROOF + hanging)
-    under = next(t for t, x in zip(*(lambda tr: (tr["tick"], tr["x"]))(
-        simulate(world, PARAMS, [], max_ticks=600).trace), strict=True) if x >= 15 + 30 * 13)
-    run = simulate(world, PARAMS, [{"tick": under, "action": "press"},
-                                   {"tick": under + 1, "action": "release"}], max_ticks=600)
-    assert run.outcome == "unverifiable"
-    assert run.death is not None and "hazard" in (run.death.reason or "")
+def _press_when_centre_reaches(world, x: float, max_ticks: int = 600):
+    tick = next(t for t, cx in zip(*(lambda tr: (tr["tick"], tr["x"]))(
+        simulate(world, PARAMS, [], max_ticks=max_ticks).trace), strict=True) if cx >= x)
+    return simulate(world, PARAMS, [{"tick": tick, "action": "press"},
+                                    {"tick": tick + 1, "action": "release"}],
+                    max_ticks=max_ticks)
+
+
+def test_a_spider_teleporting_into_a_spike_stops_there_and_dies() -> None:
+    """P22 C: a spike spanning the centre, before the roof, stops the teleport at the
+    spike's height; one beside the centre is passed."""
+    sx = 15 + 30 * 13
+    midair = [{"id": 8, "x": sx, "y": 105}]
+    world = _world(SPIDER_PORTAL + SPIDER_ROOF + midair)
+    under = _press_when_centre_reaches(world, sx - 1)
+    assert under.outcome == "death" and under.death is not None
+    assert abs(under.death.y - 105) < 1
+    beside = _press_when_centre_reaches(world, sx - 12)
+    assert beside.outcome == "max_ticks" and beside.final.y == 210 - 13.5
+
+
+def test_a_spider_finds_a_block_ahead_of_its_centre_not_behind() -> None:
+    """P22 B: a lone block counts from the centre to 15 ahead, so coming in it is found
+    while the spider's box is still short of it, and going out it is lost while the box
+    still overlaps it."""
+    bx1 = 30 * 14
+    lone = [{"id": 1, "x": bx1 + 15, "y": 225}]
+    world = _world(SPIDER_PORTAL + lone)
+    coming = _press_when_centre_reaches(world, bx1 - 14)      # box 0.5 short of the block
+    assert 196.5 in coming.trace["y"]
+    going = _press_when_centre_reaches(world, bx1 + 30 + 2)   # box still 11.5 over it
+    assert 196.5 not in going.trace["y"] and 256.5 in going.trace["y"]
 
 
 def test_a_spider_pad_under_the_cube_is_unverifiable() -> None:

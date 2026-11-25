@@ -886,7 +886,7 @@
             },
             "teleport_vy": {
                 "value": 1.0,
-                "source": "scripts/calibrate.py P21, 2026-11-24; a press on the ground moves it at once to the surface opposite (the nearest solid overhead, else the band's edge), flips gravity, and leaves vy at this towards the new floor for one sample",
+                "source": "scripts/calibrate.py P21, 2026-11-24; a press on the ground moves it at once to the surface opposite (the nearest solid overhead, else the band's edge), flips gravity, and leaves vy at this towards the new floor for one sample. A hazard whose hitbox spans the centre x, before the surface, stops it instead: it is placed at the hazard's centre y and dies on the next tick (P22 C: y 195, 105 and 15)",
                 "confidence": "measured"
             },
             "pad_impulse": {
@@ -912,6 +912,16 @@
                     "source": "scripts/calibrate.py P21, 2026-11-24; 1x",
                     "confidence": "measured"
                 }
+            },
+            "probe_back": {
+                "value": 0.0,
+                "source": "scripts/calibrate.py P22, 2026-11-25; the teleport looks for a solid face over [x - this, x + probe_ahead] of its centre x, not its own box: leaving a lone block, it was found with the centre 4.7 inside its right edge and missed 3.1 past it; under a stepped roof, a lower roof ending 1.9 behind the centre was ignored. Fits from -4.7 (exclusive) to 1.93; 0 chosen",
+                "confidence": "derived"
+            },
+            "probe_ahead": {
+                "value": 15.0,
+                "source": "scripts/calibrate.py P22, 2026-11-25; entering a lone block it was found with the centre 13.65 before its left edge (every entering run found it). Fits above 13.65; 15 (the cube's half) chosen",
+                "confidence": "derived"
             }
         }
     }

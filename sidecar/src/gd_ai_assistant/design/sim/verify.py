@@ -68,8 +68,7 @@ def verify(world: World, params: CubeParams, args: dict[str, Any]) -> dict[str, 
                     "ball, ufo and wave, mini or not, with blocks, spikes, orbs and pads. "
                     "A mini cube's orbs, a mini cube squeezed under a low block, a flying "
                     "player meeting a block from below deeper than measured, a mini "
-                    "robot's or spider's orbs, a spider teleporting onto a spike, and "
-                    "the swing are not calibrated yet and stop it.",
+                    "robot's orbs, and the swing are not calibrated yet and stop it.",
         }
 
     idle = simulate(world, params, [], max_ticks=10**6, until_x=x1, start=cube,
