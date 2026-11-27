@@ -1,0 +1,48 @@
+{
+ "schema": 1,
+ "id": "wave.spike-corridor.0.5x",
+ "name": "Wave spike corridor",
+ "tags": [
+  "wave",
+  "spike",
+  "corridor"
+ ],
+ "mode": "wave",
+ "speed": "0.5x",
+ "gravity": 1,
+ "mini": false,
+ "difficulty": 1,
+ "grid": "@grid col=0 row=0 w=15 h=10\n...vvvvvvvvv...\n...............\n...............\n...............\n...............\n...............\n...............\n...............\n...............\n...^^^^^^^^^...",
+ "legend": {},
+ "floor": "#",
+ "entry": {
+  "row": 0,
+  "grounded": true,
+  "vy": 0
+ },
+ "exit": {
+  "mode": "wave",
+  "gravity": 1,
+  "grounded": true,
+  "row": 0
+ },
+ "verified": {
+  "result": "possible",
+  "constants_version": "8cea56fb5afa",
+  "min_window_ms": 204.2,
+  "inputs": 1,
+  "holds": 1,
+  "exit": {
+   "mode": "wave",
+   "gravity": 1,
+   "grounded": true,
+   "y": 10.0
+  },
+  "in_band": true
+ },
+ "source": {
+  "kind": "seed",
+  "author": "gd-ai-assistant",
+  "license": "MIT"
+ }
+}

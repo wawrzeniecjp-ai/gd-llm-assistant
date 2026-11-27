@@ -1,0 +1,49 @@
+{
+ "schema": 1,
+ "id": "spider.switch-sides.4x",
+ "name": "Spider switching sides",
+ "tags": [
+  "spider",
+  "spike",
+  "teleport",
+  "roof"
+ ],
+ "mode": "spider",
+ "speed": "4x",
+ "gravity": 1,
+ "mini": false,
+ "difficulty": 1,
+ "grid": "@grid col=0 row=0 w=41 h=7\n######################...................\n..................vvvvv..................\n.........................................\n.........................................\n.........................................\n.........................................\n.......^^^^^.............................",
+ "legend": {},
+ "floor": "#",
+ "entry": {
+  "row": 0,
+  "grounded": true,
+  "vy": 0
+ },
+ "exit": {
+  "mode": "spider",
+  "gravity": -1,
+  "grounded": true,
+  "row": 8
+ },
+ "verified": {
+  "result": "possible",
+  "constants_version": "8cea56fb5afa",
+  "min_window_ms": 116.7,
+  "inputs": 1,
+  "holds": 0,
+  "exit": {
+   "mode": "spider",
+   "gravity": -1,
+   "grounded": true,
+   "y": 256.5
+  },
+  "in_band": true
+ },
+ "source": {
+  "kind": "seed",
+  "author": "gd-ai-assistant",
+  "license": "MIT"
+ }
+}

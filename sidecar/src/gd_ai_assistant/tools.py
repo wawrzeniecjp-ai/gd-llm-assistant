@@ -795,7 +795,8 @@ def _build() -> dict[str, Tool]:
 #: them itself; `place_grid` then sends ordinary `delete_objects`/`create_objects`.
 DESIGN_TOOLS = frozenset(
     {"render_grid", "place_grid", "render_schematic", "verify_section", "simulate_inputs",
-     "playtest_verify", "get_level_plan", "update_level_plan", "beat_grid"}
+     "playtest_verify", "get_level_plan", "update_level_plan", "beat_grid",
+     "search_patterns", "place_pattern", "extract_pattern"}
 )
 
 
@@ -905,6 +906,12 @@ def _design_tools() -> list[Tool]:
                                           "enum": ["0.5x", "1x", "2x", "3x", "4x"],
                                           "default": "1x"},
                                 "entry_row": {"type": "integer", "minimum": 0, "default": 0},
+                                "gravity": {"type": "integer", "enum": [1, -1],
+                                            "default": 1},
+                                "mini": {"type": "boolean", "default": False},
+                                "band_floor": {"type": "number",
+                                               "description": "Units; for a mode with a "
+                                               "band. Default 0, the ground."},
                             },
                             "additionalProperties": False,
                         },
@@ -1169,6 +1176,114 @@ def _design_tools() -> list[Tool]:
             requires=("get_level_objects",),
         ),
         *_plan_tools(),
+        *_pattern_tools(),
+    ]
+
+
+def _pattern_tools() -> list[Tool]:
+    """The pattern library (LEVEL-DESIGN-SPEC.md 10.4)."""
+    speeds = ["0.5x", "1x", "2x", "3x", "4x"]
+    return [
+        Tool(
+            spec=ToolSpec(
+                name="search_patterns",
+                description=(
+                    "Search the library of verified gameplay patterns: short pieces "
+                    "(a triple spike, a stair, a ship corridor, a portal in and out) each "
+                    "checked by the simulator from its entry state. Filter by mode, speed, "
+                    "difficulty and tags, or search words in the name and tags. Each "
+                    "result has its size, difficulty (1-10, from its tightest window), "
+                    "the entry and exit state (mode, row, grounded) to chain them, and "
+                    "its GridText. Place one with place_pattern."
+                ),
+                parameters={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "query": {"type": "string",
+                                  "description": "Words to match: 'spike stair'."},
+                        "mode": {"type": "string",
+                                 "description": "cube, ship, ball, ufo, wave, robot, "
+                                 "spider or swing (matches the entry or exit mode)."},
+                        "speed": {"type": "string", "enum": speeds},
+                        "difficulty": {"type": "array", "items": {"type": "integer"},
+                                       "minItems": 2, "maxItems": 2,
+                                       "description": "[min, max], 1-10."},
+                        "tags": {"type": "array", "items": {"type": "string"},
+                                 "description": "All must match: ['orb', 'pit']."},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 20,
+                                  "default": 8},
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="place_pattern",
+                description=(
+                    "Place a library pattern with its bottom-left cell at (col, row). It "
+                    "goes through place_grid in mode 'add' (cells already holding gameplay "
+                    "are refused) and is verified with the pattern's entry state, the 10 "
+                    "columns either side included: `verification` is in the result. "
+                    "`variant`: as_is (default); flip_gravity (upside down, for cube and "
+                    "robot patterns); rescale_speed:<speed> (re-spaced for another speed "
+                    "and re-verified; if it does not play there, nothing is placed). "
+                    "Chain patterns by matching one's exit to the next one's entry. "
+                    "`preview` reports without placing."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["id", "col"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "id": {"type": "string"},
+                        "col": {"type": "integer", "minimum": 0},
+                        "row": {"type": "integer", "minimum": 0, "default": 0},
+                        "variant": {"type": "string", "default": "as_is",
+                                    "description": "as_is, flip_gravity, or "
+                                    "rescale_speed:<speed> such as rescale_speed:2x."},
+                        "preview": {"type": "boolean", "default": False},
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=True,
+            is_action=True,
+            requires=("get_level_objects", "create_objects"),
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="extract_pattern",
+                description=(
+                    "Save a stretch of the user's own level as a pattern in their library, "
+                    "for reuse with place_pattern. It must be shown exactly by GridText "
+                    "(no `?` objects), and it must play alone from the state the level "
+                    "enters it in (worked out by verifying the level up to it). Only from "
+                    "the user's own levels, and only when they ask. Changes nothing in "
+                    "the level."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["x_range", "name"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "x_range": {**_RANGE, "description": "Level units, [start, end]."},
+                        "y_range": {**_RANGE, "description": "Level units. Default: "
+                                    "from the ground up to above the highest object."},
+                        "name": {"type": "string", "maxLength": 60},
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                        "difficulty": {"type": "integer", "minimum": 1, "maximum": 10},
+                    },
+                },
+            ),
+            protocol_type=None,
+            mutates_objects=False,
+            is_action=False,
+            requires=("get_level_objects",),
+        ),
     ]
 
 

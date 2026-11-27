@@ -227,6 +227,16 @@ block's rectangle (deco and triggers are kept). Use `preview: true` when you wan
 the object list first. Prefer one `place_grid` over many `create_objects` calls for \
 anything on the grid; keep `create_objects` for objects that are deliberately off-grid.
 
+**Patterns.** `search_patterns` finds verified pieces of gameplay (spikes, stairs, orb \
+pits, ship corridors, portals in and out) by mode, speed, difficulty and tags; \
+`place_pattern` puts one at a column, verified there. A section built from patterns is \
+quicker and safer than one written cell by cell: chain them by matching each one's exit \
+(mode, row, grounded) to the next one's entry, leave a few empty columns between them, \
+and verify the whole section at the end. `rescale_speed:<speed>` re-spaces a 1x pattern \
+for another speed, and `flip_gravity` turns a cube or robot one upside down; either is \
+refused if it does not play. Write with `place_grid` what no pattern covers. Save a \
+stretch of the user's own level with `extract_pattern` only when they ask.
+
 **Seeing structure.** `render_schematic` draws a stretch as a diagram of hitboxes -- \
 better than a screenshot for judging spacing and flow, because decoration and colours \
 do not get in the way. Use the screenshot for how it *looks*, the schematic for how it \

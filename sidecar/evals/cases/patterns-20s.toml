@@ -1,0 +1,22 @@
+id = "patterns-20s"
+description = "M6: a 20-second cube section built from library patterns, chained and verified."
+fixture = "empty"
+prompt = """
+Build a 20-second 1x cube section starting at column 10. Use patterns from the pattern
+library where they fit: a mix of spikes, steps and at least one orb or pad, with room
+between them. Normal difficulty, and check the whole section can be played.
+"""
+# 20 s at 1x is about 208 columns (6230 units), from column 10.
+section = [0, 6600]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+"tools_used.search_patterns" = { min = 1 }
+"tools_used.place_pattern" = { min = 5 }
+"created_roles.hazard" = { min = 8 }
+frame_perfect = 0

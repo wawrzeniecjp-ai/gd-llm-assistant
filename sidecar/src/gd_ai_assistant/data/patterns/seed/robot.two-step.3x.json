@@ -1,0 +1,48 @@
+{
+ "schema": 1,
+ "id": "robot.two-step.3x",
+ "name": "Robot up a two-block step",
+ "tags": [
+  "robot",
+  "block",
+  "hold"
+ ],
+ "mode": "robot",
+ "speed": "3x",
+ "gravity": 1,
+ "mini": false,
+ "difficulty": 1,
+ "grid": "@grid col=0 row=0 w=24 h=5\n........................\n........................\n........................\n.........##########.....\n.........##########.....",
+ "legend": {},
+ "floor": "#",
+ "entry": {
+  "row": 0,
+  "grounded": true,
+  "vy": 0
+ },
+ "exit": {
+  "mode": "robot",
+  "gravity": 1,
+  "grounded": true,
+  "row": 0
+ },
+ "verified": {
+  "result": "possible",
+  "constants_version": "8cea56fb5afa",
+  "min_window_ms": 204.2,
+  "inputs": 1,
+  "holds": 1,
+  "exit": {
+   "mode": "robot",
+   "gravity": 1,
+   "grounded": true,
+   "y": 15.0
+  },
+  "in_band": true
+ },
+ "source": {
+  "kind": "seed",
+  "author": "gd-ai-assistant",
+  "license": "MIT"
+ }
+}

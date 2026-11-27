@@ -1,0 +1,48 @@
+{
+ "schema": 1,
+ "id": "spider.floor-spikes.3x",
+ "name": "Spider over floor spikes",
+ "tags": [
+  "spider",
+  "spike",
+  "teleport",
+  "roof"
+ ],
+ "mode": "spider",
+ "speed": "3x",
+ "gravity": 1,
+ "mini": false,
+ "difficulty": 1,
+ "grid": "@grid col=0 row=0 w=27 h=7\n##################.........\n...........................\n...........................\n...........................\n...........................\n...........................\n.........^^^^^^............",
+ "legend": {},
+ "floor": "#",
+ "entry": {
+  "row": 0,
+  "grounded": true,
+  "vy": 0
+ },
+ "exit": {
+  "mode": "spider",
+  "gravity": -1,
+  "grounded": false
+ },
+ "verified": {
+  "result": "possible",
+  "constants_version": "8cea56fb5afa",
+  "min_window_ms": 104.2,
+  "inputs": 1,
+  "holds": 0,
+  "exit": {
+   "mode": "spider",
+   "gravity": -1,
+   "grounded": true,
+   "y": 256.5
+  },
+  "in_band": true
+ },
+ "source": {
+  "kind": "seed",
+  "author": "gd-ai-assistant",
+  "license": "MIT"
+ }
+}

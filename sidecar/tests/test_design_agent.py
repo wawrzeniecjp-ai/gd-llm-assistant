@@ -95,8 +95,8 @@ async def test_without_a_shared_set_the_hiding_lasts_one_turn() -> None:
 def test_tool_specs_filters_on_required_requests() -> None:
     every = {spec.name for spec in tools.tool_specs()}
     without = {spec.name for spec in tools.tool_specs({"create_objects"})}
-    # place_grid builds through create_objects, so it is hidden with it.
-    assert every - without == {"create_objects", "place_grid"}
+    # place_grid and place_pattern build through create_objects, so they are hidden with it.
+    assert every - without == {"create_objects", "place_grid", "place_pattern"}
     # Local tools with no requirements are never hidden.
     assert "search_object_catalog" in without
 

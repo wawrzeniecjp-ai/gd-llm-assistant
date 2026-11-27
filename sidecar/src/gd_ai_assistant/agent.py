@@ -32,7 +32,7 @@ from typing import Any, Protocol
 from . import capture, properties_table, save_properties, tools
 from . import catalog as catalog_module
 from .agent_prompt import system_prompt
-from .design import grid_tools
+from .design import grid_tools, pattern_tools
 from .design import music as music_module
 from .design import plan as plan_module
 from .design import render as render_module
@@ -738,6 +738,10 @@ class ToolLoop:
         mod needs nothing new and the result is one undo step with the rest of the turn.
         """
         args = call.arguments if isinstance(call.arguments, dict) else {}
+        if tool.spec.name == "search_patterns":
+            # The library alone: no level read.
+            result = pattern_tools.search_patterns(args)
+            return result, "error" in result
         try:
             grid = Grid.from_constants()
             model = await self._snapshot.get()
@@ -752,6 +756,21 @@ class ToolLoop:
             return {"error": f"could not read the level: {exc}"}, True
 
         name = tool.spec.name
+        pattern_info = None
+        if name == "place_pattern":
+            # A pattern becomes place_grid's arguments, verify filled in from its entry
+            # state, and is placed and verified exactly as a grid the model wrote.
+            prepared = pattern_tools.prepare_place(args)
+            if "error" in prepared:
+                return prepared, True
+            pattern_info = prepared.pop("_pattern")
+            args, name = prepared, "place_grid"
+        if name == "extract_pattern":
+            settings = await self._level_settings()
+            result = pattern_tools.extract_pattern(
+                model, grid, self._snapshot.roles, args,
+                start_speed=settings.get("start_speed", "1x"))
+            return result, "error" in result
         if name == "render_grid":
             result = grid_tools.render_grid(model, grid, args)
             return result, "error" in result
@@ -807,6 +826,8 @@ class ToolLoop:
 
         plan = grid_tools.plan_place_grid(model, grid, self._snapshot.roles, args)
         if isinstance(plan, dict):
+            if pattern_info is not None:
+                plan["pattern"] = pattern_info
             return plan, True
         verification = None
         if plan.verify is not None:
@@ -818,6 +839,8 @@ class ToolLoop:
                  if args.get("snap_to_beats") else None)
         if plan.preview:
             preview = plan.preview_result()
+            if pattern_info is not None:
+                preview["pattern"] = pattern_info
             if verification is not None:
                 preview["verification"] = verification
             if beats is not None:
@@ -873,6 +896,8 @@ class ToolLoop:
 
         result: dict[str, Any] = {"created": len(created), "deleted": deleted,
                                   "created_uids": created}
+        if pattern_info is not None:
+            result["pattern"] = pattern_info
         if verification is not None:
             result["verification"] = verification
         if beats is not None:

@@ -108,3 +108,27 @@ Notes:
   35 rounds of building and re-checking.
 - `explain-green-orb`: it said the green orb cannot be checked, did not guess, and
   changed nothing.
+
+# M6 baseline: patterns (openai_compatible deepseek-flash)
+
+2026-11-27, run `m6-baseline`, three seeds, 695k tokens. The recording in `recordings/` is
+seed 1, and replays to the same result.
+
+| seed | hard | soft failed | rounds | tokens | time |
+|---|---|---|---|---|---|
+| 1 | pass | - | 10 | 276k | 63 s |
+| 2 | pass | - | 8 | 193k | 38 s |
+| 3 | pass | - | 9 | 225k | 45 s |
+
+Hard assertions: 3 of 3 seeds (M6's bar). Soft: none failed.
+
+Notes:
+
+- Every seed searched the library (2-5 times), placed 7-15 patterns, and verified the
+  whole 20-second section once at the end, which passed first time. None wrote GridText
+  by hand or fixed anything afterwards: far cheaper than the hand-built sections of M3-M5
+  (one of 35 rounds and 2.4M tokens).
+- Tightest windows 45.8, 45.8 and 75 ms; nothing frame-perfect.
+- The sections are sparse: 26-38 objects over about 208 columns, 0.33-0.52 inputs a
+  second. That is inside the normal band (0.3-2.0), and the prompt asked for room
+  between patterns, but a denser case would be worth adding.

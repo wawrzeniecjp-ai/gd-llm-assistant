@@ -1,0 +1,48 @@
+{
+ "schema": 1,
+ "id": "ball.floor-run.2x",
+ "name": "Ball over a spike run",
+ "tags": [
+  "ball",
+  "spike",
+  "flip"
+ ],
+ "mode": "ball",
+ "speed": "2x",
+ "gravity": 1,
+ "mini": false,
+ "difficulty": 1,
+ "grid": "@grid col=0 row=0 w=22 h=8\n......................\n......................\n......................\n......................\n......................\n......................\n......................\n.....^^^^^^^..........",
+ "legend": {},
+ "floor": "#",
+ "entry": {
+  "row": 0,
+  "grounded": true,
+  "vy": 0
+ },
+ "exit": {
+  "mode": "ball",
+  "gravity": -1,
+  "grounded": true,
+  "row": 7
+ },
+ "verified": {
+  "result": "possible",
+  "constants_version": "8cea56fb5afa",
+  "min_window_ms": 112.5,
+  "inputs": 1,
+  "holds": 0,
+  "exit": {
+   "mode": "ball",
+   "gravity": -1,
+   "grounded": true,
+   "y": 225.0
+  },
+  "in_band": true
+ },
+ "source": {
+  "kind": "seed",
+  "author": "gd-ai-assistant",
+  "license": "MIT"
+ }
+}

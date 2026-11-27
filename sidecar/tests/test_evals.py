@@ -154,3 +154,14 @@ def test_sim3_recordings_replay_with_their_baseline_results(tmp_path) -> None:
     assert spider["portals_created"]["spider"] == 1
     green = runs["explain-green-orb"]["metrics"]
     assert green["edited"] is False and green["says_unverified"] is True
+
+
+def test_m6_recording_replays_with_its_baseline_result(tmp_path) -> None:
+    """The M6 run (deepseek-flash, 2026-11-27, seed 1): a 20-second section built from
+    library patterns and verified whole."""
+    runner.main(["--replay", str(runner.ROOT / "recordings"),
+                 "--cases", "patterns-20s", "--out", str(tmp_path)])
+    report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    metrics = report["runs"][0]["metrics"]
+    assert metrics["playable"] == "possible" and metrics["verified_after_last_edit"]
+    assert metrics["tools_used"]["place_pattern"] >= 5

@@ -1,0 +1,49 @@
+{
+ "schema": 1,
+ "id": "ufo.gap.0.5x",
+ "name": "UFO through a gap",
+ "tags": [
+  "ufo",
+  "block",
+  "gap",
+  "taps"
+ ],
+ "mode": "ufo",
+ "speed": "0.5x",
+ "gravity": 1,
+ "mini": false,
+ "difficulty": 1,
+ "grid": "@grid col=0 row=0 w=15 h=10\n......#........\n......#........\n......#........\n......#........\n...............\n...............\n...............\n......#........\n......#........\n......#........",
+ "legend": {},
+ "floor": "#",
+ "entry": {
+  "row": 0,
+  "grounded": true,
+  "vy": 0
+ },
+ "exit": {
+  "mode": "ufo",
+  "gravity": 1,
+  "grounded": true,
+  "row": 0
+ },
+ "verified": {
+  "result": "possible",
+  "constants_version": "8cea56fb5afa",
+  "min_window_ms": 170.8,
+  "inputs": 2,
+  "holds": 0,
+  "exit": {
+   "mode": "ufo",
+   "gravity": 1,
+   "grounded": true,
+   "y": 15.0
+  },
+  "in_band": true
+ },
+ "source": {
+  "kind": "seed",
+  "author": "gd-ai-assistant",
+  "license": "MIT"
+ }
+}

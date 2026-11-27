@@ -292,9 +292,15 @@ PRESS_HORIZON_TICKS = 160
 
 
 def _search_key(cube: Cube) -> tuple:
-    """What the search deduplicates on: the cube's key, coarser while flying."""
+    """What the search deduplicates on: the cube's key, coarser while flying.
+
+    Not for the swing: from a standstill it gathers speed at 0.086 a tick, so for several
+    ticks after a flip it shares a coarse cell with a swing that flipped a tick or two
+    later. The tie keeps the first seen, which was the later flip, so the rising branch
+    was dropped every tick and a swing on the floor never got up (seed pattern
+    swing.floor-spikes, 2026-11-27)."""
     key = cube.key()
-    if cube.mode in AIR_MODES:
+    if cube.mode in AIR_MODES and cube.mode != "swing":
         key = (round(cube.y / FLIGHT_Y_STEP), round(cube.vy / FLIGHT_VY_STEP), *key[2:])
     return key
 

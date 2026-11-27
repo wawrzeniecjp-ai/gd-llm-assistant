@@ -1,0 +1,49 @@
+{
+ "schema": 1,
+ "id": "cube.yellow-orb-pit.2x",
+ "name": "Yellow orb over a pit",
+ "tags": [
+  "cube",
+  "orb",
+  "pit",
+  "two-input"
+ ],
+ "mode": "cube",
+ "speed": "2x",
+ "gravity": 1,
+ "mini": false,
+ "difficulty": 1,
+ "grid": "@grid col=0 row=0 w=25 h=5\n.........................\n.........................\n..........o..............\n.........................\n.........^^^^^^..........",
+ "legend": {},
+ "floor": "#",
+ "entry": {
+  "row": 0,
+  "grounded": true,
+  "vy": 0
+ },
+ "exit": {
+  "mode": "cube",
+  "gravity": 1,
+  "grounded": true,
+  "row": 0
+ },
+ "verified": {
+  "result": "possible",
+  "constants_version": "8cea56fb5afa",
+  "min_window_ms": 108.3,
+  "inputs": 2,
+  "holds": 0,
+  "exit": {
+   "mode": "cube",
+   "gravity": 1,
+   "grounded": true,
+   "y": 15.0
+  },
+  "in_band": true
+ },
+ "source": {
+  "kind": "seed",
+  "author": "gd-ai-assistant",
+  "license": "MIT"
+ }
+}

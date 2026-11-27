@@ -181,7 +181,8 @@ def verify_placement(model: LevelModel, creates: list[dict[str, Any]], deletes: 
         "x_range": [x0, x1],
         "start_from": "explicit",
         "start": {"mode": spec.get("gamemode", "cube"), "speed": spec.get("speed", "1x"),
-                  "row": int(spec.get("entry_row", 0))},
+                  "row": int(spec.get("entry_row", 0)),
+                  **{k: spec[k] for k in ("gravity", "mini", "band_floor") if k in spec}},
     }
     result = verify(world, params, args)
     result["note"] = ("Planned objects have negative uids in this result. The start is "

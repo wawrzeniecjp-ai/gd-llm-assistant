@@ -1,0 +1,48 @@
+{
+ "schema": 1,
+ "id": "swing.corridor.1x",
+ "name": "Swing spike corridor",
+ "tags": [
+  "swing",
+  "spike",
+  "corridor"
+ ],
+ "mode": "swing",
+ "speed": "1x",
+ "gravity": 1,
+ "mini": false,
+ "difficulty": 4,
+ "grid": "@grid col=0 row=0 w=18 h=10\n....vvvvvvvvv.....\n..................\n..................\n..................\n..................\n..................\n..................\n..................\n..................\n....^^^^^^^^^.....",
+ "legend": {},
+ "floor": "#",
+ "entry": {
+  "row": 0,
+  "grounded": true,
+  "vy": 0
+ },
+ "exit": {
+  "mode": "swing",
+  "gravity": 1,
+  "grounded": true,
+  "row": 0
+ },
+ "verified": {
+  "result": "possible",
+  "constants_version": "8cea56fb5afa",
+  "min_window_ms": 33.3,
+  "inputs": 2,
+  "holds": 0,
+  "exit": {
+   "mode": "swing",
+   "gravity": 1,
+   "grounded": true,
+   "y": 15.0
+  },
+  "in_band": true
+ },
+ "source": {
+  "kind": "seed",
+  "author": "gd-ai-assistant",
+  "license": "MIT"
+ }
+}

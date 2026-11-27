@@ -1,0 +1,48 @@
+{
+ "schema": 1,
+ "id": "ship.spike-corridor.3x",
+ "name": "Ship spike corridor",
+ "tags": [
+  "ship",
+  "spike",
+  "corridor"
+ ],
+ "mode": "ship",
+ "speed": "3x",
+ "gravity": 1,
+ "mini": false,
+ "difficulty": 1,
+ "grid": "@grid col=0 row=0 w=27 h=10\n......vvvvvvvvv............\n...........................\n...........................\n...........................\n...........................\n...........................\n...........................\n...........................\n...........................\n......^^^^^^^^^............",
+ "legend": {},
+ "floor": "#",
+ "entry": {
+  "row": 3,
+  "grounded": false,
+  "vy": 0
+ },
+ "exit": {
+  "mode": "ship",
+  "gravity": 1,
+  "grounded": true,
+  "row": 0
+ },
+ "verified": {
+  "result": "possible",
+  "constants_version": "8cea56fb5afa",
+  "min_window_ms": 133.3,
+  "inputs": 1,
+  "holds": 1,
+  "exit": {
+   "mode": "ship",
+   "gravity": 1,
+   "grounded": true,
+   "y": 15.0
+  },
+  "in_band": true
+ },
+ "source": {
+  "kind": "seed",
+  "author": "gd-ai-assistant",
+  "license": "MIT"
+ }
+}

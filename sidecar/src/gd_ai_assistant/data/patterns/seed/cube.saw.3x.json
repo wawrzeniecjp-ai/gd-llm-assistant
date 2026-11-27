@@ -1,0 +1,49 @@
+{
+ "schema": 1,
+ "id": "cube.saw.3x",
+ "name": "Saw blade on the floor",
+ "tags": [
+  "cube",
+  "saw",
+  "hazard",
+  "single-input"
+ ],
+ "mode": "cube",
+ "speed": "3x",
+ "gravity": 1,
+ "mini": false,
+ "difficulty": 1,
+ "grid": "@grid col=0 row=0 w=21 h=4\n.....................\n.....................\n.....................\n.........*...........",
+ "legend": {},
+ "floor": "#",
+ "entry": {
+  "row": 0,
+  "grounded": true,
+  "vy": 0
+ },
+ "exit": {
+  "mode": "cube",
+  "gravity": 1,
+  "grounded": true,
+  "row": 0
+ },
+ "verified": {
+  "result": "possible",
+  "constants_version": "8cea56fb5afa",
+  "min_window_ms": 112.5,
+  "inputs": 1,
+  "holds": 0,
+  "exit": {
+   "mode": "cube",
+   "gravity": 1,
+   "grounded": true,
+   "y": 15.0
+  },
+  "in_band": true
+ },
+ "source": {
+  "kind": "seed",
+  "author": "gd-ai-assistant",
+  "license": "MIT"
+ }
+}

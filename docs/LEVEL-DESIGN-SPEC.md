@@ -1842,6 +1842,82 @@ At least 60 seed patterns: 25 cube, 10 ship, 8 ball, 6 ufo, 6 wave, 5 transition
 in/out). Each speed-specific pattern is authored at 1×. The other speeds are generated
 through `rescale_speed` and committed only if they verify.
 
+## 10.6 As built (M6, 2026-11-27)
+
+`design/patterns.py` (the model, library, verification and variants),
+`design/pattern_tools.py` (the three tools), and `scripts/build_seed_patterns.py` (the
+seed library, authored as GridText).
+
+**Verifying a pattern alone.** The pattern is placed after 6 empty columns of run-up, and
+`verify_section` plays it from its entry state with an explicit start, 3 columns past its
+end. `possible` also requires the exit to match what the pattern declares: mode, gravity,
+and the row when grounded. So a variant that plays but leaves in another state is refused.
+
+**Variants.**
+- **`rescale_speed` keeps obstacles their size.** Each run of identical cells keeps its
+  length, and only where runs start is scaled by the ratio of units per second. The
+  literal rule ("scales columns, rounds to whole cells") would shrink a triple spike to
+  two at 0.5x and merge block runs. A variant whose features would meet is refused.
+- **`flip_gravity` is for the cube and robot only.** A flight mode's band is not
+  mirrored by flipping the pattern. Pads and the small spike (`_ ~ ! ,`) have no
+  upside-down character, so patterns with them cannot be flipped. A pattern with a
+  floor gets a ceiling row of it on top. It is verified 10 rows up: its jumps go down,
+  and the level's ground would catch them.
+
+**The seed library.** 66 patterns at 1x:
+- 25 cube, 10 ship, 8 ball, 6 ufo, 6 wave and 5 transitions, as in 10.5;
+- 2 each for the robot, spider and swing, which postdate the target.
+
+With the other speeds that verify, there are 315 files. Building them:
+- **Difficulty is measured:** the easiest band (§14.3) whose floor the pattern's
+  tightest window meets. Most come out 1-2. The stairs, saw and zigzags reach 4-7.
+- **The exit is the state the pattern actually leaves.**
+- **Frame-perfect patterns are refused at every speed** (a window of one tick).
+- **15 speed variants were refused:** 7 at 0.5x, where jumps are short (the triple
+  spike, gap and pad pits cannot be cleared, or features meet); others because their
+  exit changed (the ship corridor at 2x, the ball yellow pad at 2x-4x); and 3 as
+  frame-perfect.
+
+**Re-verification (10.3), in two layers in `tests/test_patterns.py`:**
+- every run checks that each seed was verified with the current constants file (a
+  hash of it, `constants_version`). A constants change fails the suite until the
+  build script has re-verified the library (about 7 minutes);
+- every run re-verifies one pattern per mode. All 315 re-verify with
+  `GD_FULL_PATTERNS=1`.
+
+**The tools.**
+- **`search_patterns`** ranks query words in tags first, then whole words of the id
+  and name, then parts of words ("triple" must not rank the triplet rhythm above the
+  triple spike). It filters by mode (entry or exit), speed, difficulty and tags.
+- **`place_pattern`** becomes `place_grid` arguments, in mode `add`, with `verify`
+  filled in from the pattern's entry (mode, speed, row, gravity, mini, band floor). So
+  it is placed, capped, undone and verified exactly as a grid the model wrote.
+  `place_grid`'s `verify` accepts `gravity`, `mini` and `band_floor` for this.
+- **`extract_pattern`** reads the region with `render_grid` and refuses extras or
+  overlaps. It takes the entry state from verifying the level up to the region, and
+  saves to `<data_dir>/patterns/` only if the region plays alone from there.
+
+**A solver fix found by the library.** `swing.floor-spikes` would not verify from the
+floor. From a standstill the swing gathers speed slowly (0.086 a tick), so for several
+ticks after a flip it shared a coarse search cell with swings that flipped a tick or two
+later. The tie kept the later flip, so the rising branch was dropped every tick. The
+swing now uses the cube's fine search key.
+
+**The eval, `patterns-20s`.** A 20-second 1x cube section (about 208 columns) from
+patterns, with a mix of spikes, steps and an orb or pad. The hard checks are the usual
+build ones. Soft: at least one search, five placements and eight hazards, and nothing
+frame-perfect.
+
+**Baseline (2026-11-27, `evals/BASELINE.md`):** 3 of 3 seeds pass every hard and soft
+assertion with deepseek-flash, in 695k tokens.
+- Each seed searched the library, placed 7-15 patterns and verified the whole section
+  once, which passed first time.
+- The sections are sparse (0.33-0.52 inputs a second): in the normal band, but a denser
+  case would be worth adding.
+
+**M6 is done:** every seed pattern verifies at each committed speed, and the eval passes
+its hard checks in 3/3 seeds.
+
 ---
 
 # 11. Style profiles and decoration
