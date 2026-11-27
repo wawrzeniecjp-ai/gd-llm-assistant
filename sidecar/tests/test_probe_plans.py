@@ -236,3 +236,32 @@ def test_p22_runs_end_to_end_against_a_fake_game(tmp_path, monkeypatch) -> None:
     asyncio.run(calibrate.probe_spider_contacts(calibrate.Runner(game), out))
     assert game.replays == len(calibrate.p22_plan()) == len(out["P22_spider"])
     assert (tmp_path / "fixtures" / "cal_spider_contacts.json").exists()
+
+
+def test_p23_swing_plan_is_sound() -> None:
+    plan = calibrate.p23_plan()
+    labels = [label for label, *_ in plan]
+    assert len(labels) == len(set(labels))
+    assert 20 <= len(plan) <= 60
+    assert {meta["part"] for *_, meta in plan} == {"A", "B", "C", "D"}
+    for label, objects, inputs, max_ticks, meta in plan:
+        assert all(o["x"] < calibrate.CLEAR_X for o in objects), label
+        assert sum(o["id"] == calibrate.SWING_PORTAL for o in objects) == 1, label
+        assert not any(o["id"] in (calibrate.ROBOT_PORTAL, calibrate.SPIDER_PORTAL)
+                       for o in objects), label
+        ticks = [i["tick"] for i in inputs]
+        assert ticks == sorted(ticks) and all(0 < t < max_ticks for t in ticks), label
+        if "touch" in meta and "press_tick" in meta:
+            assert meta["touch"][0] <= meta["press_tick"] <= meta["touch"][1], label
+
+
+def test_p23_runs_end_to_end_against_a_fake_game(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    monkeypatch.setattr(calibrate, "FIXTURES", tmp_path / "fixtures")
+    monkeypatch.setattr(calibrate, "RAW", tmp_path / "raw")
+    game = _FakeGame()
+    out: dict = {}
+    asyncio.run(calibrate.probe_swing(calibrate.Runner(game), out))
+    assert game.replays == len(calibrate.p23_plan()) == len(out["P23_swing"])
+    assert (tmp_path / "fixtures" / "cal_swing.json").exists()

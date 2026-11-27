@@ -32,6 +32,7 @@ cancels a run). Run from `sidecar/`, with `start-sidecar.bat` closed:
     uv run python scripts/calibrate.py P20          # robot contacts (~7 min)
     uv run python scripts/calibrate.py P21          # the spider (~3 min)
     uv run python scripts/calibrate.py P22          # spider contacts (~3 min)
+    uv run python scripts/calibrate.py P23          # the swing (~3 min)
 """
 
 from __future__ import annotations
@@ -1637,6 +1638,111 @@ async def probe_spider_contacts(r: Runner, out: dict) -> None:
             save_raw("P22", raw)
 
 
+# P23 (M5, Sim-3): the swing, the last Sim-3 mode, explored as P15 explored the flight
+# modes: its band is read off the traces, so there is no roof. A: presses: none, one,
+# rhythms, a long hold, two presses close together. B: mini, upside down from a gravity
+# portal, each speed, a high portal. C: pads and orbs. D: spikes and blocks met while
+# it rests on the floor, and a block above it.
+
+SWING_PORTAL = 1933
+P23_COL = 14                                    # pads, orbs, spikes and blocks
+
+
+def _p23_base(speed: str = "1x", mini: bool = False, flipped: bool = False,
+              high: bool = False) -> list[dict[str, Any]]:
+    """As `_p19_base`, with the swing portal."""
+    return [o if o["id"] != ROBOT_PORTAL else {**o, "id": SWING_PORTAL}
+            for o in _p19_base(speed=speed, mini=mini, flipped=flipped, high=high)]
+
+
+def _swing_free(objects: list[dict]) -> list[dict]:
+    """The layout without its swing portal, for aiming with the cube."""
+    return [o for o in objects if o["id"] != SWING_PORTAL]
+
+
+def _taps(first: int, every: int, count: int) -> list[dict[str, Any]]:
+    return [i for k in range(count) for i in press(first + every * k)]
+
+
+def p23_plan() -> list[tuple[str, list[dict], list[dict], int, dict]]:
+    """Every P23 run as (label, objects, inputs, max_ticks, meta); no game needed."""
+    runs: list[tuple[str, list[dict], list[dict], int, dict]] = []
+    base = _p23_base()
+    start = P15_START
+    # A: presses.
+    runs.append(("A idle", base, [], 700, {"part": "A", "kind": "idle"}))
+    runs.append(("A one press", base, press(start), 800, {"part": "A", "kind": "one"}))
+    for every in (20, 40, 80):
+        runs.append((f"A taps every {every}", base, _taps(start, every, 8), 900,
+                     {"part": "A", "kind": "rhythm", "every": every}))
+    runs.append(("A hold 300", base, press(start, hold=300), 900,
+                 {"part": "A", "kind": "hold", "hold": 300}))
+    for gap in (2, 6):
+        runs.append((f"A press again at +{gap}", base, [*press(start), *press(start + gap)],
+                     800, {"part": "A", "kind": "repress", "gap": gap}))
+    # B: variants, with a rhythm of taps.
+    rhythm = _taps(start, 40, 8)
+    for label, kwargs in (("mini", {"mini": True}), ("flipped", {"flipped": True}),
+                          *[(f"speed {sp}", {"speed": sp}) for sp in ("0.5x", "2x", "3x",
+                                                                       "4x")]):
+        objects = _p23_base(**kwargs)
+        runs.append((f"B {label} taps every 40", objects, rhythm, 900,
+                     {"part": "B", "setup": label, **kwargs}))
+    for label, kwargs in (("mini", {"mini": True}), ("flipped", {"flipped": True})):
+        runs.append((f"B {label} idle", _p23_base(**kwargs), [], 700,
+                     {"part": "B", "setup": label, **kwargs}))
+    high = _p23_base(high=True)
+    runs.append(("B high idle", high, [], 700, {"part": "B", "setup": "high", "high": True}))
+    after = _sim_tick_at(_swing_free(high), [], cell(6, 0)[0] + 30)
+    if after is not None:
+        runs.append((f"B high press {after}", high, press(after), 700,
+                     {"part": "B", "setup": "high", "high": True, "press_tick": after}))
+    # C: pads on the floor, no input; orbs on the floor, pressed mid-overlap.
+    px, py = cell(P23_COL, 0, PAD_Y_OFFSET)
+    for color, pad_id in PAD_IDS.items():
+        runs.append((f"C {color} pad", [*base, {"id": pad_id, "x": px, "y": py}], [], 700,
+                     {"part": "C", "color": color, "kind": "pad"}))
+    span = _orb_span(_swing_free(base), mini=False)
+    if span is not None:
+        middle = (span[0] + span[1]) // 2
+        ox, oy = cell(P23_COL, 0)
+        for color, orb_id in ORB_IDS.items():
+            runs.append((f"C {color} orb", [*base, {"id": orb_id, "x": ox, "y": oy}],
+                         press(middle), 700,
+                         {"part": "C", "color": color, "kind": "orb", "press_tick": middle,
+                          "touch": [span[0], span[1]]}))
+    # D: a spike and a one-block step on the floor (no input); a block one and two rows
+    # above the floor; a spike hanging over the floor at row 2.
+    fx = cell(P23_COL, 0)[0]
+    runs.append(("D floor spike", [*base, {"id": 8, "x": fx, "y": 15.0}], [], 600,
+                 {"part": "D", "kind": "floor spike"}))
+    runs.append(("D one-block step", [*base, *_blocks([(c, 0) for c in range(P23_COL, 26)])],
+                 [], 600, {"part": "D", "kind": "step"}))
+    for row in (1, 2):
+        runs.append((f"D block row {row}", [*base, *_blocks([(P23_COL, row)])], [], 600,
+                     {"part": "D", "kind": "block above", "row": row}))
+    runs.append(("D hanging spike row 2", [*base, {"id": 8, "x": fx, "y": cell(0, 2)[1],
+                                                    "properties": {"rotation": 180}}],
+                 [], 600, {"part": "D", "kind": "hanging spike"}))
+    return runs
+
+
+async def probe_swing(r: Runner, out: dict) -> None:
+    """P23: the swing (Sim-3 exploration); see `p23_plan`."""
+    runs: list[dict] = []
+    raw: list[dict] = []
+    try:
+        for label, objects, inputs, max_ticks, meta in p23_plan():
+            await _record(r, runs, raw, label, objects, inputs, max_ticks, mode="swing",
+                          **meta)
+    finally:
+        out["P23_swing"] = [{k: v for k, v in run.items() if k != "trace"} for run in runs]
+        if runs:
+            save_fixture("cal_swing", "P23 the swing: presses, sizes, speeds, pads, orbs, "
+                         "spikes, blocks", runs)
+            save_raw("P23", raw)
+
+
 async def probe_hold(r: Runner, out: dict, cube: dict) -> None:
     """P3: hold for a long time; does the cube jump again on landing, and when?"""
     inputs = press(60, hold=480)
@@ -1812,6 +1918,7 @@ async def routine(server: SidecarServer) -> dict[str, Any]:
         ("P21", "the spider (Sim-3 exploration)", lambda: probe_spider(r, out)),
         ("P22", "the spider under part of a block, onto spikes, high bands",
          lambda: probe_spider_contacts(r, out)),
+        ("P23", "the swing (Sim-3 exploration)", lambda: probe_swing(r, out)),
     ]
     try:
         for code, label, step in steps:

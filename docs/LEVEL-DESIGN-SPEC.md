@@ -1276,6 +1276,24 @@ replay as goldens (1376 in all). At first, 12 runs disagreed.
 - **Nothing about the spider is unverifiable now.** A teleport with nothing above it and
   no band (which no portal produces) is the only case left.
 
+**P23, the swing (written 2026-11-27, not run yet).** `scripts/calibrate.py P23`, 29
+runs (about 3 minutes), explored before anything is fitted. It is the last Sim-3 mode.
+Swing portal 1933; the replay trace already reports `swing`. There is no roof: its band
+is read off the traces, as P15 read the flight modes'. The fixture will be
+`cal_swing.json`.
+- **A, presses:** none; one; taps every 20, 40 and 80 ticks; a 300-tick hold; a press
+  repeated 2 and 6 ticks after the first.
+- **B, variants:** taps every 40 mini, upside down from a gravity portal, and at 0.5x,
+  2x, 3x and 4x; mini and upside down idle; a high portal, idle and pressed just after it.
+- **C, pads and orbs:** yellow, pink and blue pads on the floor, no input; the same
+  orbs pressed mid-overlap.
+- **D, contacts:**
+  - a floor spike and a one-block step met with no input;
+  - a block one and two rows above the floor;
+  - a spike hanging at row 2.
+
+`tests/test_probe_plans.py` checks the plan and runs it against the fake game.
+
 The `explain-robot` eval was written when the robot was unverifiable. Its recording
 replays, but a live run would now get `possible`. It should be pointed at the spider
 when it is next recorded.
