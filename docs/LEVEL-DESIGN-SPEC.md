@@ -1294,6 +1294,33 @@ is read off the traces, as P15 read the flight modes'. The fixture will be
 
 `tests/test_probe_plans.py` checks the plan and runs it against the fake game.
 
+**P23 results, now in the simulator (`modes.swing`, 2026-11-27).** 27 of the 29 runs
+were recorded; two idle runs were cancelled by a key press. All 27 replay as goldens
+with no further change (1403 in all). Every game mode is now simulated.
+- **A flight mode:** it flies within a band 300 high, as the ship and wave do, with the
+  flight modes' contacts:
+  - it dies on a floor spike or a one-block step's face;
+  - it runs on under a block whose bottom is level with its top.
+- **Gravity:** 0.086 a tick towards its floor, rising or falling, the same at every
+  speed (speed does not change its vertical path at all); mini 0.129 (1.5 x).
+- **Speed cap:** |vy| at most 8, mini too. A pad above it is cut to 8 on the next move.
+- **The press flips gravity, in the air too,** on the next move, as the ufo's jump.
+  vy is multiplied by 0.8, then the new gravity applies. This fits all 66 flips
+  within 0.0004. Held, it flips once; a second press 2 ticks later flips it back.
+- **Entering:** vy x 0.5, as the ship.
+- **Pads:** yellow 9.6 and pink 6.24. **Orbs:** yellow 6.708 and pink 4.83. Both are
+  0.6 of the cube's. Blue is 0.4 of its own yellow and flips gravity.
+- **Solver:** a swing press is a tap at any flight decision tick, as the ufo's
+  (`AIR_TAP_MODES`). A row of floor spikes is possible in 1.5 s with one flip; a
+  corridor of floor and ceiling spikes with a block in the middle takes two.
+- **Not measured:** a mini swing's pads and orbs (taken at the usual 0.8). The two idle
+  runs P23 lost (normal and upside down) are untested, but follow from the rest.
+
+With the swing, every mode in Sim-2 and Sim-3 has golden traces. What stays unverifiable
+is listed by `verify_section`: a mini cube's or robot's orbs, a mini cube squeezed under
+a low block, a flying player meeting a block from below between the push and kill
+depths, and the green, black, red, dash and teleport orbs.
+
 The `explain-robot` eval was written when the robot was unverifiable. Its recording
 replays, but a live run would now get `possible`. It should be pointed at the spider
 when it is next recorded.

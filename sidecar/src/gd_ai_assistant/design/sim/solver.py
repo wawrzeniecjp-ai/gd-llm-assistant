@@ -5,7 +5,7 @@ choice when an input would do something:
 
 - the cube and the ball: on the ground (a jump, a flip) or touching an unused orb; the
   press is a tap, released on the next tick;
-- the ufo: any tick (it jumps in the air too), a tap;
+- the ufo and the swing: any tick (a jump, a gravity flip, in the air too), a tap;
 - the ship and the wave: any tick, start holding or let go; a hold lasts until a later
   decision releases it;
 - the robot: on the ground, a press held for one of `ROBOT_HOLDS` ticks (its jump grows
@@ -36,7 +36,9 @@ TICK_MS = 1000.0 / 240.0
 #: Modes played by holding: the search presses and releases on decision ticks.
 HOLD_MODES = frozenset({"ship", "wave"})
 #: Modes whose press does something in the air.
-AIR_MODES = frozenset({"ship", "wave", "ufo"})
+AIR_MODES = frozenset({"ship", "wave", "ufo", "swing"})
+#: Air modes whose press is a tap (the ship's and the wave's are holds).
+AIR_TAP_MODES = frozenset({"ufo", "swing"})
 #: How long the search holds a robot's press from the ground, in ticks. The jump grows by
 #: 1.26 units a tick of hold up to a 68-tick boost (P19), so these step its apex by about
 #: 5-10 units from a tap (18.75) to the highest (103); windows then measure each press
@@ -406,7 +408,7 @@ def _decide(world: World, p: CubeParams, branch: Branch, pre: Cube, idle: Cube, 
         return [Branch(pre, branch.presses, (*branch.releases, t), branch.release_at)]
     hold = idle.mode in HOLD_MODES and fly
     tap = (idle.touching_orbs or (decide and idle.grounded)
-           or (fly and idle.mode == "ufo"))
+           or (fly and idle.mode in AIR_TAP_MODES))
     if not (hold or tap):
         return []
     if advance(pre, world, p, tick, _actions(branch, t, True), near) is not None:

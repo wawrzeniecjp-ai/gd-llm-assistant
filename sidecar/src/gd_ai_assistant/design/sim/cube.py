@@ -60,7 +60,7 @@ def f32(value: float) -> float:
 
 FLOOR = 0.0          # the ground's top (S-L1)
 #: Modes the simulator plays (Sim-2, and the robot of Sim-3).
-MODES = ("cube", "ship", "ball", "ufo", "wave", "robot", "spider")
+MODES = ("cube", "ship", "ball", "ufo", "wave", "robot", "spider", "swing")
 #: Modes that run on the ground and jump: the cube's moves and contacts, each with its
 #: own jump. The others fly within a band.
 GROUND_MODES = frozenset({"cube", "robot", "spider"})
@@ -124,6 +124,9 @@ class FlightParams:
     #: Yellow and pink orbs and pads by flight mode (P18, the same at 1x and 2x); the wave
     #: has none: they leave its path as it is. A mode missing here is not calibrated.
     orb: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
+    #: Sim-3's swing (P23; None: not calibrated): `gravity`, `flip`, `max_speed`, and
+    #: `mini_gravity`.
+    swing: Mapping[str, float] | None = None
     pad: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
 
     @classmethod
@@ -161,13 +164,21 @@ class FlightParams:
             ground_entry = constants.mode_value(ground, "entry_vy")
             if ground_entry is not None and ground_entry.value is not None:
                 entry[ground] = ground_entry.value
+        swing = table("swing", "gravity", "flip", "max_speed", "bounds", "entry_vy")
+        swing_mini = table("swing", "gravity", sub=("mini",))
+        if swing is not None and swing_mini is not None:
+            swing = {**swing, "mini_gravity": swing_mini["gravity"]}
+            modes["swing"] = swing
+            entry["swing"] = swing["entry_vy"]
+        else:
+            swing = None
         bounds = {name: t["bounds"] for name, t in modes.items()}
         spider_bounds = constants.mode_value("spider", "bounds")
         if spider_bounds is not None and spider_bounds.value is not None:
             # A ground mode in a band (P21: a press with nothing overhead stops at 270).
             bounds["spider"] = spider_bounds.value
         orb, pad = {}, {}
-        for name in ("ship", "ufo", "ball"):
+        for name in ("ship", "ufo", "ball", "swing"):
             orbs = table(name, "yellow", "pink", sub=("orb_impulse",))
             pads = table(name, "yellow", "pink", sub=("pad_impulse",))
             if orbs is not None and pads is not None:
@@ -178,6 +189,7 @@ class FlightParams:
                    ceiling_push=player["ceiling_push"], ceiling_kill=player["ceiling_kill"],
                    mini_cube_squeeze=player["mini_cube_squeeze"], ship=ship, ufo=ufo,
                    ball=ball, wave=wave, ship_mini=ship_mini, ufo_mini=ufo_mini,
+                   swing=swing,
                    bounds=bounds, entry=entry,
                    orb=orb, pad=pad)
 
@@ -648,6 +660,19 @@ def _move_flight(cube: Cube, p: CubeParams) -> None:
         else:
             vr -= u["falling"] if falling else u["rising"]
             vr = max(-u["max_down"], min(u["max_up"], vr))
+    elif cube.mode == "swing" and fp.swing is not None:
+        w = fp.swing
+        pull = w["mini_gravity"] if cube.mini else w["gravity"]
+        if cube.buffered:
+            # A press flips gravity on the next move, as the ufo's jumps (P23: pressed at
+            # 320, gravity flipped at 322), vy x 0.8 before the new gravity: fits all 66
+            # flips within 0.0004. Held, it flips once.
+            g = cube.gravity = -cube.gravity
+            vr = cube.vy * w["flip"] * g
+            cube.buffered = False
+            cube.snap = None
+        vr -= pull
+        vr = max(-w["max_speed"], min(w["max_speed"], vr))
     elif cube.mode == "ball":
         b = fp.ball
         vr -= b["gravity"]
@@ -1075,7 +1100,7 @@ def commands(cube: Cube, p: CubeParams, actions: Iterable[str],
             # first touch fired, on the release tick).
             _fire_orb(cube, p, near)
             cube.holding = False
-            if cube.mode != "ufo":
+            if cube.mode not in ("ufo", "swing"):
                 cube.buffered = False
     _fire_orb(cube, p, near)
 

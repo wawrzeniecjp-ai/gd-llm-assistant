@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from gd_ai_assistant.design.constants import load_constants
 from gd_ai_assistant.design.roles import load_role_table
 from gd_ai_assistant.design.sim.cube import Cube, CubeParams, simulate
@@ -110,10 +112,10 @@ def test_verify_impossible_says_how_far_and_what_killed() -> None:
 
 
 def test_verify_refuses_unsupported_content() -> None:
-    swing = [{"id": 1933, "x": 255, "y": 45}]           # Sim-3's last mode
-    result = _verify(swing, {"x_range": [0, 600]})
+    green = [{"id": 1022, "x": 255, "y": 45}]           # every mode is simulated now
+    result = _verify(green, {"x_range": [0, 600]})
     assert result["result"] == "unverifiable"
-    assert "Sim-3" in result["unverifiable"][0]["reason"]
+    assert "green orbs" in result["unverifiable"][0]["reason"]
 
 
 def test_a_ship_holds_over_a_spike() -> None:
@@ -424,3 +426,30 @@ def test_a_spider_pad_under_the_cube_is_unverifiable() -> None:
     run = simulate(_world(pad), PARAMS, [], max_ticks=400)
     assert run.outcome == "unverifiable"
     assert "spider pad or orb" in (run.death.reason or "")
+
+
+# -- the swing (Sim-3, P23) --------------------------------------------------------------
+
+SWING_PORTAL = [{"id": 1933, "x": 195, "y": 45}]
+
+
+def test_a_swing_flips_over_floor_spikes() -> None:
+    """A row of floor spikes: one press flips the swing's gravity and it flies over."""
+    spikes = [{"id": 8, "x": 15 + 30 * c, "y": 15} for c in range(16, 30)]
+    result = _verify(SWING_PORTAL + spikes, {"x_range": [0, 1000]})
+    assert result["result"] == "possible"
+    assert result["route"] and all(r["mode"] == "swing" for r in result["route"])
+    assert result["exit"]["mode"] == "swing"
+
+
+def test_a_swing_flips_in_the_air_on_the_next_move() -> None:
+    """P23 A: pressed at 320, flipped at 322, vy x 0.8 before the new gravity."""
+    run = simulate(_world(SWING_PORTAL), PARAMS,
+                   [{"tick": 320, "action": "press"}, {"tick": 321, "action": "release"},
+                    {"tick": 340, "action": "press"}, {"tick": 341, "action": "release"}],
+                   max_ticks=345)
+    states = zip(run.trace["vy"], run.trace["gravity"], strict=True)
+    by_tick = dict(zip(run.trace["tick"], states, strict=True))
+    assert by_tick[321][1] == 1 and by_tick[322] == (pytest.approx(0.086), -1)
+    vy_before = by_tick[341][0]
+    assert by_tick[342] == (pytest.approx(0.8 * vy_before - 0.086), 1)

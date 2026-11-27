@@ -1,7 +1,7 @@
 {
     "schema": 1,
     "game_version": "2.2091",
-    "calibrated_at": "2026-11-24",
+    "calibrated_at": "2026-11-27",
     "note": "LEVEL-DESIGN-SPEC.md 6.3. Every leaf is {value, source, confidence}. confidence is measured | derived | guess. A null value means 'not known yet', and code that needs it must refuse rather than assume. Replaced by scripts/calibrate.py (M2).",
     "tick_rate": {
         "value": 240,
@@ -922,6 +922,64 @@
                 "value": 15.0,
                 "source": "scripts/calibrate.py P22, 2026-11-25; entering a lone block it was found with the centre 13.65 before its left edge (every entering run found it). Fits above 13.65; 15 (the cube's half) chosen",
                 "confidence": "derived"
+            }
+        },
+        "swing": {
+            "gravity": {
+                "value": 0.086,
+                "source": "scripts/calibrate.py P23, 2026-11-27; per tick towards its floor, rising or falling, the same at 0.5x to 4x",
+                "confidence": "measured"
+            },
+            "flip": {
+                "value": 0.8,
+                "source": "scripts/calibrate.py P23, 2026-11-27; a press flips gravity on the next move (as the ufo's jump), multiplying vy by this before the new gravity applies: fits all 66 flips within 0.0004",
+                "confidence": "measured"
+            },
+            "max_speed": {
+                "value": 8.0,
+                "source": "scripts/calibrate.py P23, 2026-11-27; |vy| is capped here, mini too; a pad above it is cut to 8 on the next move",
+                "confidence": "measured"
+            },
+            "bounds": {
+                "value": 300.0,
+                "source": "scripts/calibrate.py P23, 2026-11-27; with nothing above it stops at y 285",
+                "confidence": "measured"
+            },
+            "entry_vy": {
+                "value": 0.5,
+                "source": "scripts/calibrate.py P23, 2026-11-27; from the cube in the air: 1.744 became 0.872",
+                "confidence": "measured"
+            },
+            "mini": {
+                "gravity": {
+                    "value": 0.129,
+                    "source": "scripts/calibrate.py P23, 2026-11-27; 1.5 x the full size's",
+                    "confidence": "measured"
+                }
+            },
+            "pad_impulse": {
+                "yellow": {
+                    "value": 9.6,
+                    "source": "scripts/calibrate.py P23, 2026-11-27; 1x (0.6 of the cube's)",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 6.24,
+                    "source": "scripts/calibrate.py P23, 2026-11-27; 1x",
+                    "confidence": "measured"
+                }
+            },
+            "orb_impulse": {
+                "yellow": {
+                    "value": 6.708,
+                    "source": "scripts/calibrate.py P23, 2026-11-27; 1x (0.6 of the cube's)",
+                    "confidence": "measured"
+                },
+                "pink": {
+                    "value": 4.83,
+                    "source": "scripts/calibrate.py P23, 2026-11-27; 1x",
+                    "confidence": "measured"
+                }
             }
         }
     }

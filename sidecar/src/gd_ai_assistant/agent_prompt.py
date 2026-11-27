@@ -252,9 +252,11 @@ cube. So is the robot, either way up: it jumps higher the longer the press is he
 tap rises under one block, a full hold about three and a half). So is the spider: a \
 press teleports it at once to the surface opposite (the nearest block overhead from its \
 centre to half a block ahead, else the top of its 9-block band) and flips its gravity; \
-a spike straight overhead stops it, and it dies. Not yet: a mini cube's or robot's \
-orbs, a grounded mini cube squeezed under a low block, a ship, ufo or ball meeting a \
-block from below 4-6 deep (mini) or 6.7-10 deep, and the swing. The reason says which. \
+a spike straight overhead stops it, and it dies. So is the swing: each press flips its \
+gravity on the next tick, in the air too, within a 10-block band. Not yet: a mini cube's \
+or robot's orbs, a grounded mini cube squeezed under a low block, a ship, ufo or ball \
+meeting a block from below 4-6 deep (mini) or 6.7-10 deep, and green, black, red, dash \
+and teleport orbs. The reason says which. \
 The wave dies on any block it touches: it never slides on one. A ship, wave or robot \
 route lists holds (`action` "hold", with \
 `release_tick` and a window for the release too); a dense flying stretch may come back \
