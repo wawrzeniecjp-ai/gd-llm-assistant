@@ -8,7 +8,7 @@ from typing import Any
 from ..bands import judge
 from ..constants import SPEEDS, PhysicsConstants, load_constants
 from ..level_model import LevelModel
-from .cube import HALF, Cube, CubeParams, UncalibratedError, simulate
+from .cube import GROUND_MODES, MODES, Cube, CubeParams, UncalibratedError, half_of, simulate
 from .solver import describe_forgiving, input_events, solve
 from .world import World, world_from_model
 
@@ -16,8 +16,14 @@ from .world import World, world_from_model
 _MAX_LISTED = 20
 
 
-def _start_state(args: dict[str, Any], x0: float) -> tuple[Cube | None, float, str | None]:
-    """(cube, start x, reason it cannot be simulated)."""
+def _start_state(args: dict[str, Any], x0: float,
+                 params: CubeParams) -> tuple[Cube | None, float, str | None]:
+    """(cube, start x, reason it cannot be simulated).
+
+    An explicit start may be any simulated mode, upside down or mini, the same ones a mode
+    portal may enter (until 2026-11-27 only the upright cube was allowed, a leftover from
+    Sim-1: a robot section placed with `place_grid`'s check was reported unverifiable).
+    A mode with a band starts with it on the ground, or at `band_floor`."""
     start_from = args.get("start_from", "level_start")
     if start_from in ("level_start", "auto"):
         # The level's own start speed, which the agent reads from the level settings
@@ -30,16 +36,31 @@ def _start_state(args: dict[str, Any], x0: float) -> tuple[Cube | None, float, s
         return None, 0.0, f"unknown start_from {start_from!r}"
     start = args.get("start") or {}
     mode = start.get("mode", "cube")
-    if mode != "cube":
-        return None, x0, f"the simulator handles the cube only so far, not {mode}"
-    if start.get("gravity", 1) != 1 or start.get("mini", False):
-        return None, x0, "flipped gravity and mini size are not simulated yet"
+    if mode not in MODES:
+        return None, x0, f"unknown mode {mode!r}"
+    fp = params.flight
+    if mode != "cube" and (fp is None or mode not in fp.entry
+                           or (mode == "robot" and params.robot is None)
+                           or (mode == "spider" and params.spider is None)):
+        return None, x0, f"the {mode} is not calibrated"
+    gravity = int(start.get("gravity", 1))
+    if gravity not in (1, -1):
+        return None, x0, f"gravity must be 1 or -1, not {gravity}"
+    mini = bool(start.get("mini", False))
+    if (gravity != 1 or mini) and fp is None:
+        return None, x0, "flipped gravity and mini size are not calibrated"
     speed = start.get("speed", "1x")
     if speed not in SPEEDS:
         return None, x0, f"unknown speed {speed!r}"
     row = int(start.get("row", 0))
-    cube = Cube(x=x0, y=HALF + 30.0 * row, vy=float(start.get("vy", 0.0)), speed=speed,
-                grounded=row == 0 and float(start.get("vy", 0.0)) == 0.0)
+    vy = float(start.get("vy", 0.0))
+    cube = Cube(x=x0, vy=vy, speed=speed, mode=mode, gravity=gravity, mini=mini)
+    if fp is not None and mode in fp.bounds:
+        floor = float(start.get("band_floor", 0.0))
+        cube.bounds = (floor, floor + fp.bounds[mode])
+    cube.y = half_of(cube, params) + 30.0 * row
+    cube.grounded = (mode in GROUND_MODES and gravity == 1 and row == 0 and vy == 0.0)
+    cube.was_grounded = cube.grounded
     return cube, x0, None
 
 
@@ -49,7 +70,7 @@ def verify(world: World, params: CubeParams, args: dict[str, Any]) -> dict[str, 
     if not x_range or len(x_range) != 2:
         return {"error": "give `x_range` as [start, end] in level units"}
     x0, x1 = sorted(float(v) for v in x_range)
-    cube, sx, reason = _start_state(args, x0)
+    cube, sx, reason = _start_state(args, x0, params)
     base: dict[str, Any] = {
         "constants": "calibrated" if params.calibrated else "uncalibrated",
         "start": {"x": sx, "from": args.get("start_from", "level_start")},

@@ -1,0 +1,23 @@
+id = "robot-steps"
+description = "M5 Sim-3: a robot section from empty: steps of different heights, so jumps need different holds."
+fixture = "empty"
+prompt = """
+Build a 1x robot section from column 10 to column 60: a robot portal at the start, steps
+of one, two and three blocks to climb with gaps between them, a few spikes, and a cube
+portal at the end. Medium difficulty, and check it can be played.
+"""
+section = [0, 1950]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+"portals_created.robot" = { between = [1, 1] }
+"portals_created.cube" = { between = [1, 1] }
+exit_mode = "cube"
+# A robot jump is a hold: the taller steps need longer ones (P19).
+holds = { min = 2 }
+frame_perfect = 0

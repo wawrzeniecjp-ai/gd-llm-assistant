@@ -68,11 +68,43 @@ Notes:
   route that keeps 18 units from the spikes and walls, at 5.7 inputs a second, so the soft
   assertion passes. The table keeps the run as recorded.
 - `explain-robot`: it said plainly that the robot part cannot be checked, did not guess,
-  and checked the cube stretches it could. Since 2026-11-24 the simulator plays the
-  robot (P19), so a live run would get `possible`: the case should move to the spider
-  when it is next recorded. The recording still replays.
+  and checked the cube stretches it could. Retired 2026-11-27: the simulator plays the
+  robot since P19, so the case asked about something no longer unverifiable. Its case,
+  fixture and recording are removed (in git history); `explain-green-orb` replaces it.
 - In every case the model saw only the catalog seed (block and spike): the fake editor
   has no object table, and the real one comes from the game. It built portals, orbs and
   pads from GridText characters and the role table. Dumping the game's catalog into an
   eval fixture would make this closer to real use.
 - `--max-total-tokens 5000000` checks between cases, so the last case ran past it.
+
+# Sim-3 baseline: robot, spider, swing (openai_compatible deepseek-flash)
+
+2026-11-27, one seed per case. Run `sim3-baseline` (3.49M tokens), then `robot-steps`
+again as `sim3-robot-rerun` (326k) after the bug its first run found was fixed. The
+recordings in `recordings/` are of the runs in the table, and replay to the same results.
+
+| case | hard | soft failed | rounds | tokens | time |
+|---|---|---|---|---|---|
+| explain-green-orb | pass | - | 7 | 106k | 21 s |
+| robot-steps (rerun) | pass | - | 14 | 326k | 92 s |
+| spider-roof | pass | - | 18 | 660k | 177 s |
+| swing-easy | pass | - | 35 | 2.39M | 475 s |
+
+Hard assertions: 4 of 4 cases. Soft: none failed.
+
+Notes:
+
+- `robot-steps`, first run: the hard assertion `verified_after_last_edit` failed, and it
+  was our bug, not the model's. A check that starts part-way (`place_grid`'s `verify`,
+  or `verify_section` and `simulate_inputs` with an explicit start) still allowed only
+  the upright cube, a leftover from Sim-1. Every check the model tried said the robot
+  could not be simulated. It built the section, said plainly that it could not verify
+  it, and noted that in the level plan, which was the right behaviour given what it was
+  told. The section it left was playable (37.5 ms, 4 holds). Fixed the same day (an
+  explicit start may be any simulated mode, upside down or mini, with `band_floor` for a
+  raised band). The rerun verified its section: 116.7 ms, 4 holds, nothing frame-perfect.
+- `spider-roof`: 122 objects, 18 spikes; 104 ms tightest window, 1.28 inputs a second.
+- `swing-easy`: 50 ms tightest window, 0.69 inputs a second. 70% of the run's tokens:
+  35 rounds of building and re-checking.
+- `explain-green-orb`: it said the green orb cannot be checked, did not guess, and
+  changed nothing.

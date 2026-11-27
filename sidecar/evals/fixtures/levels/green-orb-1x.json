@@ -1,0 +1,14 @@
+{
+ "description": "1x: spikes at columns 18 and 30-33, a green orb (not simulated) above the pit at column 31, and a block at column 40.",
+ "settings": {},
+ "colors": {},
+ "objects": [
+  {"id": 8, "x": 555.0, "y": 15.0},
+  {"id": 8, "x": 915.0, "y": 15.0},
+  {"id": 8, "x": 945.0, "y": 15.0},
+  {"id": 8, "x": 975.0, "y": 15.0},
+  {"id": 8, "x": 1005.0, "y": 15.0},
+  {"id": 1022, "x": 945.0, "y": 75.0},
+  {"id": 1, "x": 1215.0, "y": 15.0}
+ ]
+}

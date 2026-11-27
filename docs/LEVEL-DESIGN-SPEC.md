@@ -1321,9 +1321,31 @@ is listed by `verify_section`: a mini cube's or robot's orbs, a mini cube squeez
 a low block, a flying player meeting a block from below between the push and kill
 depths, and the green, black, red, dash and teleport orbs.
 
-The `explain-robot` eval was written when the robot was unverifiable. Its recording
-replays, but a live run would now get `possible`. It should be pointed at the spider
-when it is next recorded.
+**Sim-3 mode evals (2026-11-27, not run yet).** Four cases, as the Sim-2 ones:
+- `robot-steps`: steps of one, two and three blocks, so the jumps need different holds
+  (soft: at least two holds);
+- `spider-roof`: spikes on the floor and hanging from a roof, so the spider switches
+  sides;
+- `swing-easy`: spikes on the floor and ceiling and blocks in the middle;
+- `explain-green-orb`: a part with a green orb, which is not simulated. It must be
+  reported as unverifiable, not guessed, and not edited.
+
+`explain-robot` is retired: it was written when the robot was unverifiable, and a live
+run would now get `possible`. Its case, fixture and recording are removed (in git
+history). A test now checks that `explain-green-orb`'s fixture stays unverifiable, so the
+same thing cannot happen silently again.
+
+**Baseline (2026-11-27, `evals/BASELINE.md`):** all four pass every hard and soft
+assertion with deepseek-flash.
+- `robot-steps`' first run found a bug: a check that starts part-way (`place_grid`'s
+  `verify`, or an explicit start for `verify_section` or `simulate_inputs`) still
+  allowed only the upright cube, a leftover from Sim-1. The model was told the robot
+  could not be simulated, said so, and left its section unverified.
+- An explicit start may now be any simulated mode, upside down or mini, with
+  `band_floor` for a raised band. The rerun verified its section (116.7 ms, 4 holds).
+
+**M5 is done:** every mode has golden traces (1403), the Sim-2 and Sim-3 mode evals have
+baselines, and the difficulty bands are data (§14.3).
 
 ## 6.11 Deferred: slopes, platformer, moving objects
 

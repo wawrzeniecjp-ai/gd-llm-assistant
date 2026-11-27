@@ -973,6 +973,15 @@ def _design_tools() -> list[Tool]:
                                 "speed": {"type": "string",
                                           "enum": ["0.5x", "1x", "2x", "3x", "4x"]},
                                 "row": {"type": "integer", "minimum": 0},
+                                "band_floor": {
+                                    "type": "number",
+                                    "description": (
+                                        "For a mode with a band (ship, ufo, "
+                                        "ball, wave, spider, swing): where its "
+                                        "floor is, in units. Default 0, the "
+                                        "ground."
+                                    ),
+                                },
                                 "vy": {"type": "number"},
                                 "gravity": {"type": "integer", "enum": [1, -1]},
                                 "mini": {"type": "boolean"},
@@ -1040,6 +1049,15 @@ def _design_tools() -> list[Tool]:
                                 "speed": {"type": "string",
                                           "enum": ["0.5x", "1x", "2x", "3x", "4x"]},
                                 "row": {"type": "integer", "minimum": 0},
+                                "band_floor": {
+                                    "type": "number",
+                                    "description": (
+                                        "For a mode with a band (ship, ufo, "
+                                        "ball, wave, spider, swing): where its "
+                                        "floor is, in units. Default 0, the "
+                                        "ground."
+                                    ),
+                                },
                                 "vy": {"type": "number"},
                                 "gravity": {"type": "integer", "enum": [1, -1]},
                                 "mini": {"type": "boolean"},

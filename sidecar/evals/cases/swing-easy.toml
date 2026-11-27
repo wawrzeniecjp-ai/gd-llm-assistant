@@ -1,0 +1,21 @@
+id = "swing-easy"
+description = "M5 Sim-3: an easy swing section; each press flips its gravity, in the air too."
+fixture = "empty"
+prompt = """
+Make an easy swing part from column 10 to column 55 at 1x, with spikes on the floor and
+the ceiling and a few blocks in the middle to fly around, then back to the cube. Make
+sure it is playable.
+"""
+section = [0, 1800]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+"portals_created.swing" = { between = [1, 1] }
+exit_mode = "cube"
+min_window_ms = { min = 40 }
+frame_perfect = 0

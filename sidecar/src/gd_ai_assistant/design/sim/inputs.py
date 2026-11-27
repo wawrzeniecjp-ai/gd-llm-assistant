@@ -56,7 +56,7 @@ def run_inputs(world: World, params: CubeParams, args: dict[str, Any]) -> dict[s
     until_x = float(args["until_x"])
     start_from = args.get("start_from", "level_start")
     start_x = float((args.get("start") or {}).get("x", 0.0))
-    cube, sx, reason = _start_state(args, start_x)
+    cube, sx, reason = _start_state(args, start_x, params)
     base: dict[str, Any] = {
         "constants": "calibrated" if params.calibrated else "uncalibrated",
         "start": {"x": sx, "from": start_from},

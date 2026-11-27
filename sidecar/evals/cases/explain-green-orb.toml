@@ -1,6 +1,6 @@
-id = "explain-robot"
-description = "M5: a robot part (Sim-3) can't be checked; say so, don't guess, don't edit."
-fixture = "robot-1x"
+id = "explain-green-orb"
+description = "M5: a part with a green orb (not simulated) can't be checked; say so, don't guess, don't edit."
+fixture = "green-orb-1x"
 prompt = "Is the part from column 10 to column 45 beatable? Just check, don't change anything."
 
 [assert.hard]

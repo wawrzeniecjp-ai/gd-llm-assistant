@@ -253,9 +253,10 @@ def test_verify_explicit_start_mid_level() -> None:
     result = _verify(spike, {"x_range": [2700, 3300], "start_from": "explicit",
                              "start": {"mode": "cube", "speed": "1x", "row": 0}})
     assert result["result"] == "possible" and len(result["route"]) == 1
+    # Any simulated mode may start part-way (only the cube could until 2026-11-27).
     ship = _verify(spike, {"x_range": [2700, 3300], "start_from": "explicit",
                            "start": {"mode": "ship"}})
-    assert ship["result"] == "unverifiable"
+    assert ship["result"] == "possible" and ship["exit"]["mode"] == "ship"
 
 
 def test_start_positions_do_not_block_verification() -> None:
@@ -453,3 +454,31 @@ def test_a_swing_flips_in_the_air_on_the_next_move() -> None:
     assert by_tick[321][1] == 1 and by_tick[322] == (pytest.approx(0.086), -1)
     vy_before = by_tick[341][0]
     assert by_tick[342] == (pytest.approx(0.8 * vy_before - 0.086), 1)
+
+
+# -- explicit start states (2026-11-27) --------------------------------------------------
+
+
+@pytest.mark.parametrize("mode", ["robot", "spider", "swing", "ship", "wave"])
+def test_an_explicit_start_may_be_any_simulated_mode(mode: str) -> None:
+    """Until 2026-11-27 only the upright cube could start a check part-way, so a robot
+    section checked by `place_grid` came back unverifiable (eval robot-steps)."""
+    result = _verify([{"id": 8, "x": 15 + 30 * 20, "y": 15}],
+                     {"x_range": [300, 900], "start_from": "explicit",
+                      "start": {"mode": mode, "speed": "1x", "row": 0}})
+    assert result["result"] in ("possible", "impossible", "inconclusive"), result
+    if result["result"] == "possible":
+        assert result["exit"]["mode"] == mode
+
+
+def test_an_explicit_start_may_be_upside_down_mini_or_in_a_raised_band() -> None:
+    flipped = _verify([], {"x_range": [300, 900], "start_from": "explicit",
+                           "start": {"mode": "spider", "gravity": -1, "mini": True}})
+    assert flipped["result"] == "possible" and flipped["exit"]["gravity"] == -1
+    assert flipped["exit"]["mini"] is True
+    raised = _verify([], {"x_range": [300, 900], "start_from": "explicit",
+                          "start": {"mode": "ship", "band_floor": 60, "row": 3}})
+    assert raised["result"] == "possible" and raised["exit"]["y"] >= 60
+    unknown = _verify([], {"x_range": [300, 900], "start_from": "explicit",
+                           "start": {"mode": "jetpack"}})
+    assert unknown["result"] == "unverifiable"

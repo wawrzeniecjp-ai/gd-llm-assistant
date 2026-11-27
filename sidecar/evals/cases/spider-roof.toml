@@ -1,0 +1,23 @@
+id = "spider-roof"
+description = "M5 Sim-3: a spider section under a roof, spikes on the floor and hanging from the roof."
+fixture = "empty"
+prompt = """
+Build a 1x spider section from column 10 to column 60: a spider portal at the start, a
+roof of blocks about six blocks up, spikes on the floor in some places and hanging from
+the roof in others, so the spider has to switch sides, and a cube portal at the end.
+Medium difficulty, and check it can be played.
+"""
+section = [0, 1950]
+
+[assert.hard]
+status = "completed"
+edited = true
+playable = "possible"
+verified_after_last_edit = true
+
+[assert.soft]
+"portals_created.spider" = { between = [1, 1] }
+"portals_created.cube" = { between = [1, 1] }
+exit_mode = "cube"
+"created_roles.hazard" = { min = 4 }
+frame_perfect = 0
